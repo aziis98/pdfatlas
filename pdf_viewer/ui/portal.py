@@ -242,7 +242,8 @@ class ResultRow(Gtk.Box):
             picture = Gtk.Picture.new_for_paintable(texture)
             picture.set_content_fit(Gtk.ContentFit.CONTAIN)
             picture.set_size_request(-1, _display_height(y0, y1))
-            picture.set_hexpand(True)
+            picture.set_hexpand(False)
+            picture.set_halign(Gtk.Align.CENTER)
             self.frame.set_child(picture)
         else:
             self.spinner.stop()
