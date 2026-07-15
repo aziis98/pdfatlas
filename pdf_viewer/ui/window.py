@@ -619,7 +619,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         live_results = fts_search(self.index_conn, query, limit=30) if self.index_conn else []
 
-        # 1. Pinned Excerpts Header + Portals
+        is_grid = getattr(self.settings, "search_layout", "grid") == "grid"
+
+        # 1. Pinned Portals Header + FlowBox/List
         if self.pinned:
             pinned_label = Gtk.Label(label="📌 Pinned Portals", xalign=0)
             pinned_label.add_css_class("heading")
@@ -627,6 +629,16 @@ class MainWindow(Adw.ApplicationWindow):
             pinned_label.set_margin_start(16)
             pinned_label.set_margin_bottom(6)
             self.results_box.append(pinned_label)
+
+            if is_grid:
+                pinned_grid = Gtk.FlowBox()
+                pinned_grid.set_valign(Gtk.Align.START)
+                pinned_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+                pinned_grid.set_column_spacing(8)
+                pinned_grid.set_row_spacing(8)
+                pinned_grid.set_margin_start(12)
+                pinned_grid.set_margin_end(12)
+                self.results_box.append(pinned_grid)
 
             for entry in self.pinned.values():
                 row = ResultRow(
@@ -638,8 +650,11 @@ class MainWindow(Adw.ApplicationWindow):
                     on_toggle_pin=self._on_toggle_pin,
                     on_row_clicked=self._on_row_clicked
                 )
-                self.results_box.append(row)
-                self.results_box.append(Gtk.Separator())
+                if is_grid:
+                    pinned_grid.append(row)
+                else:
+                    self.results_box.append(row)
+                    self.results_box.append(Gtk.Separator())
 
             if live_results:
                 live_label = Gtk.Label(label="Search Results", xalign=0)
@@ -649,12 +664,22 @@ class MainWindow(Adw.ApplicationWindow):
                 live_label.set_margin_bottom(6)
                 self.results_box.append(live_label)
 
-        # 2. Main Search Results List
+        # 2. Main Search Results List/FlowBox
         if not live_results:
             placeholder = Gtk.Label(label="No matches found.", margin_top=32)
             placeholder.add_css_class("dim-label")
             self.results_box.append(placeholder)
             return
+
+        if is_grid:
+            live_grid = Gtk.FlowBox()
+            live_grid.set_valign(Gtk.Align.START)
+            live_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+            live_grid.set_column_spacing(8)
+            live_grid.set_row_spacing(8)
+            live_grid.set_margin_start(12)
+            live_grid.set_margin_end(12)
+            self.results_box.append(live_grid)
 
         for i, result in enumerate(live_results):
             already_pinned = result["id"] in self.pinned
@@ -667,9 +692,12 @@ class MainWindow(Adw.ApplicationWindow):
                 on_toggle_pin=self._on_toggle_pin,
                 on_row_clicked=self._on_row_clicked
             )
-            self.results_box.append(row)
-            if i < len(live_results) - 1:
-                self.results_box.append(Gtk.Separator())
+            if is_grid:
+                live_grid.append(row)
+            else:
+                self.results_box.append(row)
+                if i < len(live_results) - 1:
+                    self.results_box.append(Gtk.Separator())
 
     def _on_escape(self):
         """Clears the search input and returns to reader view."""
@@ -882,6 +910,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_settings_changed(self):
         self._on_crop_settings_updated()
+        # Re-run search if a query is active to apply layout changes (list vs grid) in real-time
+        if hasattr(self, "_last_query") and self._last_query:
+            self.run_search(self._last_query)
 
     def _on_crop_settings_updated(self):
         # Sync stateful action states

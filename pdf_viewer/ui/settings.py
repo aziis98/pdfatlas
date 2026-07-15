@@ -179,6 +179,24 @@ class SettingsWindow(Gtk.Window):
 
         self.main_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
+        # 5b. Search Result Layout Dropdown
+        self.layout_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.layout_label = Gtk.Label(label="Search result layout", xalign=0)
+        self.layout_label.set_hexpand(True)
+        
+        self.layout_dropdown = Gtk.DropDown.from_strings(["List", "Grid"])
+        if getattr(self.settings, "search_layout", "grid") == "list":
+            self.layout_dropdown.set_selected(0)
+        else:
+            self.layout_dropdown.set_selected(1)
+        self.layout_dropdown.connect("notify::selected", self._on_layout_changed)
+        
+        self.layout_box.append(self.layout_label)
+        self.layout_box.append(self.layout_dropdown)
+        self.main_box.append(self.layout_box)
+
+        self.main_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
         # 6. Re-analyze Button
         self.reanalyze_btn = Gtk.Button(label="Re-analyze")
         self.reanalyze_btn.connect("clicked", self._on_reanalyze_clicked)
@@ -212,6 +230,14 @@ class SettingsWindow(Gtk.Window):
     def _on_threshold_changed(self, spin):
         val = spin.get_value()
         self.settings.whitespace_threshold = val / 100.0
+        self.on_changed()
+
+    def _on_layout_changed(self, dropdown, pspec):
+        selected = dropdown.get_selected()
+        if selected == 0:
+            self.settings.search_layout = "list"
+        else:
+            self.settings.search_layout = "grid"
         self.on_changed()
 
     def _on_reanalyze_clicked(self, button):
