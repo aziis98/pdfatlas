@@ -69,8 +69,8 @@ def get_query_match_rects(page, query_terms, clip_y0, clip_y1):
     return match_rects
 
 def _display_height(y0, y1):
-    clip_h = (y1 - y0) + 2 * STRIP_PAD_PT
-    return max(24, min(120, int(clip_h * 1.2)))
+    # Fixed vertical viewport height (52pt * 1.2 = ~62 DIPs)
+    return 62
 
 # Thread-local storage for PyMuPDF Document instances to ensure thread safety
 _thread_local = threading.local()
@@ -83,18 +83,26 @@ def _thread_doc(pdf_path):
         _thread_local.pdf_path = pdf_path
     return doc
 
-def render_strip_surface(pdf_path, page_no, y0, y1, query_terms):
+def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     """
     Renders one search result page-strip directly to a cairo.ImageSurface.
-    Uses in-memory NumPy operations for cropping and channel swapping.
-    No PNG compression/decompression or PIL conversions are performed.
+    Crops to the block's width (x0 to x1) plus some horizontal padding,
+    and a fixed-height vertical window (about 3-4 lines of text) centered on the block.
     """
     doc = _thread_doc(pdf_path)
     page = doc[page_no - 1]
-    page_w = page.rect.width
-    clip_y0 = max(0, y0 - STRIP_PAD_PT)
-    clip_y1 = min(page.rect.height, y1 + STRIP_PAD_PT)
-    clip = fitz.Rect(0, clip_y0, page_w, clip_y1)
+    
+    # 1. Horizontal bounds: block width with 6pt padding
+    clip_x0 = max(0.0, x0 - 6.0)
+    clip_x1 = min(page.rect.width, x1 + 6.0)
+    
+    # 2. Vertical bounds: fixed height window (52 points, ~4 lines of text) centered on block midpoint
+    WINDOW_HEIGHT_PT = 52.0
+    mid_y = (y0 + y1) / 2.0
+    clip_y0 = max(0.0, mid_y - WINDOW_HEIGHT_PT / 2.0)
+    clip_y1 = min(page.rect.height, mid_y + WINDOW_HEIGHT_PT / 2.0)
+    
+    clip = fitz.Rect(clip_x0, clip_y0, clip_x1, clip_y1)
 
     mat = fitz.Matrix(STRIP_ZOOM, STRIP_ZOOM)
     # Render with alpha so we get a clean buffer
@@ -103,27 +111,8 @@ def render_strip_surface(pdf_path, page_no, y0, y1, query_terms):
     # Convert the pixmap raw bytes into a NumPy array
     arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
     
-    # 1. Trim whitespace in-memory (check first 3 color channels, ignore alpha)
-    non_white = np.any(arr[:, :, 0:3] < WHITESPACE_TRIM_THRESHOLD, axis=2)
-    
-    if non_white.any():
-        pad_px = int(round(WHITESPACE_TRIM_PAD_PT * STRIP_ZOOM))
-        rows = np.where(non_white.any(axis=1))[0]
-        cols = np.where(non_white.any(axis=0))[0]
-        
-        top = max(0, int(rows[0]) - pad_px)
-        bottom = min(arr.shape[0], int(rows[-1]) + pad_px + 1)
-        left = max(0, int(cols[0]) - pad_px)
-        right = min(arr.shape[1], int(cols[-1]) + pad_px + 1)
-        
-        cropped_arr = arr[top:bottom, left:right].copy()
-        crop_offset_px = (left, top)
-    else:
-        cropped_arr = arr.copy()
-        crop_offset_px = (0, 0)
-
-    # 2. Swap channels: RGBA to Cairo's native-endian memory BGRA (ARGB32)
-    bgra = cropped_arr[:, :, [2, 1, 0, 3]].copy()
+    # Swap channels: RGBA to Cairo's native-endian memory BGRA (ARGB32)
+    bgra = arr[:, :, [2, 1, 0, 3]].copy()
 
     h, w, _ = bgra.shape
     surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_ARGB32, w, h, w * 4)
@@ -136,8 +125,8 @@ def render_strip_surface(pdf_path, page_no, y0, y1, query_terms):
         # Get precise character-level matched ranges
         match_rects = get_query_match_rects(page, query_terms, clip_y0, clip_y1)
         for (ux0, uy0, ux1, uy1) in match_rects:
-            px0 = (ux0 - clip.x0) * STRIP_ZOOM - crop_offset_px[0]
-            py0 = (uy0 - clip.y0) * STRIP_ZOOM - crop_offset_px[1]
+            px0 = (ux0 - clip.x0) * STRIP_ZOOM
+            py0 = (uy0 - clip.y0) * STRIP_ZOOM
             pw = (ux1 - ux0) * STRIP_ZOOM
             ph = (uy1 - uy0) * STRIP_ZOOM
             ctx.rectangle(px0, py0, pw, ph)
@@ -165,7 +154,7 @@ class ResultRow(Gtk.Box):
         self.on_row_clicked = on_row_clicked
 
         page = result["page"]
-        y0, y1 = result["y0"], result["y1"]
+        x0, y0, x1, y1 = result["x0"], result["y0"], result["x1"], result["y1"]
 
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
@@ -204,7 +193,7 @@ class ResultRow(Gtk.Box):
         self.add_controller(click)
         self.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
-        executor.submit(self._render_worker, pdf_path, page, y0, y1, query_terms)
+        executor.submit(self._render_worker, pdf_path, page, x0, y0, x1, y1, query_terms)
 
     def _on_pin_toggled(self, btn):
         active = btn.get_active()
@@ -216,9 +205,9 @@ class ResultRow(Gtk.Box):
         if self.on_row_clicked:
             self.on_row_clicked(self.result, self.query_terms)
 
-    def _render_worker(self, pdf_path, page_no, y0, y1, query_terms):
+    def _render_worker(self, pdf_path, page_no, x0, y0, x1, y1, query_terms):
         try:
-            surface, bgra = render_strip_surface(pdf_path, page_no, y0, y1, query_terms)
+            surface, bgra = render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms)
         except Exception as e:
             print(f"Error rendering portal strip surface: {e}")
             surface, bgra = None, None
