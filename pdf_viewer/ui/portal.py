@@ -146,6 +146,8 @@ class ResultRow(Gtk.Box):
         self.set_margin_bottom(6)
         self.set_margin_start(12)
         self.set_margin_end(12)
+        self.set_hexpand(False)
+        self.set_halign(Gtk.Align.CENTER)
 
         self.result = result
         self.query_terms = query_terms
