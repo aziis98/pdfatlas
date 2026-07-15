@@ -185,6 +185,8 @@ class ResultRow(Gtk.Box):
 
         self.frame = Gtk.Frame()
         self.frame.set_child(placeholder_box)
+        self.frame.set_hexpand(False)
+        self.frame.set_halign(Gtk.Align.CENTER)
         self.append(self.frame)
 
         # Handle mouse clicks on the row
