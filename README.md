@@ -57,7 +57,23 @@ pdf-reader-portals/
 
 ## Getting Started
 
-To install dependencies and start the application using `uv`:
+### Installation as a System-Wide Tool (Recommended)
+
+You can install `gtk-pdfviewer` directly from GitHub into an isolated global environment using `uv`:
+
+```bash
+uv tool install git+https://github.com/aziis98/gtk-pdfviewer.git
+```
+
+This registers the `gtk-pdfviewer` command globally in your `PATH`. Once installed, you can launch the application from anywhere using:
+
+```bash
+gtk-pdfviewer [path/to/document.pdf]
+```
+
+### Local Development
+
+To install dependencies and run the application locally:
 
 ```bash
 # Sync dependencies

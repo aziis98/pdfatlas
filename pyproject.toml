@@ -1,7 +1,7 @@
 [project]
-name = "pdf-reader-portals"
+name = "gtk-pdfviewer"
 version = "0.1.0"
-description = "Add your description here"
+description = "PDF Reader with Search Portals and Auto-Crop"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -13,3 +13,10 @@ dependencies = [
     "pyopengl>=3.1.10",
     "rapidfuzz>=3.14.5",
 ]
+
+[project.scripts]
+gtk-pdfviewer = "pdf_viewer.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
