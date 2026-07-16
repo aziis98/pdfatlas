@@ -332,6 +332,17 @@ class MainWindow(Adw.ApplicationWindow):
         scroll_controller.connect("scroll", self._on_canvas_scroll)
         self.canvas.add_controller(scroll_controller)
 
+        click_gesture = Gtk.GestureClick.new()
+        click_gesture.connect("released", self._on_canvas_clicked)
+        self.canvas.add_controller(click_gesture)
+
+    def _on_canvas_clicked(self, gesture, n_press, x, y):
+        if self.canvas.highlighted_block is not None:
+            self.canvas.set_highlighted_block(0, None)
+            self.canvas.queue_draw()
+            if hasattr(self, "gl_canvas") and self.gl_canvas:
+                self.gl_canvas.queue_draw()
+
     def _on_canvas_motion(self, controller, x, y):
         self.pointer_x = x
         self.pointer_y = y
