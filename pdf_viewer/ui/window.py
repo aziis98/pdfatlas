@@ -32,7 +32,7 @@ class MainWindow(Adw.ApplicationWindow):
       - Background FTS5 database builder to prevent UI freeze during text indexing.
       - Click-to-navigate search portal coordinates mapping.
     """
-    def __init__(self, app, backend="cairo", state=None, screenshot_path=None):
+    def __init__(self, app, backend="opengl", state=None, screenshot_path=None):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")

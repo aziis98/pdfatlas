@@ -178,7 +178,7 @@ class PDFCanvas(Gtk.Box):
         self.screen_physical_dpi = 192.0
         
         # Backend settings
-        self.backend = "cairo"
+        self.backend = "opengl"
         self.gl_canvas = None
 
     def set_document(self, doc_model: DocumentModel, cache: RenderCache, render_worker, crop_analyzer: CropAnalyzer, settings: CropSettings):

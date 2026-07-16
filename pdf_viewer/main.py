@@ -20,7 +20,7 @@ class PDFViewerApplication(Adw.Application):
 
     def do_activate(self):
         # Create and present the main application window
-        backend = getattr(self, "backend", "cairo")
+        backend = getattr(self, "backend", "opengl")
         state = getattr(self, "state", None)
         screenshot = getattr(self, "screenshot", None)
         
@@ -39,7 +39,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="PDF Reader with Portals & FTS5 Search")
     parser.add_argument("pdf_path", nargs="?", help="Path to PDF file to open")
-    parser.add_argument("--backend", choices=["cairo", "opengl"], default="cairo", help="Rendering backend")
+    parser.add_argument("--backend", choices=["cairo", "opengl"], default="opengl", help="Rendering backend")
     parser.add_argument("--state", default=None, help="Initial application state as a JSON string")
     parser.add_argument("--screenshot", default=None, help="Path to save window screenshot after 2 seconds")
     

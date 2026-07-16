@@ -20,3 +20,6 @@ gtk-pdfviewer = "pdf_viewer.main:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pdf_viewer"]
