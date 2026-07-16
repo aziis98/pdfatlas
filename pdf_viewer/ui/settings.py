@@ -184,7 +184,7 @@ class SettingsWindow(Gtk.Window):
         self.layout_label = Gtk.Label(label="Search result layout", xalign=0)
         self.layout_label.set_hexpand(True)
         
-        self.layout_dropdown = Gtk.DropDown.from_strings(["List", "Grid"])
+        self.layout_dropdown = Gtk.DropDown.new_from_strings(["List", "Grid"])
         if getattr(self.settings, "search_layout", "grid") == "list":
             self.layout_dropdown.set_selected(0)
         else:

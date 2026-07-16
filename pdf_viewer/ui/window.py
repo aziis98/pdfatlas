@@ -633,6 +633,7 @@ class MainWindow(Adw.ApplicationWindow):
             if is_grid:
                 pinned_grid = Gtk.FlowBox()
                 pinned_grid.set_valign(Gtk.Align.START)
+                pinned_grid.set_halign(Gtk.Align.CENTER)
                 pinned_grid.set_selection_mode(Gtk.SelectionMode.NONE)
                 pinned_grid.set_column_spacing(8)
                 pinned_grid.set_row_spacing(8)
@@ -674,6 +675,7 @@ class MainWindow(Adw.ApplicationWindow):
         if is_grid:
             live_grid = Gtk.FlowBox()
             live_grid.set_valign(Gtk.Align.START)
+            live_grid.set_halign(Gtk.Align.CENTER)
             live_grid.set_selection_mode(Gtk.SelectionMode.NONE)
             live_grid.set_column_spacing(8)
             live_grid.set_row_spacing(8)

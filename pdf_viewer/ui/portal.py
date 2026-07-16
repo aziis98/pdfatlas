@@ -182,7 +182,7 @@ class ResultRow(Gtk.Box):
         self.spinner.set_size_request(20, 20)
         self.spinner.start()
         placeholder_box = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        placeholder_box.set_size_request(-1, display_h)
+        placeholder_box.set_size_request(230, display_h)
         placeholder_box.append(self.spinner)
 
         self.frame = Gtk.Frame()
@@ -245,7 +245,7 @@ class ResultRow(Gtk.Box):
             
             picture = Gtk.Picture.new_for_paintable(texture)
             picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-            picture.set_size_request(-1, _display_height(y0, y1))
+            picture.set_size_request(230, _display_height(y0, y1))
             picture.set_hexpand(False)
             picture.set_halign(Gtk.Align.CENTER)
             self.frame.set_child(picture)
