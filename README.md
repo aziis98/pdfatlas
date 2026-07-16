@@ -65,6 +65,12 @@ You can install `gtk-pdfviewer` directly from GitHub into an isolated global env
 uv tool install git+https://github.com/aziis98/gtk-pdfviewer.git
 ```
 
+Alternatively, to install it system-wide from a local clone of the repository:
+
+```bash
+uv tool install .
+```
+
 This registers the `gtk-pdfviewer` command globally in your `PATH`. Once installed, you can launch the application from anywhere using:
 
 ```bash
