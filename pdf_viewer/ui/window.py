@@ -302,6 +302,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         
         self.results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.results_box.set_hexpand(True)
         self.search_scrolled.set_child(self.results_box)
         self.stack.add_named(self.search_scrolled, "search-view")
 
@@ -633,7 +634,8 @@ class MainWindow(Adw.ApplicationWindow):
             if is_grid:
                 pinned_grid = Gtk.FlowBox()
                 pinned_grid.set_valign(Gtk.Align.START)
-                pinned_grid.set_halign(Gtk.Align.CENTER)
+                pinned_grid.set_halign(Gtk.Align.FILL)
+                pinned_grid.set_hexpand(True)
                 pinned_grid.set_selection_mode(Gtk.SelectionMode.NONE)
                 pinned_grid.set_column_spacing(8)
                 pinned_grid.set_row_spacing(8)
@@ -652,7 +654,11 @@ class MainWindow(Adw.ApplicationWindow):
                     on_row_clicked=self._on_row_clicked
                 )
                 if is_grid:
-                    pinned_grid.append(row)
+                    child_wrapper = Gtk.FlowBoxChild()
+                    child_wrapper.set_child(row)
+                    child_wrapper.set_halign(Gtk.Align.CENTER)
+                    child_wrapper.set_valign(Gtk.Align.CENTER)
+                    pinned_grid.append(child_wrapper)
                 else:
                     self.results_box.append(row)
                     self.results_box.append(Gtk.Separator())
@@ -675,7 +681,8 @@ class MainWindow(Adw.ApplicationWindow):
         if is_grid:
             live_grid = Gtk.FlowBox()
             live_grid.set_valign(Gtk.Align.START)
-            live_grid.set_halign(Gtk.Align.CENTER)
+            live_grid.set_halign(Gtk.Align.FILL)
+            live_grid.set_hexpand(True)
             live_grid.set_selection_mode(Gtk.SelectionMode.NONE)
             live_grid.set_column_spacing(8)
             live_grid.set_row_spacing(8)
@@ -695,7 +702,11 @@ class MainWindow(Adw.ApplicationWindow):
                 on_row_clicked=self._on_row_clicked
             )
             if is_grid:
-                live_grid.append(row)
+                child_wrapper = Gtk.FlowBoxChild()
+                child_wrapper.set_child(row)
+                child_wrapper.set_halign(Gtk.Align.CENTER)
+                child_wrapper.set_valign(Gtk.Align.CENTER)
+                live_grid.append(child_wrapper)
             else:
                 self.results_box.append(row)
                 if i < len(live_results) - 1:

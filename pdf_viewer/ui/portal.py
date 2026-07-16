@@ -92,9 +92,16 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     doc = _thread_doc(pdf_path)
     page = doc[page_no - 1]
     
-    # 1. Horizontal bounds: block width with 6pt padding
-    clip_x0 = max(0.0, x0 - 6.0)
-    clip_x1 = min(page.rect.width, x1 + 6.0)
+    # 1. Horizontal bounds: block width capped at 110pt (~220px) to fit in grid view
+    block_w = x1 - x0
+    MAX_WIDTH_PT = 110.0
+    if block_w > MAX_WIDTH_PT:
+        mid_x = (x0 + x1) / 2.0
+        clip_x0 = max(0.0, mid_x - MAX_WIDTH_PT / 2.0)
+        clip_x1 = min(page.rect.width, mid_x + MAX_WIDTH_PT / 2.0)
+    else:
+        clip_x0 = max(0.0, x0 - 6.0)
+        clip_x1 = min(page.rect.width, x1 + 6.0)
     
     # 2. Vertical bounds: fixed height window (52 points, ~4 lines of text) centered on block midpoint
     WINDOW_HEIGHT_PT = 52.0
