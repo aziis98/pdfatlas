@@ -92,16 +92,9 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     doc = _thread_doc(pdf_path)
     page = doc[page_no - 1]
     
-    # 1. Horizontal bounds: block width capped at 110pt (~220px) to fit in grid view
-    block_w = x1 - x0
-    MAX_WIDTH_PT = 110.0
-    if block_w > MAX_WIDTH_PT:
-        mid_x = (x0 + x1) / 2.0
-        clip_x0 = max(0.0, mid_x - MAX_WIDTH_PT / 2.0)
-        clip_x1 = min(page.rect.width, mid_x + MAX_WIDTH_PT / 2.0)
-    else:
-        clip_x0 = max(0.0, x0 - 6.0)
-        clip_x1 = min(page.rect.width, x1 + 6.0)
+    # 1. Horizontal bounds: block width with 6pt padding
+    clip_x0 = max(0.0, x0 - 6.0)
+    clip_x1 = min(page.rect.width, x1 + 6.0)
     
     # 2. Vertical bounds: fixed height window (52 points, ~4 lines of text) centered on block midpoint
     WINDOW_HEIGHT_PT = 52.0
@@ -138,6 +131,18 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
             ph = (uy1 - uy0) * STRIP_ZOOM
             ctx.rectangle(px0, py0, pw, ph)
     ctx.fill()
+
+    # 4. Scale down surface if it is wider than 380 pixels to limit the widget request width
+    max_w = 380
+    if w > max_w:
+        scale = max_w / w
+        new_h = max(1, int(h * scale))
+        scaled_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, max_w, new_h)
+        scaled_ctx = cairo.Context(scaled_surface)
+        scaled_ctx.scale(scale, scale)
+        scaled_ctx.set_source_surface(surface, 0, 0)
+        scaled_ctx.paint()
+        return scaled_surface, scaled_surface
 
     return surface, bgra
 
@@ -189,7 +194,7 @@ class ResultRow(Gtk.Box):
         self.spinner.set_size_request(20, 20)
         self.spinner.start()
         placeholder_box = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        placeholder_box.set_size_request(230, display_h)
+        placeholder_box.set_size_request(380, display_h)
         placeholder_box.append(self.spinner)
 
         self.frame = Gtk.Frame()
@@ -252,7 +257,7 @@ class ResultRow(Gtk.Box):
             
             picture = Gtk.Picture.new_for_paintable(texture)
             picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-            picture.set_size_request(230, _display_height(y0, y1))
+            picture.set_size_request(380, _display_height(y0, y1))
             picture.set_hexpand(False)
             picture.set_halign(Gtk.Align.CENTER)
             self.frame.set_child(picture)
