@@ -1265,7 +1265,7 @@ class MainWindow(Adw.ApplicationWindow):
             bw, bh = base.size
             mw, mh = modal.size
 
-            dim = Image.new("RGBA", (bw, bh), (0, 0, 0, 60))
+            dim = Image.new("RGBA", (bw, bh), (0, 0, 0, 45))
             base_dimmed = Image.alpha_composite(base, dim)
 
             modal_radius = 12
@@ -1277,11 +1277,11 @@ class MainWindow(Adw.ApplicationWindow):
             rounded_modal.paste(modal, (0, 0), mask=modal_mask)
 
             draw_b = ImageDraw.Draw(rounded_modal)
-            draw_b.rounded_rectangle((0, 0, mw - 1, mh - 1), radius=modal_radius, outline=(180, 180, 180, 140), width=1)
+            draw_b.rounded_rectangle((0, 0, mw - 1, mh - 1), radius=modal_radius, outline=(180, 180, 180, 120), width=1)
 
-            shadow_blur = 24
-            shadow_opacity = 0.40
-            offset_y = 8
+            shadow_blur = 16
+            shadow_opacity = 0.25
+            offset_y = 6
 
             shadow_mask = Image.new("L", (bw, bh), 0)
             s_draw = ImageDraw.Draw(shadow_mask)
@@ -1317,11 +1317,11 @@ class MainWindow(Adw.ApplicationWindow):
             w, h = img.size
             
             corner_radius = 12
-            shadow_margin = 40
-            shadow_blur = 24
-            shadow_offset_y = 10
-            shadow_opacity = 0.35
-            border_color = (180, 180, 180, 120)
+            shadow_margin = 60
+            shadow_blur = 18
+            shadow_offset_y = 6
+            shadow_opacity = 0.20
+            border_color = (180, 180, 180, 100)
             
             mask = Image.new("L", (w, h), 0)
             draw = ImageDraw.Draw(mask)
