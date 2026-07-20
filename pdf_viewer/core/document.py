@@ -1,9 +1,11 @@
 import fitz
 
+
 class DocumentModel:
     """
     A read-only model wrapper around fitz.Document.
     """
+
     def __init__(self, filepath: str):
         self.filepath = filepath
         self.doc = fitz.open(filepath)
@@ -22,7 +24,7 @@ class DocumentModel:
         """
         if 0 <= index < self._page_count:
             return self.doc[index]
-        raise IndexError(f"Page index {index} out of range (0..{self._page_count-1})")
+        raise IndexError(f"Page index {index} out of range (0..{self._page_count - 1})")
 
     def page_rect(self, index: int) -> fitz.Rect:
         """
@@ -30,7 +32,7 @@ class DocumentModel:
         """
         if 0 <= index < self._page_count:
             return self._page_rects[index]
-        raise IndexError(f"Page rect index {index} out of range (0..{self._page_count-1})")
+        raise IndexError(f"Page rect index {index} out of range (0..{self._page_count - 1})")
 
     def close(self):
         """

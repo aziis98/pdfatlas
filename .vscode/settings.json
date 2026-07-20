@@ -1,0 +1,3 @@
+{
+    "ruff.lint.ignore": ["E402"]
+}

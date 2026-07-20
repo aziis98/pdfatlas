@@ -1,21 +1,21 @@
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, GLib, Adw
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk
 
 from ..core.settings import CropSettings
+
 
 class SettingsWindow(Gtk.Window):
     """
     A GTK4 modal Window containing crop controls and settings.
     It reads/writes settings to a CropSettings instance.
     """
+
     def __init__(self, parent_window, settings: CropSettings, on_changed, on_reanalyze):
         super().__init__(
-            title="Crop Settings",
-            transient_for=parent_window,
-            modal=True,
-            destroy_with_parent=True
+            title="Crop Settings", transient_for=parent_window, modal=True, destroy_with_parent=True
         )
         self.settings = settings
         self.on_changed = on_changed
@@ -53,7 +53,7 @@ class SettingsWindow(Gtk.Window):
         self.gaps_label.set_hexpand(True)
         self.gaps_label.set_xalign(0)
         self.gaps_switch = Gtk.Switch()
-        self.gaps_switch.set_active(getattr(self.settings, 'page_gaps', True))
+        self.gaps_switch.set_active(getattr(self.settings, "page_gaps", True))
         self.gaps_switch.connect("state-set", self._on_gaps_toggled)
         self.gaps_box.append(self.gaps_label)
         self.gaps_box.append(self.gaps_switch)
@@ -79,10 +79,34 @@ class SettingsWindow(Gtk.Window):
         self.lbl_b = Gtk.Label(label="Bottom", xalign=0)
 
         # Spin adjustments (lower, upper, step)
-        self.adj_l = Gtk.Adjustment(value=self.settings.min_padding_left, lower=0.0, upper=100.0, step_increment=0.5, page_increment=5.0)
-        self.adj_r = Gtk.Adjustment(value=self.settings.min_padding_right, lower=0.0, upper=100.0, step_increment=0.5, page_increment=5.0)
-        self.adj_t = Gtk.Adjustment(value=self.settings.min_padding_top, lower=0.0, upper=100.0, step_increment=0.5, page_increment=5.0)
-        self.adj_b = Gtk.Adjustment(value=self.settings.min_padding_bottom, lower=0.0, upper=100.0, step_increment=0.5, page_increment=5.0)
+        self.adj_l = Gtk.Adjustment(
+            value=self.settings.min_padding_left,
+            lower=0.0,
+            upper=100.0,
+            step_increment=0.5,
+            page_increment=5.0,
+        )
+        self.adj_r = Gtk.Adjustment(
+            value=self.settings.min_padding_right,
+            lower=0.0,
+            upper=100.0,
+            step_increment=0.5,
+            page_increment=5.0,
+        )
+        self.adj_t = Gtk.Adjustment(
+            value=self.settings.min_padding_top,
+            lower=0.0,
+            upper=100.0,
+            step_increment=0.5,
+            page_increment=5.0,
+        )
+        self.adj_b = Gtk.Adjustment(
+            value=self.settings.min_padding_bottom,
+            lower=0.0,
+            upper=100.0,
+            step_increment=0.5,
+            page_increment=5.0,
+        )
 
         self.spin_l = Gtk.SpinButton(adjustment=self.adj_l, digits=1)
         self.spin_r = Gtk.SpinButton(adjustment=self.adj_r, digits=1)
@@ -167,7 +191,13 @@ class SettingsWindow(Gtk.Window):
         self.threshold_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.threshold_label = Gtk.Label(label="Whitespace threshold", xalign=0)
         self.threshold_label.set_hexpand(True)
-        self.threshold_adj = Gtk.Adjustment(value=self.settings.whitespace_threshold * 100, lower=0.0, upper=50.0, step_increment=1.0, page_increment=5.0)
+        self.threshold_adj = Gtk.Adjustment(
+            value=self.settings.whitespace_threshold * 100,
+            lower=0.0,
+            upper=50.0,
+            step_increment=1.0,
+            page_increment=5.0,
+        )
         self.threshold_spin = Gtk.SpinButton(adjustment=self.threshold_adj, digits=0)
         self.threshold_spin.connect("value-changed", self._on_threshold_changed)
         self.threshold_suffix = Gtk.Label(label="%")
@@ -183,14 +213,14 @@ class SettingsWindow(Gtk.Window):
         self.layout_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.layout_label = Gtk.Label(label="Search result layout", xalign=0)
         self.layout_label.set_hexpand(True)
-        
+
         self.layout_dropdown = Gtk.DropDown.new_from_strings(["List", "Grid"])
         if getattr(self.settings, "search_layout", "grid") == "list":
             self.layout_dropdown.set_selected(0)
         else:
             self.layout_dropdown.set_selected(1)
         self.layout_dropdown.connect("notify::selected", self._on_layout_changed)
-        
+
         self.layout_box.append(self.layout_label)
         self.layout_box.append(self.layout_dropdown)
         self.main_box.append(self.layout_box)

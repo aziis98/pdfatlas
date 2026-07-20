@@ -1,19 +1,21 @@
 import threading
-import string
+
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gdk, GLib
-
-import fitz
 import cairo
+import fitz
 import numpy as np
+from gi.repository import Gdk, GLib, Gtk
+
 # Render settings for portals
-STRIP_PAD_PT = 8           # padding (in PDF points) above/below the matched block
-STRIP_ZOOM = 2.0           # render zoom factor for thumbnail strips
+STRIP_PAD_PT = 8  # padding (in PDF points) above/below the matched block
+STRIP_ZOOM = 2.0  # render zoom factor for thumbnail strips
 HIGHLIGHT_RGBA = (1.0, 0.85, 0.0, 0.40)  # semi-transparent yellow highlight
 WHITESPACE_TRIM_THRESHOLD = 248  # pixel value above which channel counts as "white"
-WHITESPACE_TRIM_PAD_PT = 8       # margin kept around trimmed content
+WHITESPACE_TRIM_PAD_PT = 8  # margin kept around trimmed content
+
 
 def get_query_match_rects(page, query_terms, clip_y0, clip_y1):
     """
@@ -23,7 +25,7 @@ def get_query_match_rects(page, query_terms, clip_y0, clip_y1):
     match_rects = []
     if not query_terms:
         return match_rects
-        
+
     try:
         raw_dict = page.get_text("rawdict")
     except Exception as e:
@@ -37,24 +39,24 @@ def get_query_match_rects(page, query_terms, clip_y0, clip_y1):
             line_bbox = line.get("bbox", (0, 0, 0, 0))
             if line_bbox[3] < clip_y0 or line_bbox[1] > clip_y1:
                 continue
-                
+
             for span in line.get("spans", []):
                 chars = span.get("chars", [])
                 if not chars:
                     continue
-                    
+
                 span_text = "".join(c["c"] for c in chars)
                 span_text_lower = span_text.lower()
                 for qt in query_terms:
                     if not qt:
                         continue
-                    
+
                     start_idx = 0
                     while True:
                         idx = span_text_lower.find(qt, start_idx)
                         if idx == -1:
                             break
-                            
+
                         # Extract characters matching the term and compute their union bounds
                         match_chars = chars[idx : min(len(chars), idx + len(qt))]
                         if match_chars:
@@ -63,17 +65,20 @@ def get_query_match_rects(page, query_terms, clip_y0, clip_y1):
                             ux1 = max(c["bbox"][2] for c in match_chars)
                             uy1 = max(c["bbox"][3] for c in match_chars)
                             match_rects.append((ux0, uy0, ux1, uy1))
-                            
+
                         start_idx = idx + len(qt)
-                        
+
     return match_rects
+
 
 def _display_height(y0, y1):
     # Fixed vertical viewport height (52pt * 1.2 = ~62 DIPs)
     return 62
 
+
 # Thread-local storage for PyMuPDF Document instances to ensure thread safety
 _thread_local = threading.local()
+
 
 def _thread_doc(pdf_path):
     doc = getattr(_thread_local, "doc", None)
@@ -83,6 +88,7 @@ def _thread_doc(pdf_path):
         _thread_local.pdf_path = pdf_path
     return doc
 
+
 def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     """
     Renders one search result page-strip directly to a cairo.ImageSurface.
@@ -91,17 +97,17 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     """
     doc = _thread_doc(pdf_path)
     page = doc[page_no - 1]
-    
+
     # 1. Horizontal bounds: block width with 6pt padding
     clip_x0 = max(0.0, x0 - 6.0)
     clip_x1 = min(page.rect.width, x1 + 6.0)
-    
+
     # 2. Vertical bounds: fixed height window (52 points, ~4 lines of text) centered on block midpoint
     WINDOW_HEIGHT_PT = 52.0
     mid_y = (y0 + y1) / 2.0
     clip_y0 = max(0.0, mid_y - WINDOW_HEIGHT_PT / 2.0)
     clip_y1 = min(page.rect.height, mid_y + WINDOW_HEIGHT_PT / 2.0)
-    
+
     clip = fitz.Rect(clip_x0, clip_y0, clip_x1, clip_y1)
 
     mat = fitz.Matrix(STRIP_ZOOM, STRIP_ZOOM)
@@ -110,7 +116,7 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
 
     # Convert the pixmap raw bytes into a NumPy array
     arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
-    
+
     # Swap channels: RGBA to Cairo's native-endian memory BGRA (ARGB32)
     bgra = arr[:, :, [2, 1, 0, 3]].copy()
 
@@ -120,11 +126,11 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     # 3. Draw Highlights with Cairo
     ctx = cairo.Context(surface)
     ctx.set_source_rgba(*HIGHLIGHT_RGBA)
-    
+
     if query_terms:
         # Get precise character-level matched ranges
         match_rects = get_query_match_rects(page, query_terms, clip_y0, clip_y1)
-        for (ux0, uy0, ux1, uy1) in match_rects:
+        for ux0, uy0, ux1, uy1 in match_rects:
             px0 = (ux0 - clip.x0) * STRIP_ZOOM
             py0 = (uy0 - clip.y0) * STRIP_ZOOM
             pw = (ux1 - ux0) * STRIP_ZOOM
@@ -146,13 +152,24 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
 
     return surface, bgra
 
+
 class ResultRow(Gtk.Box):
     """
     A single Search Result card: location header with pin button, and a
     horizontally cropped & highlighted page clip (portal view) loaded in the background.
     """
-    def __init__(self, pdf_path, executor, result, query_terms, pinned=False,
-                 on_toggle_pin=None, on_render_done=None, on_row_clicked=None):
+
+    def __init__(
+        self,
+        pdf_path,
+        executor,
+        result,
+        query_terms,
+        pinned=False,
+        on_toggle_pin=None,
+        on_render_done=None,
+        on_row_clicked=None,
+    ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.set_margin_top(6)
         self.set_margin_bottom(6)
@@ -236,25 +253,19 @@ class ResultRow(Gtk.Box):
             h = surface.get_height()
             stride = surface.get_stride()
             data = surface.get_data()
-            
+
             # Wrap bytes in GLib.Bytes
             gbytes = GLib.Bytes.new(data.tobytes())
-            
+
             # B8G8R8A8_PREMULTIPLIED maps exactly to cairo.FORMAT_ARGB32 in little-endian RAM
-            texture = Gdk.MemoryTexture.new(
-                w,
-                h,
-                Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED,
-                gbytes,
-                stride
-            )
-            
+            texture = Gdk.MemoryTexture.new(w, h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, gbytes, stride)
+
             # Store references to keep everything alive on the ResultRow instance
             self._cached_surface = surface
             self._cached_bgra = bgra
             self._cached_gbytes = gbytes
             self._cached_texture = texture
-            
+
             picture = Gtk.Picture.new_for_paintable(texture)
             picture.set_content_fit(Gtk.ContentFit.CONTAIN)
             picture.set_size_request(380, _display_height(y0, y1))

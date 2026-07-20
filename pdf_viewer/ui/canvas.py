@@ -1,14 +1,14 @@
 import cairo
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk
 
-import fitz
 from ..core.cache import RenderCache
-from ..core.renderer import RenderWorker
 from ..core.crop import CropAnalyzer, CropSettings
 from ..core.document import DocumentModel
+
 
 class PageContainer(Gtk.Box):
     """
@@ -16,6 +16,7 @@ class PageContainer(Gtk.Box):
     Maintains a fixed size and dynamically mounts/unmounts its internal
     Gtk.DrawingArea canvas based on visible viewport intersections.
     """
+
     def __init__(self, page_index, canvas):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.page_index = page_index
@@ -26,7 +27,7 @@ class PageContainer(Gtk.Box):
         self.crop_rect = None
         self.drawing_area = None
         self.is_visible = False
-        
+
         self.set_valign(Gtk.Align.CENTER)
         self.set_halign(Gtk.Align.CENTER)
         self.add_css_class("page-container")
@@ -47,10 +48,10 @@ class PageContainer(Gtk.Box):
         """Mount or unmount Gtk.DrawingArea based on visibility viewport bounds."""
         page_y0 = self.y_offset
         page_y1 = self.y_offset + self.h
-        
+
         # Determine overlap with buffered viewport height
         visible = (page_y1 >= y_min - buffer) and (page_y0 <= y_max + buffer)
-        
+
         if visible:
             if self.canvas_parent.backend == "opengl":
                 self.is_visible = True
@@ -77,8 +78,12 @@ class PageContainer(Gtk.Box):
         canvas = self.canvas_parent
         zoom_key = round(canvas.zoom, 2)
         scale_factor = canvas.get_scale_factor()
-        crop_key = (self.crop_rect.x0, self.crop_rect.y0, self.crop_rect.x1, self.crop_rect.y1) if self.crop_rect is not None else None
-        
+        crop_key = (
+            (self.crop_rect.x0, self.crop_rect.y0, self.crop_rect.x1, self.crop_rect.y1)
+            if self.crop_rect is not None
+            else None
+        )
+
         # 1. Fill page background (white)
         cr.set_source_rgb(1.0, 1.0, 1.0)
         cr.paint()
@@ -90,7 +95,7 @@ class PageContainer(Gtk.Box):
             cr.set_source_surface(surface, 0, 0)
             cr.paint()
             cr.restore()
-            
+
             # 3. Draw block highlights if selected
             if canvas.highlighted_block is not None:
                 h_page_idx, h_bbox = canvas.highlighted_block
@@ -98,7 +103,7 @@ class PageContainer(Gtk.Box):
                     bx0, by0, bx1, by1 = h_bbox
                     crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
                     crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
-                    
+
                     cr.save()
                     cr.set_source_rgba(1.0, 0.85, 0.0, 0.3)
                     px0 = (bx0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
@@ -107,7 +112,7 @@ class PageContainer(Gtk.Box):
                     ph = (by1 - by0) * canvas.zoom * canvas.dpi_scale_factor
                     cr.rectangle(px0, py0, pw, ph)
                     cr.fill_preserve()
-                    
+
                     cr.set_source_rgba(0.85, 0.1, 0.1, 0.9)
                     cr.set_line_width(2.5)
                     cr.stroke()
@@ -128,7 +133,7 @@ class PageContainer(Gtk.Box):
             job_key = (self.page_index, zoom_key, scale_factor, crop_key)
             if job_key not in canvas.in_flight:
                 canvas.in_flight.add(job_key)
-                
+
                 def make_cb(idx, zk, sf, ck):
                     return lambda: canvas._on_render_complete(idx, zk, sf, ck)
 
@@ -142,7 +147,7 @@ class PageContainer(Gtk.Box):
                     is_minimap=False,
                     target_cache=canvas.cache,
                     redraw_callback=make_cb(self.page_index, zoom_key, scale_factor, crop_key),
-                    screen_physical_dpi=canvas.screen_physical_dpi
+                    screen_physical_dpi=canvas.screen_physical_dpi,
                 )
 
 
@@ -151,6 +156,7 @@ class PDFCanvas(Gtk.Box):
     Virtual list viewport wrapper that holds individual page layout blocks.
     Acts as a vertical Gtk.Box to avoid massive texture allocation failures on GTK4.
     """
+
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.set_valign(Gtk.Align.START)
@@ -163,7 +169,7 @@ class PDFCanvas(Gtk.Box):
         self.render_worker = None
         self.crop_analyzer = None
         self.settings = None
-        
+
         self.zoom = 1.0
         self.crop_active = False
         self.page_gap = 12
@@ -172,16 +178,23 @@ class PDFCanvas(Gtk.Box):
         self.in_flight = set()
         self.page_layout = []
         self.vadjustment = None
-        
+
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
         self.screen_physical_dpi = 192.0
-        
+
         # Backend settings
         self.backend = "opengl"
         self.gl_canvas = None
 
-    def set_document(self, doc_model: DocumentModel, cache: RenderCache, render_worker, crop_analyzer: CropAnalyzer, settings: CropSettings):
+    def set_document(
+        self,
+        doc_model: DocumentModel,
+        cache: RenderCache,
+        render_worker,
+        crop_analyzer: CropAnalyzer,
+        settings: CropSettings,
+    ):
         self.doc_model = doc_model
         self.cache = cache
         self.render_worker = render_worker
@@ -189,14 +202,14 @@ class PDFCanvas(Gtk.Box):
         self.settings = settings
         self.in_flight.clear()
         self.highlighted_block = None
-        
+
         # Remove old containers
         child = self.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
             self.remove(child)
             child = nxt
-            
+
         self.containers = []
         self.page_layout = []
         self.update_layout()
@@ -242,7 +255,7 @@ class PDFCanvas(Gtk.Box):
             return
 
         # Update page gap based on settings dynamically
-        if self.settings and not getattr(self.settings, 'page_gaps', True):
+        if self.settings and not getattr(self.settings, "page_gaps", True):
             self.page_gap = 0
         else:
             self.page_gap = 12
@@ -257,7 +270,7 @@ class PDFCanvas(Gtk.Box):
                 nxt = child.get_next_sibling()
                 self.remove(child)
                 child = nxt
-            
+
             self.containers = []
             for i in range(page_count):
                 container = PageContainer(i, self)
@@ -274,16 +287,16 @@ class PDFCanvas(Gtk.Box):
                 crop_rect = self.crop_analyzer.crop_rects[i]
 
             rect = crop_rect if crop_rect is not None else page_rect
-            
+
             # Apply dpi_scale_factor to logical layout dimensions
             dw = rect.width * self.zoom * self.dpi_scale_factor
             dh = rect.height * self.zoom * self.dpi_scale_factor
 
             self.page_layout.append((current_y, dw, dh, crop_rect))
-            
+
             container = self.containers[i]
             container.set_layout_params(current_y, dw, dh, crop_rect)
-            
+
             current_y += dh + self.page_gap
 
         self._update_visibility()
@@ -317,7 +330,16 @@ class PDFCanvas(Gtk.Box):
 
                 # For OpenGL backend, visible page render requests are queued here
                 if self.backend == "opengl":
-                    crop_key = (container.crop_rect.x0, container.crop_rect.y0, container.crop_rect.x1, container.crop_rect.y1) if container.crop_rect is not None else None
+                    crop_key = (
+                        (
+                            container.crop_rect.x0,
+                            container.crop_rect.y0,
+                            container.crop_rect.x1,
+                            container.crop_rect.y1,
+                        )
+                        if container.crop_rect is not None
+                        else None
+                    )
                     if self.cache.get(i, self.zoom, scale_factor, container.crop_rect) is None:
                         job_key = (i, zoom_key, scale_factor, crop_key)
                         if job_key not in self.in_flight:
@@ -327,7 +349,7 @@ class PDFCanvas(Gtk.Box):
                                 return lambda: self._on_render_complete(p_idx, zk, sf, ck)
 
                             self.render_worker.queue_render_job(
-                                priority=0, # High priority for visible pages
+                                priority=0,  # High priority for visible pages
                                 doc_model=self.doc_model,
                                 page_index=i,
                                 zoom=self.zoom * self.dpi_scale_factor,
@@ -336,7 +358,7 @@ class PDFCanvas(Gtk.Box):
                                 is_minimap=False,
                                 target_cache=self.cache,
                                 redraw_callback=make_cb(i, zoom_key, scale_factor, crop_key),
-                                screen_physical_dpi=self.screen_physical_dpi
+                                screen_physical_dpi=self.screen_physical_dpi,
                             )
 
         # 2. Queue prefetch jobs for adjacent pages
@@ -356,7 +378,16 @@ class PDFCanvas(Gtk.Box):
 
             for idx, priority in prefetch_targets:
                 container = self.containers[idx]
-                crop_key = (container.crop_rect.x0, container.crop_rect.y0, container.crop_rect.x1, container.crop_rect.y1) if container.crop_rect is not None else None
+                crop_key = (
+                    (
+                        container.crop_rect.x0,
+                        container.crop_rect.y0,
+                        container.crop_rect.x1,
+                        container.crop_rect.y1,
+                    )
+                    if container.crop_rect is not None
+                    else None
+                )
 
                 if self.cache.get(idx, self.zoom, scale_factor, container.crop_rect) is None:
                     job_key = (idx, zoom_key, scale_factor, crop_key)
@@ -376,7 +407,7 @@ class PDFCanvas(Gtk.Box):
                             is_minimap=False,
                             target_cache=self.cache,
                             redraw_callback=make_cb(idx, zoom_key, scale_factor, crop_key),
-                            screen_physical_dpi=self.screen_physical_dpi
+                            screen_physical_dpi=self.screen_physical_dpi,
                         )
 
     def _on_render_complete(self, page_index, zoom_key, scale_factor, crop_key):

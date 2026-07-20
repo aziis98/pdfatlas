@@ -1,6 +1,8 @@
 import fitz
+
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -8,11 +10,13 @@ except ImportError:
 from .document import DocumentModel
 from .settings import CropSettings
 
+
 class CropAnalyzer:
     """
     Analyzes document pages to detect content bounding boxes by trimming white margins.
     Caches raw content bounding boxes (in points) to avoid re-rendering pages on settings change.
     """
+
     ANALYSIS_SCALE = 0.2  # 20% scale for fast scan (approx 14.4 dpi)
 
     def __init__(self, doc_model: DocumentModel):
@@ -55,10 +59,10 @@ class CropAnalyzer:
             arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape((height, width, n))
             # True where pixel is not white (threshold 240)
             non_white = (arr[:, :, 0] <= 240) | (arr[:, :, 1] <= 240) | (arr[:, :, 2] <= 240)
-            
+
             rows = np.any(non_white, axis=1)
             cols = np.any(non_white, axis=0)
-            
+
             if np.any(rows) and np.any(cols):
                 min_row = int(np.where(rows)[0][0])
                 max_row = int(np.where(rows)[0][-1])
@@ -69,20 +73,20 @@ class CropAnalyzer:
             # Fallback pure-Python scanning
             data = pix.samples
             min_row, max_row = None, None
-            
+
             # Find min_row
             for r in range(height):
                 offset = r * stride
                 row_has_content = False
                 for c in range(width):
                     idx = offset + c * n
-                    if data[idx] <= 240 or data[idx+1] <= 240 or data[idx+2] <= 240:
+                    if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
                         row_has_content = True
                         break
                 if row_has_content:
                     min_row = r
                     break
-            
+
             if min_row is not None:
                 # Find max_row
                 for r in range(height - 1, min_row - 1, -1):
@@ -90,42 +94,42 @@ class CropAnalyzer:
                     row_has_content = False
                     for c in range(width):
                         idx = offset + c * n
-                        if data[idx] <= 240 or data[idx+1] <= 240 or data[idx+2] <= 240:
+                        if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
                             row_has_content = True
                             break
                     if row_has_content:
                         max_row = r
                         break
-                
+
                 # Find min_col
                 min_col = None
                 for c in range(width):
                     col_has_content = False
                     for r in range(min_row, max_row + 1):
                         idx = r * stride + c * n
-                        if data[idx] <= 240 or data[idx+1] <= 240 or data[idx+2] <= 240:
+                        if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
                             col_has_content = True
                             break
                     if col_has_content:
                         min_col = c
                         break
-                
+
                 # Find max_col
                 max_col = None
                 for c in range(width - 1, min_col - 1, -1):
                     col_has_content = False
                     for r in range(min_row, max_row + 1):
                         idx = r * stride + c * n
-                        if data[idx] <= 240 or data[idx+1] <= 240 or data[idx+2] <= 240:
+                        if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
                             col_has_content = True
                             break
                     if col_has_content:
                         max_col = c
                         break
-                
+
                 if min_col is not None and max_col is not None:
                     bbox_pixels = (min_col, min_row, max_col, max_row)
- 
+
         if bbox_pixels is not None:
             min_col, min_row, max_col, max_row = bbox_pixels
             # Convert back to points (divide by ANALYSIS_SCALE)
@@ -133,7 +137,7 @@ class CropAnalyzer:
                 min_col / self.ANALYSIS_SCALE,
                 min_row / self.ANALYSIS_SCALE,
                 (max_col + 1) / self.ANALYSIS_SCALE,
-                (max_row + 1) / self.ANALYSIS_SCALE
+                (max_row + 1) / self.ANALYSIS_SCALE,
             )
             self.raw_bboxes[page_index] = raw_box
         else:
@@ -158,7 +162,7 @@ class CropAnalyzer:
         for i in range(self.page_count):
             page_rect = self.doc_model.page_rect(i)
             raw_box = self.raw_bboxes[i]
-            
+
             # If not scanned yet, we use None (which will fall back to full page in main app)
             if not self.scanned[i] or raw_box is None:
                 per_page_rects[i] = None
@@ -174,7 +178,7 @@ class CropAnalyzer:
             if right > left and bottom > top:
                 per_page_rect = fitz.Rect(left, top, right, bottom)
                 per_page_rects[i] = per_page_rect
-                
+
                 # Check for sparse pages (where content width is less than threshold of page width)
                 content_w = raw_box.x1 - raw_box.x0
                 is_sparse_list[i] = content_w < (settings.whitespace_threshold * page_rect.width)
@@ -183,8 +187,10 @@ class CropAnalyzer:
                 is_sparse_list[i] = True
 
         # 2. Compute document-wide uniform width (left & right) from non-sparse pages
-        non_sparse_rects = [r for idx, r in enumerate(per_page_rects) if not is_sparse_list[idx] and r is not None]
-        
+        non_sparse_rects = [
+            r for idx, r in enumerate(per_page_rects) if not is_sparse_list[idx] and r is not None
+        ]
+
         if non_sparse_rects:
             uniform_left = min(r.x0 for r in non_sparse_rects)
             uniform_right = max(r.x1 for r in non_sparse_rects)

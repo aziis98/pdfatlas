@@ -16,7 +16,6 @@ dependencies = [
 
 [project.scripts]
 pdfatlas = "pdf_viewer.main:main"
-gtk-pdfviewer = "pdf_viewer.main:main"
 
 [build-system]
 requires = ["hatchling"]

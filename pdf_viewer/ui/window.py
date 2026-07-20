@@ -1,27 +1,31 @@
-import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-gi.require_version('Gdk', '4.0')
-gi.require_version('Graphene', '1.0')
-from gi.repository import Gtk, Gdk, GLib, Gio, Adw, Graphene
 import os
 import threading
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
+gi.require_version("Graphene", "1.0")
 from concurrent.futures import ThreadPoolExecutor
 
-from ..core.document import DocumentModel
-from ..core.cache import RenderCache, MiniMapCache
-from ..core.renderer import RenderWorker
-from ..core.crop import CropAnalyzer
-from ..core.settings import CropSettings
-from ..core.index import get_db_for_pdf, search as fts_search
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk
 
+from ..core.cache import MiniMapCache, RenderCache
+from ..core.crop import CropAnalyzer
+from ..core.document import DocumentModel
+from ..core.index import get_db_for_pdf
+from ..core.index import search as fts_search
+from ..core.renderer import RenderWorker
+from ..core.settings import CropSettings
 from .canvas import PDFCanvas
-from .minimap import MinimapWindow
-from .settings import SettingsWindow
-from .portal import ResultRow
 from .gl_canvas import GLCanvas
+from .minimap import MinimapWindow
+from .portal import ResultRow
+from .settings import SettingsWindow
 
 DEBOUNCE_MS = 300  # search-as-you-type debounce delay
+
 
 class MainWindow(Adw.ApplicationWindow):
     """
@@ -32,6 +36,7 @@ class MainWindow(Adw.ApplicationWindow):
       - Background FTS5 database builder to prevent UI freeze during text indexing.
       - Click-to-navigate search portal coordinates mapping.
     """
+
     def __init__(self, app, backend="opengl", state=None, screenshot_path=None):
         super().__init__(application=app)
         self.app = app
@@ -52,12 +57,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.doc_model = None
         self.crop_analyzer = None
         self.settings = CropSettings()
-        
+
         # LRU Caches and background thread pool for canvas rendering
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
         self.render_worker = RenderWorker()
-        
+
         # Thread pool for search indexing & result portal rendering
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
         self.index_conn = None
@@ -69,20 +74,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.zoom = 1.0
 
         # Define window actions for the menu
-        gapless_state = getattr(self.settings, 'page_gaps', True)
+        gapless_state = getattr(self.settings, "page_gaps", True)
         self.gapless_action = Gio.SimpleAction.new_stateful(
-            "gapless-mode",
-            None,
-            GLib.Variant.new_boolean(gapless_state)
+            "gapless-mode", None, GLib.Variant.new_boolean(gapless_state)
         )
         self.gapless_action.connect("activate", self._on_gapless_action_activated)
         self.add_action(self.gapless_action)
 
         crop_state = self.settings.enabled
         self.crop_action = Gio.SimpleAction.new_stateful(
-            "crop-mode",
-            None,
-            GLib.Variant.new_boolean(crop_state)
+            "crop-mode", None, GLib.Variant.new_boolean(crop_state)
         )
         self.crop_action.connect("activate", self._on_crop_action_activated)
         self.add_action(self.crop_action)
@@ -142,17 +143,17 @@ class MainWindow(Adw.ApplicationWindow):
         if not display:
             return
         theme = Gtk.IconTheme.get_for_display(display)
-        
+
         icon_roots = [
             "/usr/share/icons",
             "/usr/local/share/icons",
             os.path.expanduser("~/.local/share/icons"),
-            os.path.expanduser("~/.icons")
+            os.path.expanduser("~/.icons"),
         ]
-        
+
         added_paths = set()
         target_icons = {"map-symbolic.svg", "image-crop-symbolic.svg", "crop-symbolic.svg"}
-        
+
         for root in icon_roots:
             if not os.path.exists(root):
                 continue
@@ -176,7 +177,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Left: Open Button & Filename Label
         left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        
+
         self.open_btn = Gtk.Button()
         self.open_btn.set_icon_name("document-open-symbolic")
         self.open_btn.set_tooltip_text("Open PDF [Ctrl+O]")
@@ -189,7 +190,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.filename_label.set_xalign(0)
         self.filename_label.add_css_class("caption")
         left_box.append(self.filename_label)
-        
+
         header.pack_start(left_box)
 
         # Center: Search Entry
@@ -230,7 +231,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu = Gio.Menu.new()
         menu.append("Gap-less Mode", "win.gapless-mode")
         menu.append("Auto-crop Mode", "win.crop-mode")
-        
+
         section = Gio.Menu.new()
         section.append("Open Settings", "win.open-settings")
         menu.append_section(None, section)
@@ -259,9 +260,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.css_provider = Gtk.CssProvider()
         self._update_theme_css()
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            self.css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            Gdk.Display.get_default(), self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
         # Child 1: Document View Setup (always using Gtk.Overlay to overlay floating zoom controls)
@@ -269,29 +268,29 @@ class MainWindow(Adw.ApplicationWindow):
         self.scrolled_window.set_hexpand(True)
         self.scrolled_window.set_vexpand(True)
         self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.ALWAYS)
-        
+
         self.canvas = PDFCanvas()
         self.scrolled_window.set_child(self.canvas)
-        
+
         # Build floating zoom controls box
         self._build_floating_zoom_controls()
-        
+
         self.overlay = Gtk.Overlay()
         self.overlay.set_hexpand(True)
         self.overlay.set_vexpand(True)
-        
+
         if self.backend == "opengl":
             self.gl_canvas = GLCanvas(self.canvas)
             self.gl_canvas.set_hexpand(True)
             self.gl_canvas.set_vexpand(True)
-            
-            self.overlay.set_child(self.gl_canvas)         # base layer (OpenGL)
+
+            self.overlay.set_child(self.gl_canvas)  # base layer (OpenGL)
             self.overlay.add_overlay(self.scrolled_window)  # middle layer (GTK scroll container)
         else:
             self.gl_canvas = None
-            self.overlay.set_child(self.scrolled_window)   # base layer (Cairo scroll container)
-            
-        self.overlay.add_overlay(self.zoom_floating_box)    # top layer (Floating zoom controls)
+            self.overlay.set_child(self.scrolled_window)  # base layer (Cairo scroll container)
+
+        self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
         self.stack.add_named(self.overlay, "document-view")
 
         # Child 2: Search View
@@ -299,7 +298,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_scrolled.set_hexpand(True)
         self.search_scrolled.set_vexpand(True)
         self.search_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        
+
         self.results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.results_box.set_hexpand(True)
         self.search_scrolled.set_child(self.results_box)
@@ -309,13 +308,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.vadjustment = self.scrolled_window.get_vadjustment()
         self.hadjustment = self.scrolled_window.get_hadjustment()
         self.canvas.set_vadjustment(self.vadjustment)
-        
+
         if self.backend == "opengl":
             self.canvas.backend = "opengl"
             self.canvas.gl_canvas = self.gl_canvas
             # Repaint the GL background layer on scroll
             self.vadjustment.connect("value-changed", lambda adj: self.gl_canvas.queue_draw())
-            
+
         # Connect vertical scroll adjustment to track current page
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
 
@@ -350,8 +349,8 @@ class MainWindow(Adw.ApplicationWindow):
         modifiers = controller.get_current_event_state()
         if modifiers & Gdk.ModifierType.CONTROL_MASK:
             factor = 1.2 if dy < 0 else (1.0 / 1.2)
-            px = getattr(self, 'pointer_x', 0.0)
-            py = getattr(self, 'pointer_y', 0.0)
+            px = getattr(self, "pointer_x", 0.0)
+            py = getattr(self, "pointer_y", 0.0)
             self.set_zoom_level(self.zoom * factor, center_x=px, center_y=py)
             return True
         return False
@@ -389,7 +388,7 @@ class MainWindow(Adw.ApplicationWindow):
             display = Gdk.Display.get_default()
             monitors = display.get_monitors()
             monitor = monitors.get_item(0) if (monitors and monitors.get_n_items() > 0) else None
-            
+
             if monitor:
                 geom = monitor.get_geometry()
                 w_mm = monitor.get_width_mm()
@@ -403,14 +402,19 @@ class MainWindow(Adw.ApplicationWindow):
             else:
                 logical_dpi = 96.0
                 physical_dpi = 192.0
-                
+
             self.canvas.dpi_scale_factor = 1.0
             self.canvas.screen_physical_dpi = physical_dpi
-            
-            print(f"[MainWindow] Screen logical DPI: {logical_dpi:.1f}, physical DPI: {physical_dpi:.1f}, "
-                  f"layout scale multiplier: {self.canvas.dpi_scale_factor:.3f}", flush=True)
 
-            self.canvas.set_document(self.doc_model, self.render_cache, self.render_worker, self.crop_analyzer, self.settings)
+            print(
+                f"[MainWindow] Screen logical DPI: {logical_dpi:.1f}, physical DPI: {physical_dpi:.1f}, "
+                f"layout scale multiplier: {self.canvas.dpi_scale_factor:.3f}",
+                flush=True,
+            )
+
+            self.canvas.set_document(
+                self.doc_model, self.render_cache, self.render_worker, self.crop_analyzer, self.settings
+            )
 
             filename = os.path.basename(filepath)
             self.set_title(f"PDF Viewer — {filename}")
@@ -427,7 +431,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.entry.set_placeholder_text("Indexing text index...")
             self.entry.set_sensitive(False)
             self.stack.set_visible_child_name("document-view")
-            
+
             indexing_thread = threading.Thread(target=self._index_worker, args=(filepath,), daemon=True)
             indexing_thread.start()
 
@@ -435,17 +439,18 @@ class MainWindow(Adw.ApplicationWindow):
             if self.initial_state:
                 try:
                     import json
+
                     state = json.loads(self.initial_state)
-                    
+
                     if "zoom" in state:
                         self.set_zoom_level(float(state["zoom"]))
                     if "crop" in state:
                         self.settings.enabled = bool(state["crop"])
                     if "page_gaps" in state:
                         self.settings.page_gaps = bool(state["page_gaps"])
-                        
+
                     self._on_crop_settings_updated()
-                    
+
                     # Defer scroll_y and search query application until layout realizes
                     def apply_deferred_state():
                         if "scroll_y" in state:
@@ -460,6 +465,7 @@ class MainWindow(Adw.ApplicationWindow):
                         if "minimap" in state and state["minimap"]:
                             GLib.timeout_add(500, self.toggle_minimap)
                         return False
+
                     GLib.idle_add(apply_deferred_state)
                 except Exception as e:
                     print(f"[MainWindow] Error restoring programmatic state: {e}", flush=True)
@@ -478,7 +484,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.index_conn = conn
         self.entry.set_sensitive(True)
         self.entry.set_placeholder_text("Search document...")
-        
+
         # If there's a deferred query from state restoration, execute it now
         if hasattr(self, "_deferred_state_query") and self._deferred_state_query:
             query = self._deferred_state_query
@@ -488,13 +494,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _open_file_dialog(self):
         dialog = Gtk.FileChooserNative.new(
-            "Open PDF File",
-            self,
-            Gtk.FileChooserAction.OPEN,
-            "Open",
-            "Cancel"
+            "Open PDF File", self, Gtk.FileChooserAction.OPEN, "Open", "Cancel"
         )
-        
+
         filter_pdf = Gtk.FileFilter()
         filter_pdf.set_name("PDF Files")
         filter_pdf.add_mime_type("application/pdf")
@@ -516,7 +518,7 @@ class MainWindow(Adw.ApplicationWindow):
             modal=True,
             message_type=Gtk.MessageType.ERROR,
             buttons=Gtk.ButtonsType.OK,
-            text=message
+            text=message,
         )
         dialog.connect("response", lambda d, r: d.destroy())
         dialog.show()
@@ -574,26 +576,26 @@ class MainWindow(Adw.ApplicationWindow):
         def scroll_to_target():
             if not self.doc_model or page_idx >= len(self.canvas.page_layout):
                 return False
-                
+
             y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_idx]
             crop_y0 = crop_rect.y0 if crop_rect is not None else 0.0
-            
+
             # Calculate midpoint of the match block relative to cropped Y top boundary
             block_rel_y0 = max(0.0, result["y0"] - crop_y0)
             block_rel_y1 = max(0.0, result["y1"] - crop_y0)
             block_rel_mid = block_rel_y0 + (block_rel_y1 - block_rel_y0) / 2.0
-            
+
             # Convert points to layout pixels (taking zoom and dpi scale multiplier into account)
             scale = self.zoom * self.canvas.dpi_scale_factor
             block_pixel_y = block_rel_mid * scale
-            
+
             # Absolute target Y including the page gap offset
             block_absolute_y = y_offset + self.canvas.page_gap + block_pixel_y
 
             viewport_h = self.vadjustment.get_page_size()
             if viewport_h <= 1.0:
                 viewport_h = 700.0  # Fallback layout height
-                
+
             target_y = block_absolute_y - (viewport_h / 2.0)
 
             lower = self.vadjustment.get_lower()
@@ -628,6 +630,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Normalize query words
         import string
+
         query_terms = {t.strip(string.punctuation).lower() for t in query.strip().split() if t}
 
         live_results = fts_search(self.index_conn, query, limit=30) if self.index_conn else []
@@ -663,7 +666,7 @@ class MainWindow(Adw.ApplicationWindow):
                     entry["query_terms"],
                     pinned=True,
                     on_toggle_pin=self._on_toggle_pin,
-                    on_row_clicked=self._on_row_clicked
+                    on_row_clicked=self._on_row_clicked,
                 )
                 if is_grid:
                     child_wrapper = Gtk.FlowBoxChild()
@@ -711,7 +714,7 @@ class MainWindow(Adw.ApplicationWindow):
                 query_terms,
                 pinned=already_pinned,
                 on_toggle_pin=self._on_toggle_pin,
-                on_row_clicked=self._on_row_clicked
+                on_row_clicked=self._on_row_clicked,
             )
             if is_grid:
                 child_wrapper = Gtk.FlowBoxChild()
@@ -738,7 +741,7 @@ class MainWindow(Adw.ApplicationWindow):
     def set_zoom_level(self, zoom: float, center_x=None, center_y=None):
         if not self.doc_model:
             return
-        
+
         old_zoom = self.zoom
         new_zoom = max(0.25, min(8.0, zoom))
         if old_zoom == new_zoom:
@@ -759,7 +762,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.zoom = new_zoom
         self.zoom_label.set_label(f"{int(new_zoom * 100)}%")
-        
+
         # Apply to canvas (recomputes layout / bounds)
         self.canvas.set_zoom(new_zoom)
 
@@ -796,7 +799,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         viewport_w = self.scrolled_window.get_width()
-        
+
         max_w = 0.0
         for i in range(self.doc_model.page_count):
             rect = None
@@ -843,7 +846,7 @@ class MainWindow(Adw.ApplicationWindow):
         val = self.vadjustment.get_value()
         page_size = self.vadjustment.get_page_size()
         step = page_size * 0.9
-        
+
         new_val = val + step if forward else val - step
 
         lower = self.vadjustment.get_lower()
@@ -859,7 +862,7 @@ class MainWindow(Adw.ApplicationWindow):
         step = self.vadjustment.get_step_increment()
         if step <= 0:
             step = 40.0
-            
+
         new_val = val + step if forward else val - step
         lower = self.vadjustment.get_lower()
         upper = self.vadjustment.get_upper()
@@ -891,9 +894,9 @@ class MainWindow(Adw.ApplicationWindow):
             settings=self.settings,
             main_vadjustment=self.vadjustment,
             main_zoom=self.zoom,
-            on_page_selected=self._on_minimap_page_clicked
+            on_page_selected=self._on_minimap_page_clicked,
         )
-        
+
         self.minimap_dialog = dialog
         dialog.minimap.set_current_page(active_page)
         dialog.present()
@@ -905,14 +908,14 @@ class MainWindow(Adw.ApplicationWindow):
         if page_index < len(self.canvas.page_layout):
             y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_index]
             viewport_h = self.vadjustment.get_page_size()
-            
+
             target_y = y_offset + dh / 2 - viewport_h / 2
-            
+
             lower = self.vadjustment.get_lower()
             upper = self.vadjustment.get_upper()
             max_y = upper - viewport_h
             target_y = max(lower, min(max_y, target_y))
-            
+
             self.vadjustment.set_value(target_y)
 
     # --- Toggles & Settings ---
@@ -930,7 +933,7 @@ class MainWindow(Adw.ApplicationWindow):
             parent_window=self,
             settings=self.settings,
             on_changed=self._on_settings_changed,
-            on_reanalyze=self._on_reanalyze
+            on_reanalyze=self._on_reanalyze,
         )
         dialog.present()
 
@@ -945,8 +948,8 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "crop_action") and self.crop_action:
             self.crop_action.set_state(GLib.Variant.new_boolean(self.settings.enabled))
         if hasattr(self, "gapless_action") and self.gapless_action:
-            self.gapless_action.set_state(GLib.Variant.new_boolean(getattr(self.settings, 'page_gaps', True)))
-            
+            self.gapless_action.set_state(GLib.Variant.new_boolean(getattr(self.settings, "page_gaps", True)))
+
         # Apply CSS updates dynamically (e.g. for gap-less mode padding/borders)
         self._update_theme_css()
 
@@ -1016,47 +1019,47 @@ class MainWindow(Adw.ApplicationWindow):
         super().close()
 
     def _update_theme_css(self):
-        gap_size = 12 if getattr(self.settings, 'page_gaps', True) else 0
-        
-        shared_css = f"""
-            .zoom-floating-box {{
+        gap_size = 12 if getattr(self.settings, "page_gaps", True) else 0
+
+        shared_css = """
+            .zoom-floating-box {
                 background-color: rgba(255, 255, 255, 0.9);
                 border: 1px solid rgba(0, 0, 0, 0.15);
                 border-radius: 10px;
                 padding: 4px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            }}
-            .zoom-floating-label {{
+            }
+            .zoom-floating-label {
                 font-size: 10px;
                 font-weight: bold;
                 color: #2e2e2e;
                 margin: 4px 0;
-            }}
-            .zoom-floating-box button {{
+            }
+            .zoom-floating-box button {
                 min-width: 30px;
                 min-height: 30px;
                 padding: 0;
                 border-radius: 6px;
-            }}
+            }
             headerbar entry.page-input text,
             headerbar entry.page-input > text,
             .page-input text,
-            entry.page-input > text {{
+            entry.page-input > text {
                 padding-top: 2px;
                 padding-bottom: 2px;
                 padding-left: 2px;
                 padding-right: 2px;
                 min-width: 0px;
                 min-height: 0px;
-            }}
+            }
             headerbar entry.page-input,
             .page-input,
-            entry.page-input {{
+            entry.page-input {
                 min-width: 0px;
                 min-height: 0px;
                 padding: 0;
                 margin: 0;
-            }}
+            }
         """
 
         if self.backend == "opengl":
@@ -1088,7 +1091,7 @@ class MainWindow(Adw.ApplicationWindow):
                 }}
                 {shared_css}
             """
-        self.css_provider.load_from_data(css_data.encode('utf-8'))
+        self.css_provider.load_from_data(css_data.encode("utf-8"))
 
     def _build_floating_zoom_controls(self):
         self.zoom_floating_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -1117,7 +1120,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_page_input_activate(self, entry):
         if not self.doc_model or not self.canvas.page_layout:
             return
-            
+
         text = entry.get_text().strip()
         try:
             page_num = int(text)
@@ -1144,7 +1147,7 @@ class MainWindow(Adw.ApplicationWindow):
         old_state = action.get_state().get_boolean()
         new_state = not old_state
         action.set_state(GLib.Variant.new_boolean(new_state))
-        
+
         self.settings.page_gaps = new_state
         self._on_crop_settings_updated()
 
@@ -1152,18 +1155,18 @@ class MainWindow(Adw.ApplicationWindow):
         old_state = action.get_state().get_boolean()
         new_state = not old_state
         action.set_state(GLib.Variant.new_boolean(new_state))
-        
+
         self.settings.enabled = new_state
         self._on_crop_settings_updated()
 
     def _on_scroll_page_changed(self, adj):
         if not self.doc_model or not self.canvas.page_layout:
             return
-            
+
         y_val = adj.get_value()
         viewport_h = adj.get_page_size()
         y_center = y_val + (viewport_h / 2.0)
-        
+
         current_idx = 0
         for i, layout in enumerate(self.canvas.page_layout):
             y_offset, dw, dh, crop_rect = layout
@@ -1172,7 +1175,7 @@ class MainWindow(Adw.ApplicationWindow):
             if page_y0 <= y_center <= page_y1:
                 current_idx = i
                 break
-                
+
         page_num = current_idx + 1
         if hasattr(self, "page_input") and self.page_input and not self.page_input.has_focus():
             self.page_input.set_text(str(page_num))
@@ -1187,9 +1190,7 @@ class MainWindow(Adw.ApplicationWindow):
                 return False
 
             is_minimap = (
-                hasattr(self, "minimap_dialog")
-                and self.minimap_dialog
-                and self.minimap_dialog.get_visible()
+                hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible()
             )
 
             if is_minimap:
@@ -1256,6 +1257,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _composite_minimap_screenshot(self, base_path, modal_path, out_path):
         try:
             import os
+
             from PIL import Image, ImageDraw, ImageFilter
 
             base = Image.open(base_path).convert("RGBA")
@@ -1276,7 +1278,9 @@ class MainWindow(Adw.ApplicationWindow):
             rounded_modal.paste(modal, (0, 0), mask=modal_mask)
 
             draw_b = ImageDraw.Draw(rounded_modal)
-            draw_b.rounded_rectangle((0, 0, mw - 1, mh - 1), radius=modal_radius, outline=(180, 180, 180, 120), width=1)
+            draw_b.rounded_rectangle(
+                (0, 0, mw - 1, mh - 1), radius=modal_radius, outline=(180, 180, 180, 120), width=1
+            )
 
             shadow_blur = 16
             shadow_opacity = 0.25
@@ -1304,53 +1308,57 @@ class MainWindow(Adw.ApplicationWindow):
                 os.remove(modal_path)
 
             self._apply_gnome_shadow(out_path)
-            print(f"[Screenshot] Composited minimap window over main reader and saved to {out_path}", flush=True)
+            print(
+                f"[Screenshot] Composited minimap window over main reader and saved to {out_path}", flush=True
+            )
         except Exception as e:
             print(f"[Screenshot] Failed to composite minimap screenshot: {e}", flush=True)
 
     def _apply_gnome_shadow(self, file_path):
         try:
             from PIL import Image, ImageDraw, ImageFilter
-            
+
             img = Image.open(file_path).convert("RGBA")
             w, h = img.size
-            
+
             corner_radius = 12
             shadow_margin = 60
             shadow_blur = 18
             shadow_offset_y = 6
             shadow_opacity = 0.20
             border_color = (180, 180, 180, 100)
-            
+
             mask = Image.new("L", (w, h), 0)
             draw = ImageDraw.Draw(mask)
             draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=corner_radius, fill=255)
-            
+
             rounded_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             rounded_img.paste(img, (0, 0), mask=mask)
-            
+
             draw_border = ImageDraw.Draw(rounded_img)
-            draw_border.rounded_rectangle((0, 0, w - 1, h - 1), radius=corner_radius, outline=border_color, width=1)
-            
+            draw_border.rounded_rectangle(
+                (0, 0, w - 1, h - 1), radius=corner_radius, outline=border_color, width=1
+            )
+
             canvas_w = w + shadow_margin * 2
             canvas_h = h + shadow_margin * 2 + shadow_offset_y
-            
+
             shadow_mask = Image.new("L", (canvas_w, canvas_h), 0)
             shadow_draw = ImageDraw.Draw(shadow_mask)
             shadow_box = (
                 shadow_margin,
                 shadow_margin + shadow_offset_y,
                 shadow_margin + w - 1,
-                shadow_margin + shadow_offset_y + h - 1
+                shadow_margin + shadow_offset_y + h - 1,
             )
             shadow_draw.rounded_rectangle(shadow_box, radius=corner_radius, fill=int(255 * shadow_opacity))
             shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(shadow_blur))
-            
+
             canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
             dark_fill = Image.new("RGBA", (canvas_w, canvas_h), (12, 16, 24, 255))
             canvas.paste(dark_fill, (0, 0), mask=shadow_mask)
             canvas.paste(rounded_img, (shadow_margin, shadow_margin), mask=rounded_img)
-            
+
             canvas.save(file_path, format="PNG")
             print(f"[Screenshot] Applied GNOME drop-shadow to {file_path}", flush=True)
         except Exception as e:

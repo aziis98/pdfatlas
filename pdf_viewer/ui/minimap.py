@@ -1,15 +1,17 @@
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, Gdk, GLib, Adw
-import cairo
-import fitz
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 import math
 
-from ..core.document import DocumentModel
+import cairo
+from gi.repository import Adw, GLib, Gtk
+
 from ..core.cache import MiniMapCache
-from ..core.settings import CropSettings
 from ..core.crop import CropAnalyzer
+from ..core.document import DocumentModel
+from ..core.settings import CropSettings
+
 
 class MiniMap(Gtk.DrawingArea):
     """
@@ -20,8 +22,9 @@ class MiniMap(Gtk.DrawingArea):
       - Faint dashed rect showing the cropped area boundary.
       - Click navigation to jump to pages.
     """
-    THUMB_W = 90      # Thumbnail width in pixels
-    THUMB_GAP = 6     # Gap between thumbnails in pixels
+
+    THUMB_W = 90  # Thumbnail width in pixels
+    THUMB_GAP = 6  # Gap between thumbnails in pixels
 
     def __init__(self):
         super().__init__()
@@ -38,11 +41,11 @@ class MiniMap(Gtk.DrawingArea):
         self.n_cols = 1
         self.n_rows = 1
         self.in_flight = set()
-        
+
         # Set a small natural content size to allow shrinking/resizing the window down
         self.set_content_width(100)
         self.set_content_height(100)
-        
+
         # Debounce timer for resizing to avoid queueing heavy render jobs while dragging
         self.resize_timer_id = None
         self.resize_settled = True
@@ -51,7 +54,7 @@ class MiniMap(Gtk.DrawingArea):
         self.resize_cache_surface = None
 
         self.connect("destroy", self._on_destroy)
-        
+
         self.on_page_clicked = None  # Callback signature: func(page_index)
 
         # Set up draw callback and resize notifier
@@ -63,7 +66,14 @@ class MiniMap(Gtk.DrawingArea):
         self.click_gesture.connect("pressed", self._on_pressed)
         self.add_controller(self.click_gesture)
 
-    def set_document(self, doc_model: DocumentModel, cache: MiniMapCache, render_worker, crop_analyzer: CropAnalyzer, settings: CropSettings):
+    def set_document(
+        self,
+        doc_model: DocumentModel,
+        cache: MiniMapCache,
+        render_worker,
+        crop_analyzer: CropAnalyzer,
+        settings: CropSettings,
+    ):
         self.doc_model = doc_model
         self.cache = cache
         self.render_worker = render_worker
@@ -79,7 +89,7 @@ class MiniMap(Gtk.DrawingArea):
         self.last_width = 0
         self.last_height = 0
         self.resize_cache_surface = None
-        
+
         # Trigger relayout with current size allocation
         self._relayout(self.get_allocated_width(), self.get_allocated_height())
 
@@ -156,7 +166,7 @@ class MiniMap(Gtk.DrawingArea):
         self.n_cols = best_C
         self.n_rows = best_R
         self.thumb_scale = best_scale
-        
+
         # Save actual thumbnail dimensions and cell dimensions
         self.thumb_w = w_p * best_scale
         self.thumb_h = h_p * best_scale
@@ -212,7 +222,7 @@ class MiniMap(Gtk.DrawingArea):
 
         temp_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, physical_w, physical_h)
         temp_surface.set_device_scale(scale_factor, scale_factor)
-        
+
         cr = cairo.Context(temp_surface)
 
         # Background
@@ -292,7 +302,7 @@ class MiniMap(Gtk.DrawingArea):
                         crop_rect=None,  # Minimap always renders full page (uncropped)
                         is_minimap=True,
                         target_cache=self.cache,
-                        redraw_callback=lambda idx=i: self._on_thumbnail_complete(idx)
+                        redraw_callback=lambda idx=i: self._on_thumbnail_complete(idx),
                     )
 
             if i == self.current_page:
@@ -305,8 +315,8 @@ class MiniMap(Gtk.DrawingArea):
 
             # Viewport strip tracker (on all pages the viewport overlaps)
             if self.main_vadjustment:
-                main_zoom = getattr(self, 'main_zoom', 1.0)
-                main_page_gap = 12 if (self.settings and getattr(self.settings, 'page_gaps', True)) else 0
+                main_zoom = getattr(self, "main_zoom", 1.0)
+                main_page_gap = 12 if (self.settings and getattr(self.settings, "page_gaps", True)) else 0
 
                 page_canvas_y0 = 0.0
                 for j in range(i):
@@ -388,12 +398,21 @@ class MinimapWindow(Gtk.Window):
     A centered modal window containing the fitting grid Minimap.
     Clicking a page thumbnail jumps to it in the main viewer and closes this window.
     """
-    def __init__(self, parent_window, doc_model, cache, render_worker, crop_analyzer, settings, main_vadjustment, main_zoom, on_page_selected):
+
+    def __init__(
+        self,
+        parent_window,
+        doc_model,
+        cache,
+        render_worker,
+        crop_analyzer,
+        settings,
+        main_vadjustment,
+        main_zoom,
+        on_page_selected,
+    ):
         super().__init__(
-            title="Page Navigator",
-            transient_for=parent_window,
-            modal=True,
-            destroy_with_parent=True
+            title="Page Navigator", transient_for=parent_window, modal=True, destroy_with_parent=True
         )
         self.set_default_size(700, 520)
 

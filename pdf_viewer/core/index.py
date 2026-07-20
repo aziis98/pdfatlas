@@ -2,10 +2,13 @@
 SQLite/FTS5 text indexing and query logic for PDF documents.
 Caches indices in XDG cache directories indexed by PDF file hash.
 """
-import os
+
 import hashlib
+import os
 import sqlite3
+
 import fitz  # PyMuPDF
+
 
 def compute_pdf_hash(pdf_path: str) -> str:
     """Compute the SHA-256 hash of the PDF file content."""
@@ -14,6 +17,7 @@ def compute_pdf_hash(pdf_path: str) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
+
 
 def get_cache_dir() -> str:
     """Retrieve the application's XDG cache directory."""
@@ -24,10 +28,12 @@ def get_cache_dir() -> str:
     os.makedirs(app_cache_dir, exist_ok=True)
     return app_cache_dir
 
+
 def get_db_path(pdf_path: str) -> str:
     """Generate the SQLite database file path based on the PDF file's SHA-256 hash."""
     pdf_hash = compute_pdf_hash(pdf_path)
     return os.path.join(get_cache_dir(), f"{pdf_hash}_v2.db")
+
 
 def build_schema(conn: sqlite3.Connection):
     """Initialize the blocks and blocks_fts virtual tables."""
@@ -73,6 +79,7 @@ def build_schema(conn: sqlite3.Connection):
     """)
     conn.commit()
 
+
 def extract_text_to_db(pdf_path: str, conn: sqlite3.Connection) -> int:
     """Extract all text blocks from the PDF and insert them into the database."""
     doc = fitz.open(pdf_path)
@@ -85,15 +92,23 @@ def extract_text_to_db(pdf_path: str, conn: sqlite3.Connection) -> int:
                 continue
             x0, y0, x1, y1 = block["bbox"]
             text = "\n".join(
-                "".join(span["text"] for span in line["spans"])
-                for line in block["lines"]
+                "".join(span["text"] for span in line["spans"]) for line in block["lines"]
             ).strip()
             if not text:
                 continue
-            rows.append((
-                page_index + 1, block["number"],
-                x0, y0, x1, y1, x1 - x0, y1 - y0, text,
-            ))
+            rows.append(
+                (
+                    page_index + 1,
+                    block["number"],
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    x1 - x0,
+                    y1 - y0,
+                    text,
+                )
+            )
     doc.close()
     conn.executemany(
         """INSERT INTO blocks (page, block_no, x0, y0, x1, y1, width, height, text)
@@ -102,6 +117,7 @@ def extract_text_to_db(pdf_path: str, conn: sqlite3.Connection) -> int:
     )
     conn.commit()
     return len(rows)
+
 
 def get_db_for_pdf(pdf_path: str) -> sqlite3.Connection:
     """
@@ -123,15 +139,16 @@ def get_db_for_pdf(pdf_path: str) -> sqlite3.Connection:
             raise e
     return conn
 
+
 def search(conn: sqlite3.Connection, query: str, limit: int = 25) -> list[dict]:
     """Perform fuzzy FTS5 search on the document blocks. Returns ranked results."""
     if not query.strip():
         return []
-    
+
     # Sanitize: wrap query terms in quotes to form an implicit AND of quoted tokens
     terms = query.strip().split()
     safe_query = " ".join(f'"{t}"' for t in terms)
-    
+
     rows = conn.execute(
         """
         SELECT b.id, b.page, b.x0, b.y0, b.x1, b.y1, b.text
@@ -143,16 +160,7 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 25) -> list[dict]:
         """,
         (safe_query, limit),
     ).fetchall()
-    
+
     return [
-        {
-            "id": r[0],
-            "page": r[1],
-            "x0": r[2],
-            "y0": r[3],
-            "x1": r[4],
-            "y1": r[5],
-            "text": r[6]
-        }
-        for r in rows
+        {"id": r[0], "page": r[1], "x0": r[2], "y0": r[3], "x1": r[4], "y1": r[5], "text": r[6]} for r in rows
     ]
