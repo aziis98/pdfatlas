@@ -3,7 +3,7 @@
 A high-performance, modern PDF reader built with Python, GTK4, Libadwaita, Cairo, PyMuPDF, and OpenGL hardware acceleration. Key features include continuous page scrolling, dynamic auto-crop margins, a multi-column grid minimap navigator, and an integrated SQLite FTS5 search engine that presents results as cropped "portals" of matching text sections.
 
 <p align="center">
-  <img src="assets/screenshots/attention_portal_search.png" alt="PDF Atlas - Search View with Portals" width="100%" />
+  <img src="assets/screenshots/attention_hero.png" alt="PDF Atlas Reader View" width="100%" />
 </p>
 
 ---
@@ -11,25 +11,38 @@ A high-performance, modern PDF reader built with Python, GTK4, Libadwaita, Cairo
 ## Key Features
 
 ### FTS5 Search Portals
+
+<img src="assets/screenshots/attention_portal_search.png" alt="FTS Search Portals" width="55%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+
 Entering text in the headerbar instantly switches the application from Document View to Search View:
 - Excerpt results are presented as tightly cropped image strips ("portals") displaying exact visual context.
 - Cairo overlays highlight search term matches across both search portals and the continuous canvas.
 - Excerpt pinning allows users to bookmark key context snippets.
-- Clicking any search portal card smoothly transitions back to Reader Mode and scrolls directly to the match.
+- Clicking any search portal card smoothly transitions back to Reader Mode and scrolls directly to the match location.
+
+<br clear="all" />
 
 ### Continuous Reader & Gap-less Mode
-Features smooth vertical page layout using PyMuPDF with dual Cairo vector and hardware-accelerated OpenGL (`PyOpenGL`) rendering backends. Background thread workers handle rendering asynchronously to ensure continuous 60 FPS performance.
 
-<p align="center">
-  <img src="assets/screenshots/attention_reader_view.png" alt="Continuous Reader & Gapless Mode" width="85%" />
-</p>
+<img src="assets/screenshots/attention_reader_view.png" alt="Continuous Reader & Gapless Mode" width="55%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
+
+Features smooth vertical page layout using PyMuPDF with dual Cairo vector and hardware-accelerated OpenGL (`PyOpenGL`) rendering backends:
+- Asynchronous background thread workers handle rendering to keep the interface responsive at 60 FPS.
+- Seamless gap-less mode connects pages continuously without artificial visual gaps.
+- Full viewport mouse-centered smooth zooming.
+
+<br clear="all" />
 
 ### Grid Minimap Navigator
-Pressing `M` opens a multi-column grid thumbnail navigator overlay that tracks the current viewport in real time, overlays crop bounds, and allows fast grid navigation across long documents.
 
-<p align="center">
-  <img src="assets/screenshots/attention_minimap_view.png" alt="Grid Minimap Navigator" width="85%" />
-</p>
+<img src="assets/screenshots/attention_minimap_view.png" alt="Grid Minimap Navigator" width="55%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+
+Pressing `M` opens a multi-column grid thumbnail navigator overlay:
+- Displays all document page thumbnails in a wrapping multi-column grid.
+- Tracks the active viewport position in real time with translucent overlays.
+- Visualizes auto-crop boundaries across pages and allows instant grid navigation.
+
+<br clear="all" />
 
 ### Smart Auto-Crop Margins & Fast Index Caching
 - **Auto-Crop Margins (`C`):** Automatically detects page whitespace boundaries in background threads, eliminating margins to maximize font sizes on smaller screens.

@@ -1182,53 +1182,70 @@ class MainWindow(Adw.ApplicationWindow):
         print(f"[MainWindow] Taking scheduled screenshot of window to: {self.screenshot_path}", flush=True)
         try:
             self.queue_allocate()
-            
-            # Check if minimap dialog is active
-            if hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible():
-                content_widget = self.minimap_dialog
-            else:
-                content_widget = self.get_content()
-                
-            if not content_widget:
-                print("[Screenshot] Window has no content widget to snapshot", flush=True)
-                return False
-                
-            paintable = Gtk.WidgetPaintable.new(content_widget)
-            w = content_widget.get_width()
-            h = content_widget.get_height()
-            
-            rect = Graphene.Rect.alloc()
-            rect.init(0.0, 0.0, float(w), float(h))
-            
-            snapshot = Gtk.Snapshot.new()
-            
-            # Draw solid opaque white background color to eliminate alpha transparency
-            bg_color = Gdk.RGBA()
-            bg_color.parse("#ffffff")
-            snapshot.append_color(bg_color, rect)
-            
-            paintable.snapshot(snapshot, float(w), float(h))
-            node = snapshot.to_node()
-            
-            if not node:
-                print("[Screenshot] Snapshot yielded empty render node", flush=True)
-                return False
-                
             renderer = self.get_renderer()
             if not renderer:
                 print("[Screenshot] Window has no active renderer yet", flush=True)
                 return False
-                
-            rect = Graphene.Rect.alloc()
-            rect.init(0.0, 0.0, float(w), float(h))
-            
-            texture = renderer.render_texture(node, rect)
-            if texture:
-                texture.save_to_png(self.screenshot_path)
-                print(f"[Screenshot] Programmatic screenshot saved successfully.", flush=True)
-                self._apply_gnome_shadow(self.screenshot_path)
+
+            is_minimap = (
+                hasattr(self, "minimap_dialog")
+                and self.minimap_dialog
+                and self.minimap_dialog.get_visible()
+            )
+
+            if is_minimap:
+                # 1. Snapshot main window content box as base
+                base_widget = self.get_content()
+                bw = base_widget.get_width()
+                bh = base_widget.get_height()
+                b_rect = Graphene.Rect.alloc()
+                b_rect.init(0.0, 0.0, float(bw), float(bh))
+                b_snap = Gtk.Snapshot.new()
+                bg_color = Gdk.RGBA()
+                bg_color.parse("#ffffff")
+                b_snap.append_color(bg_color, b_rect)
+                Gtk.WidgetPaintable.new(base_widget).snapshot(b_snap, float(bw), float(bh))
+                b_texture = renderer.render_texture(b_snap.to_node(), b_rect)
+
+                # 2. Snapshot minimap modal window
+                modal_widget = self.minimap_dialog
+                mw = modal_widget.get_width()
+                mh = modal_widget.get_height()
+                m_rect = Graphene.Rect.alloc()
+                m_rect.init(0.0, 0.0, float(mw), float(mh))
+                m_snap = Gtk.Snapshot.new()
+                m_snap.append_color(bg_color, m_rect)
+                Gtk.WidgetPaintable.new(modal_widget).snapshot(m_snap, float(mw), float(mh))
+                m_texture = renderer.render_texture(m_snap.to_node(), m_rect)
+
+                base_path = self.screenshot_path + ".base.png"
+                modal_path = self.screenshot_path + ".modal.png"
+                b_texture.save_to_png(base_path)
+                m_texture.save_to_png(modal_path)
+                self._composite_minimap_screenshot(base_path, modal_path, self.screenshot_path)
             else:
-                print("[Screenshot] Failed to render snapshot node to texture.", flush=True)
+                content_widget = self.get_content()
+                if not content_widget:
+                    print("[Screenshot] Window has no content widget to snapshot", flush=True)
+                    return False
+
+                w = content_widget.get_width()
+                h = content_widget.get_height()
+                rect = Graphene.Rect.alloc()
+                rect.init(0.0, 0.0, float(w), float(h))
+                snapshot = Gtk.Snapshot.new()
+                bg_color = Gdk.RGBA()
+                bg_color.parse("#ffffff")
+                snapshot.append_color(bg_color, rect)
+                Gtk.WidgetPaintable.new(content_widget).snapshot(snapshot, float(w), float(h))
+
+                texture = renderer.render_texture(snapshot.to_node(), rect)
+                if texture:
+                    texture.save_to_png(self.screenshot_path)
+                    print(f"[Screenshot] Programmatic screenshot saved successfully.", flush=True)
+                    self._apply_gnome_shadow(self.screenshot_path)
+                else:
+                    print("[Screenshot] Failed to render snapshot node to texture.", flush=True)
         except Exception as e:
             print(f"[Screenshot] Error taking screenshot: {e}", flush=True)
         finally:
@@ -1236,6 +1253,61 @@ class MainWindow(Adw.ApplicationWindow):
             if hasattr(self, "app") and self.app:
                 self.app.quit()
         return False
+
+    def _composite_minimap_screenshot(self, base_path, modal_path, out_path):
+        try:
+            import os
+            from PIL import Image, ImageDraw, ImageFilter
+
+            base = Image.open(base_path).convert("RGBA")
+            modal = Image.open(modal_path).convert("RGBA")
+
+            bw, bh = base.size
+            mw, mh = modal.size
+
+            dim = Image.new("RGBA", (bw, bh), (0, 0, 0, 60))
+            base_dimmed = Image.alpha_composite(base, dim)
+
+            modal_radius = 12
+            modal_mask = Image.new("L", (mw, mh), 0)
+            draw_m = ImageDraw.Draw(modal_mask)
+            draw_m.rounded_rectangle((0, 0, mw - 1, mh - 1), radius=modal_radius, fill=255)
+
+            rounded_modal = Image.new("RGBA", (mw, mh), (0, 0, 0, 0))
+            rounded_modal.paste(modal, (0, 0), mask=modal_mask)
+
+            draw_b = ImageDraw.Draw(rounded_modal)
+            draw_b.rounded_rectangle((0, 0, mw - 1, mh - 1), radius=modal_radius, outline=(180, 180, 180, 140), width=1)
+
+            shadow_blur = 24
+            shadow_opacity = 0.40
+            offset_y = 8
+
+            shadow_mask = Image.new("L", (bw, bh), 0)
+            s_draw = ImageDraw.Draw(shadow_mask)
+
+            x0 = (bw - mw) // 2
+            y0 = (bh - mh) // 2
+
+            shadow_box = (x0, y0 + offset_y, x0 + mw - 1, y0 + offset_y + mh - 1)
+            s_draw.rounded_rectangle(shadow_box, radius=modal_radius, fill=int(255 * shadow_opacity))
+            shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(shadow_blur))
+
+            dark_fill = Image.new("RGBA", (bw, bh), (10, 10, 16, 255))
+            base_dimmed.paste(dark_fill, (0, 0), mask=shadow_mask)
+            base_dimmed.paste(rounded_modal, (x0, y0), mask=rounded_modal)
+
+            base_dimmed.save(out_path, format="PNG")
+
+            if os.path.exists(base_path):
+                os.remove(base_path)
+            if os.path.exists(modal_path):
+                os.remove(modal_path)
+
+            self._apply_gnome_shadow(out_path)
+            print(f"[Screenshot] Composited minimap window over main reader and saved to {out_path}", flush=True)
+        except Exception as e:
+            print(f"[Screenshot] Failed to composite minimap screenshot: {e}", flush=True)
 
     def _apply_gnome_shadow(self, file_path):
         try:
