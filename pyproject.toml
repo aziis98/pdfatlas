@@ -1,5 +1,5 @@
 [project]
-name = "gtk-pdfviewer"
+name = "pdfatlas"
 version = "0.1.0"
 description = "PDF Reader with Search Portals and Auto-Crop"
 readme = "README.md"
@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
+pdfatlas = "pdf_viewer.main:main"
 gtk-pdfviewer = "pdf_viewer.main:main"
 
 [build-system]

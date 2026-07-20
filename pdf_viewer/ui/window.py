@@ -458,6 +458,8 @@ class MainWindow(Adw.ApplicationWindow):
                                 self.run_search(query)
                             else:
                                 self._deferred_state_query = query
+                        if "minimap" in state and state["minimap"]:
+                            self.toggle_minimap()
                         return False
                     GLib.idle_add(apply_deferred_state)
                 except Exception as e:
