@@ -19,7 +19,7 @@ OUTPUT_DIR = REPO_ROOT / "assets" / "screenshots"
 
 # Screenshot tasks: (output_filename, pdf_path, state_json)
 TASKS = [
-    ("attention_hero.png", ATTENTION_PDF, None),
+    ("attention_hero.png", ATTENTION_PDF, {"scroll_y": 1500}),
     ("attention_portal_search.png", ATTENTION_PDF, {"query": "attention mechanism"}),
     ("attention_reader_view.png", ATTENTION_PDF, {"crop": True, "page_gaps": False, "scroll_y": 1100}),
     ("attention_minimap_view.png", CATEGORY_PDF, {"minimap": True}),

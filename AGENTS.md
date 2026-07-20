@@ -7,10 +7,12 @@ This document outlines project conventions, development workflows, and automated
 ## 1. Environment & Package Management
 
 - **Tooling:** Always use `uv` for dependency management, package execution, and environment synchronization.
+
 - **Run Commands:**
-  - `uv run pdfatlas [file.pdf]` — Run the main application.
-  - `uv run pyright` — Run static type checking.
-  - `uv run ruff check .` — Run code linting.
+    - `uv run main.py [file.pdf]` — Run the main application.
+    - `uv run pyright` — Run static type checking.
+    - `uv run ruff check .` — Run code linting.
+
 - **Imports Policy:** Dependencies listed in `pyproject.toml` (such as `numpy`, `PyOpenGL`, `PyMuPDF`, `PyGObject`) are guaranteed to be installed. **Do not use `try...except ImportError` fallback patterns** for standard project dependencies. Import them directly at top-level.
 
 ---
@@ -31,6 +33,7 @@ Ensure both commands report **0 errors**.
 ## 3. Screenshot Policy
 
 - The standalone script [`scripts/generate_screenshots.py`](file:///home/aziis98/Projects/pdfatlas/scripts/generate_screenshots.py) programmatically re-generates all README screenshots with GNOME window drop-shadows.
+
 - **Rule:** **Only run `scripts/generate_screenshots.py` if explicitly asked by the user.** Do not automatically re-generate screenshots after routine bug fixes or refactorings.
 
 ---

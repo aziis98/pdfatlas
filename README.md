@@ -134,7 +134,7 @@ To install dependencies and run locally:
 uv sync
 
 # Launch with hardware-accelerated OpenGL renderer (default)
-uv run pdfatlas [path/to/document.pdf]
+uv run main.py [path/to/document.pdf]
 
 # Launch with standard Cairo backend renderer
 uv run python main.py [path/to/document.pdf] --backend cairo
