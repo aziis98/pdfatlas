@@ -157,8 +157,9 @@ uv run python main.py [path/to/document.pdf] --state '{"query": "attention"}' --
 | `M`                     | Toggle Pages Minimap Navigator             |
 | `C`                     | Toggle Auto-crop margins                   |
 | `Page Up` / `Page Down` | Scroll by one page/viewport height         |
-| `Up` / `Down`           | Scroll step up / down                      |
-| `Escape`                | Clear/close search or close active dialogs |
+| `h` / `j` / `k` / `l`   | Vim navigation (scroll left / down / up / right) |
+| `Up` / `Down` / `Left` / `Right` | Scroll step up / down / left / right |
+| `Escape`                | Clear/exit search or close Minimap modal   |
 | `Ctrl+Q` or `q`         | Quit                                       |
 
 ---

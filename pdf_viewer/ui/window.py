@@ -101,11 +101,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.add_controller(self.shortcut_controller)
         self._setup_shortcuts()
 
+    def _is_entry_focused(self) -> bool:
+        focus = self.get_focus()
+        if focus is not None and isinstance(focus, (Gtk.Editable, Gtk.Entry, Gtk.SearchEntry)):
+            return True
+        if self.entry.has_focus() or self.page_input.has_focus():
+            return True
+        return False
+
     def _setup_shortcuts(self):
         # File operations
         self._add_shortcut("<Control>o", self._open_file_dialog)
         self._add_shortcut("<Control>q", self.close)
-        self._add_shortcut("q", self.close)
+        self._add_nav_shortcut("q", self.close)
 
         # Focus search bar
         self._add_shortcut("<Control>l", self.entry.grab_focus)
@@ -120,22 +128,43 @@ class MainWindow(Adw.ApplicationWindow):
         self._add_shortcut("KP_Subtract", self.zoom_out)
         self._add_shortcut("<Control>0", self.zoom_reset)
 
-        # Modal window triggers
-        self._add_shortcut("m", self.toggle_minimap)
-        self._add_shortcut("c", self.toggle_crop)
+        # Modal window / mode triggers
+        self._add_nav_shortcut("m", self.toggle_minimap)
+        self._add_nav_shortcut("c", self.toggle_crop)
 
-        # Scrolling
+        # Scrolling - Page and Arrow keys
         self._add_shortcut("Page_Up", lambda: self.scroll_page(forward=False))
         self._add_shortcut("Page_Down", lambda: self.scroll_page(forward=True))
         self._add_shortcut("Up", lambda: self.scroll_step(forward=False))
         self._add_shortcut("Down", lambda: self.scroll_step(forward=True))
+        self._add_shortcut("Left", lambda: self.scroll_step_h(forward=False))
+        self._add_shortcut("Right", lambda: self.scroll_step_h(forward=True))
 
-        # Close/clear search
+        # Scrolling - Vim Keys (h, j, k, l)
+        self._add_nav_shortcut("h", lambda: self.scroll_step_h(forward=False))
+        self._add_nav_shortcut("j", lambda: self.scroll_step(forward=True))
+        self._add_nav_shortcut("k", lambda: self.scroll_step(forward=False))
+        self._add_nav_shortcut("l", lambda: self.scroll_step_h(forward=True))
+
+        # Close/clear search or exit minimap
         self._add_shortcut("Escape", self._on_escape)
 
     def _add_shortcut(self, trigger_str, callback):
         trigger = Gtk.ShortcutTrigger.parse_string(trigger_str)
         action = Gtk.CallbackAction.new(lambda w, a: (callback(), True)[1])
+        shortcut = Gtk.Shortcut.new(trigger, action)
+        self.shortcut_controller.add_shortcut(shortcut)
+
+    def _add_nav_shortcut(self, trigger_str, callback):
+        trigger = Gtk.ShortcutTrigger.parse_string(trigger_str)
+
+        def _handler(w, a):
+            if self._is_entry_focused():
+                return False
+            callback()
+            return True
+
+        action = Gtk.CallbackAction.new(_handler)
         shortcut = Gtk.Shortcut.new(trigger, action)
         self.shortcut_controller.add_shortcut(shortcut)
 
@@ -742,7 +771,13 @@ class MainWindow(Adw.ApplicationWindow):
                     self.results_box.append(Gtk.Separator())
 
     def _on_escape(self):
-        """Clears the search input and returns to reader view."""
+        """Clears search input or closes minimap modal and returns focus to reader view."""
+        if hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible():
+            self.minimap_dialog.destroy()
+            self.minimap_dialog = None
+            self.canvas.grab_focus()
+            return True
+
         if self.stack.get_visible_child_name() == "search-view" or self.entry.has_focus():
             self.entry.set_text("")
             self.stack.set_visible_child_name("document-view")
@@ -883,6 +918,21 @@ class MainWindow(Adw.ApplicationWindow):
         page_size = self.vadjustment.get_page_size()
         max_y = upper - page_size
         self.vadjustment.set_value(max(lower, min(max_y, new_val)))
+
+    def scroll_step_h(self, forward: bool):
+        if not self.hadjustment:
+            return
+        val = self.hadjustment.get_value()
+        step = self.hadjustment.get_step_increment()
+        if step <= 0:
+            step = 40.0
+
+        new_val = val + step if forward else val - step
+        lower = self.hadjustment.get_lower()
+        upper = self.hadjustment.get_upper()
+        page_size = self.hadjustment.get_page_size()
+        max_x = max(lower, upper - page_size)
+        self.hadjustment.set_value(max(lower, min(max_x, new_val)))
 
     # --- Pages Minimap Window ---
 

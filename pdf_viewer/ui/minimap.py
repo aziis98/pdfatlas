@@ -430,3 +430,10 @@ class MinimapWindow(Gtk.Window):
 
         # Connect callback to scroll and close the window
         self.minimap.on_page_clicked = lambda idx: (on_page_selected(idx), self.destroy())
+
+        # Close on Escape key
+        shortcut_controller = Gtk.ShortcutController.new()
+        trigger = Gtk.ShortcutTrigger.parse_string("Escape")
+        action = Gtk.CallbackAction.new(lambda w, a: (self.destroy(), True)[1])
+        shortcut_controller.add_shortcut(Gtk.Shortcut.new(trigger, action))
+        self.add_controller(shortcut_controller)
