@@ -2,56 +2,38 @@
 
 A high-performance, modern PDF reader built with Python, GTK4, Libadwaita, Cairo, PyMuPDF, and OpenGL hardware acceleration. Key features include continuous page scrolling, dynamic auto-crop margins, a multi-column grid minimap navigator, and an integrated SQLite FTS5 search engine that presents results as cropped "portals" of matching text sections.
 
-Search indexes are cached locally in the user's XDG cache directory (`~/.cache/pdf-reader-portals/<sha256>.db`) and mapped by the document's SHA-256 hash for instant subsequent lookups.
-
----
-
 <p align="center">
-  <img src="assets/screenshots/attention_portal_search.png" alt="PDF Atlas - Search View Portals" width="95%" />
+  <img src="assets/screenshots/attention_portal_search.png" alt="PDF Atlas - Search View with Portals" width="100%" />
 </p>
-
-<p align="center">
-  <img src="assets/screenshots/attention_reader_view.png" alt="PDF Atlas - Continuous Reader View" width="48%" align="left" style="margin-right: 2%;" />
-  <img src="assets/screenshots/attention_minimap_view.png" alt="PDF Atlas - Grid Minimap View" width="48%" align="right" />
-</p>
-<br clear="all" />
 
 ---
 
 ## Key Features
 
-- **Continuous Scroll & Dual Rendering Engines:** 
-  Smooth vertical page rendering using PyMuPDF. Features both Cairo vector rendering and hardware-accelerated OpenGL (`PyOpenGL`) canvas backends. All page renders execute in a background thread pool to keep the UI at 60 FPS.
+### FTS5 Search Portals
+Entering text in the headerbar instantly switches the application from Document View to Search View:
+- Excerpt results are presented as tightly cropped image strips ("portals") displaying exact visual context.
+- Cairo overlays highlight search term matches across both search portals and the continuous canvas.
+- Excerpt pinning allows users to bookmark key context snippets.
+- Clicking any search portal card smoothly transitions back to Reader Mode and scrolls directly to the match.
 
-- **Smart Auto-Crop Margins:** 
-  Analyzes page whitespace bounds in the background and automatically crops unnecessary page margins, maximizing text zoom and readability on display screens.
-
-- **Grid Minimap Navigator:** 
-  A multi-column grid thumbnail window tracking the active viewport, displaying crop region overlays and enabling rapid grid navigation across large documents.
-
-- **FTS5 Search Portals:** 
-  Entering search text in the headerbar switches the application from Document View to Search View:
-  - Match excerpts are displayed as cropped image strips ("portals") showing exact visual context.
-  - Cairo overlays highlight query matches inside both search portals and the main canvas.
-  - Excerpt pinning lets users save key context snippets.
-  - Clicking any search result card instantly switches back to Reader Mode and smoothly scrolls to the match location.
-
-- **Cryptographic Search Caching:** 
-  FTS5 text indexes are saved to SQLite DBs in `~/.cache/pdf-reader-portals/<sha256>.db` using SHA-256 file digests, avoiding repetitive indexing runs.
-
----
-
-## Showcase
+### Continuous Reader & Gap-less Mode
+Features smooth vertical page layout using PyMuPDF with dual Cairo vector and hardware-accelerated OpenGL (`PyOpenGL`) rendering backends. Background thread workers handle rendering asynchronously to ensure continuous 60 FPS performance.
 
 <p align="center">
-  <img src="assets/screenshots/category_theory_portal_search.png" alt="Applied Category Theory Portal Search" width="95%" />
+  <img src="assets/screenshots/attention_reader_view.png" alt="Continuous Reader & Gapless Mode" width="85%" />
 </p>
 
+### Grid Minimap Navigator
+Pressing `M` opens a multi-column grid thumbnail navigator overlay that tracks the current viewport in real time, overlays crop bounds, and allows fast grid navigation across long documents.
+
 <p align="center">
-  <img src="assets/screenshots/category_theory_reader_view.png" alt="Applied Category Theory Reader View" width="48%" align="left" style="margin-right: 2%;" />
-  <img src="assets/screenshots/category_theory_minimap_view.png" alt="Applied Category Theory Minimap" width="48%" align="right" />
+  <img src="assets/screenshots/attention_minimap_view.png" alt="Grid Minimap Navigator" width="85%" />
 </p>
-<br clear="all" />
+
+### Smart Auto-Crop Margins & Fast Index Caching
+- **Auto-Crop Margins (`C`):** Automatically detects page whitespace boundaries in background threads, eliminating margins to maximize font sizes on smaller screens.
+- **Cryptographic Cache:** Search indexes are cached locally in `~/.cache/pdf-reader-portals/<sha256>.db` keyed by the document's SHA-256 digest for instant subsequent document loads.
 
 ---
 
