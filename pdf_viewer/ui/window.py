@@ -459,7 +459,7 @@ class MainWindow(Adw.ApplicationWindow):
                             else:
                                 self._deferred_state_query = query
                         if "minimap" in state and state["minimap"]:
-                            self.toggle_minimap()
+                            GLib.timeout_add(500, self.toggle_minimap)
                         return False
                     GLib.idle_add(apply_deferred_state)
                 except Exception as e:
@@ -895,6 +895,7 @@ class MainWindow(Adw.ApplicationWindow):
             on_page_selected=self._on_minimap_page_clicked
         )
         
+        self.minimap_dialog = dialog
         dialog.minimap.set_current_page(active_page)
         dialog.present()
 
@@ -1182,8 +1183,12 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             self.queue_allocate()
             
-            # Use WidgetPaintable to capture snapshot of the window content widget
-            content_widget = self.get_content()
+            # Check if minimap dialog is active
+            if hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible():
+                content_widget = self.minimap_dialog
+            else:
+                content_widget = self.get_content()
+                
             if not content_widget:
                 print("[Screenshot] Window has no content widget to snapshot", flush=True)
                 return False
@@ -1221,6 +1226,7 @@ class MainWindow(Adw.ApplicationWindow):
             if texture:
                 texture.save_to_png(self.screenshot_path)
                 print(f"[Screenshot] Programmatic screenshot saved successfully.", flush=True)
+                self._apply_gnome_shadow(self.screenshot_path)
             else:
                 print("[Screenshot] Failed to render snapshot node to texture.", flush=True)
         except Exception as e:
@@ -1230,3 +1236,51 @@ class MainWindow(Adw.ApplicationWindow):
             if hasattr(self, "app") and self.app:
                 self.app.quit()
         return False
+
+    def _apply_gnome_shadow(self, file_path):
+        try:
+            from PIL import Image, ImageDraw, ImageFilter
+            
+            img = Image.open(file_path).convert("RGBA")
+            w, h = img.size
+            
+            corner_radius = 12
+            shadow_margin = 40
+            shadow_blur = 24
+            shadow_offset_y = 10
+            shadow_opacity = 0.35
+            border_color = (180, 180, 180, 120)
+            
+            mask = Image.new("L", (w, h), 0)
+            draw = ImageDraw.Draw(mask)
+            draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=corner_radius, fill=255)
+            
+            rounded_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            rounded_img.paste(img, (0, 0), mask=mask)
+            
+            draw_border = ImageDraw.Draw(rounded_img)
+            draw_border.rounded_rectangle((0, 0, w - 1, h - 1), radius=corner_radius, outline=border_color, width=1)
+            
+            canvas_w = w + shadow_margin * 2
+            canvas_h = h + shadow_margin * 2 + shadow_offset_y
+            
+            shadow_mask = Image.new("L", (canvas_w, canvas_h), 0)
+            shadow_draw = ImageDraw.Draw(shadow_mask)
+            shadow_box = (
+                shadow_margin,
+                shadow_margin + shadow_offset_y,
+                shadow_margin + w - 1,
+                shadow_margin + shadow_offset_y + h - 1
+            )
+            shadow_draw.rounded_rectangle(shadow_box, radius=corner_radius, fill=int(255 * shadow_opacity))
+            shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(shadow_blur))
+            
+            canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+            dark_fill = Image.new("RGBA", (canvas_w, canvas_h), (12, 16, 24, 255))
+            canvas.paste(dark_fill, (0, 0), mask=shadow_mask)
+            canvas.paste(rounded_img, (shadow_margin, shadow_margin), mask=rounded_img)
+            
+            canvas.save(file_path, format="PNG")
+            print(f"[Screenshot] Applied GNOME drop-shadow to {file_path}", flush=True)
+        except Exception as e:
+            print(f"[Screenshot] Failed to apply GNOME shadow: {e}", flush=True)
