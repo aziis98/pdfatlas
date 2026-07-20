@@ -1242,7 +1242,7 @@ class MainWindow(Adw.ApplicationWindow):
                 texture = renderer.render_texture(snapshot.to_node(), rect)
                 if texture:
                     texture.save_to_png(self.screenshot_path)
-                    print(f"[Screenshot] Programmatic screenshot saved successfully.", flush=True)
+                    print("[Screenshot] Programmatic screenshot saved successfully.", flush=True)
                     self._apply_gnome_shadow(self.screenshot_path)
                 else:
                     print("[Screenshot] Failed to render snapshot node to texture.", flush=True)
