@@ -1,4 +1,5 @@
 import gi
+from typing import Any
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -33,8 +34,8 @@ class MiniMap(Gtk.DrawingArea):
         self.render_worker = None
         self.crop_analyzer = None
         self.settings = None
-        self.main_vadjustment = None
-
+        self.main_zoom = 1.0
+        self.on_page_clicked: Any = None
         self.current_page = 0
         self.thumb_h = 120  # Dynamically calculated
         self.items_per_column = 1
@@ -291,7 +292,7 @@ class MiniMap(Gtk.DrawingArea):
 
             # Queue render job if not in cache or if size is wrong (only when resize has settled)
             if (surface is None or not is_correct_size) and self.resize_settled:
-                if i not in self.in_flight:
+                if i not in self.in_flight and self.render_worker:
                     self.in_flight.add(i)
                     self.render_worker.queue_render_job(
                         priority=3,

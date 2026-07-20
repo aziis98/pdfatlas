@@ -1,11 +1,5 @@
 import fitz
-
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ImportError:
-    HAS_NUMPY = False
+import numpy as np
 
 from .document import DocumentModel
 from .settings import CropSettings
@@ -23,11 +17,11 @@ class CropAnalyzer:
         self.doc_model = doc_model
         self.page_count = doc_model.page_count
         # Cached raw content bounding box (fitz.Rect) in page coordinates, or None if blank
-        self.raw_bboxes = [None] * self.page_count
+        self.raw_bboxes: list[fitz.Rect | None] = [None] * self.page_count
         # Status of whether each page has been scanned yet
         self.scanned = [False] * self.page_count
         # Computed final crop rects for each page
-        self.crop_rects = [None] * self.page_count
+        self.crop_rects: list[fitz.Rect | None] = [None] * self.page_count
         self._doc = None
 
     def scan_page(self, page_index: int) -> fitz.Rect | None:
@@ -49,89 +43,22 @@ class CropAnalyzer:
 
         width = pix.width
         height = pix.height
-        stride = pix.stride
         n = pix.n  # Number of components (usually 3 for RGB)
 
-        bbox_pixels = None  # (min_col, min_row, max_col, max_row)
+        # Fast numpy scanning
+        arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape((height, width, n))
+        # True where pixel is not white (threshold 240)
+        non_white = (arr[:, :, 0] <= 240) | (arr[:, :, 1] <= 240) | (arr[:, :, 2] <= 240)
 
-        if HAS_NUMPY:
-            # Fast numpy scanning
-            arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape((height, width, n))
-            # True where pixel is not white (threshold 240)
-            non_white = (arr[:, :, 0] <= 240) | (arr[:, :, 1] <= 240) | (arr[:, :, 2] <= 240)
+        rows = np.any(non_white, axis=1)
+        cols = np.any(non_white, axis=0)
 
-            rows = np.any(non_white, axis=1)
-            cols = np.any(non_white, axis=0)
+        if np.any(rows) and np.any(cols):
+            min_row = int(np.where(rows)[0][0])
+            max_row = int(np.where(rows)[0][-1])
+            min_col = int(np.where(cols)[0][0])
+            max_col = int(np.where(cols)[0][-1])
 
-            if np.any(rows) and np.any(cols):
-                min_row = int(np.where(rows)[0][0])
-                max_row = int(np.where(rows)[0][-1])
-                min_col = int(np.where(cols)[0][0])
-                max_col = int(np.where(cols)[0][-1])
-                bbox_pixels = (min_col, min_row, max_col, max_row)
-        else:
-            # Fallback pure-Python scanning
-            data = pix.samples
-            min_row, max_row = None, None
-
-            # Find min_row
-            for r in range(height):
-                offset = r * stride
-                row_has_content = False
-                for c in range(width):
-                    idx = offset + c * n
-                    if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
-                        row_has_content = True
-                        break
-                if row_has_content:
-                    min_row = r
-                    break
-
-            if min_row is not None:
-                # Find max_row
-                for r in range(height - 1, min_row - 1, -1):
-                    offset = r * stride
-                    row_has_content = False
-                    for c in range(width):
-                        idx = offset + c * n
-                        if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
-                            row_has_content = True
-                            break
-                    if row_has_content:
-                        max_row = r
-                        break
-
-                # Find min_col
-                min_col = None
-                for c in range(width):
-                    col_has_content = False
-                    for r in range(min_row, max_row + 1):
-                        idx = r * stride + c * n
-                        if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
-                            col_has_content = True
-                            break
-                    if col_has_content:
-                        min_col = c
-                        break
-
-                # Find max_col
-                max_col = None
-                for c in range(width - 1, min_col - 1, -1):
-                    col_has_content = False
-                    for r in range(min_row, max_row + 1):
-                        idx = r * stride + c * n
-                        if data[idx] <= 240 or data[idx + 1] <= 240 or data[idx + 2] <= 240:
-                            col_has_content = True
-                            break
-                    if col_has_content:
-                        max_col = c
-                        break
-
-                if min_col is not None and max_col is not None:
-                    bbox_pixels = (min_col, min_row, max_col, max_row)
-
-        if bbox_pixels is not None:
-            min_col, min_row, max_col, max_row = bbox_pixels
             # Convert back to points (divide by ANALYSIS_SCALE)
             raw_box = fitz.Rect(
                 min_col / self.ANALYSIS_SCALE,
@@ -155,7 +82,7 @@ class CropAnalyzer:
             self.crop_rects = [None] * self.page_count
             return
 
-        per_page_rects = [None] * self.page_count
+        per_page_rects: list[fitz.Rect | None] = [None] * self.page_count
         is_sparse_list = [False] * self.page_count
 
         # 1. Compute per-page padded rects and identify sparse pages
@@ -205,7 +132,7 @@ class CropAnalyzer:
                 uniform_right = None
 
         # 3. Assemble final crop rectangles
-        new_crop_rects = [None] * self.page_count
+        new_crop_rects: list[fitz.Rect | None] = [None] * self.page_count
         for i in range(self.page_count):
             page_rect = self.doc_model.page_rect(i)
             per_page_rect = per_page_rects[i]
@@ -234,8 +161,9 @@ class CropAnalyzer:
                     new_crop_rects[i] = per_page_rect
 
             # Intersect with the actual page bounds to guarantee validity
-            if new_crop_rects[i] is not None:
-                new_crop_rects[i] = new_crop_rects[i].intersect(page_rect)
+            rect_to_check = new_crop_rects[i]
+            if rect_to_check is not None:
+                new_crop_rects[i] = rect_to_check.intersect(page_rect)
 
         self.crop_rects = new_crop_rects
 

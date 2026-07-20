@@ -23,3 +23,17 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pdf_viewer"]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "ruff>=0.15.22",
+]
+
+[tool.ruff.lint]
+ignore = ["E402"]
+
+[tool.pyright]
+reportMissingModuleSource = false
+
+

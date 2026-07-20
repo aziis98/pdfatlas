@@ -7,9 +7,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Graphene", "1.0")
+gi.require_version("Pango", "1.0")
 from concurrent.futures import ThreadPoolExecutor
 
-from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
 from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
@@ -24,7 +25,7 @@ from .minimap import MinimapWindow
 from .portal import ResultRow
 from .settings import SettingsWindow
 
-DEBOUNCE_MS = 300  # search-as-you-type debounce delay
+DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -185,7 +186,7 @@ class MainWindow(Adw.ApplicationWindow):
         left_box.append(self.open_btn)
 
         self.filename_label = Gtk.Label(label="No document loaded")
-        self.filename_label.set_ellipsize(3)  # End ellipsizing
+        self.filename_label.set_ellipsize(Pango.EllipsizeMode.END)  # End ellipsizing
         self.filename_label.set_max_width_chars(40)
         self.filename_label.set_xalign(0)
         self.filename_label.add_css_class("caption")
@@ -259,9 +260,11 @@ class MainWindow(Adw.ApplicationWindow):
         # Initialize CSS styling for canvas background and page margins
         self.css_provider = Gtk.CssProvider()
         self._update_theme_css()
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
+        display = Gdk.Display.get_default()
+        if display is not None:
+            Gtk.StyleContext.add_provider_for_display(
+                display, self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
 
         # Child 1: Document View Setup (always using Gtk.Overlay to overlay floating zoom controls)
         self.scrolled_window = Gtk.ScrolledWindow()
@@ -269,6 +272,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.scrolled_window.set_vexpand(True)
         self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.ALWAYS)
 
+        # Inner Canvas Container
         self.canvas = PDFCanvas()
         self.scrolled_window.set_child(self.canvas)
 
@@ -280,7 +284,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.overlay.set_vexpand(True)
 
         if self.backend == "opengl":
-            self.gl_canvas = GLCanvas(self.canvas)
+            self.gl_canvas = GLCanvas(canvas_layout_provider=self.canvas)
             self.gl_canvas.set_hexpand(True)
             self.gl_canvas.set_vexpand(True)
 
@@ -293,14 +297,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
         self.stack.add_named(self.overlay, "document-view")
 
-        # Child 2: Search View
+        # Child 2: Search View Setup
         self.search_scrolled = Gtk.ScrolledWindow()
         self.search_scrolled.set_hexpand(True)
         self.search_scrolled.set_vexpand(True)
-        self.search_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self.results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.results_box.set_hexpand(True)
+        self.results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.results_box.set_margin_top(16)
+        self.results_box.set_margin_bottom(24)
         self.search_scrolled.set_child(self.results_box)
         self.stack.add_named(self.search_scrolled, "search-view")
 
@@ -313,7 +316,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.backend = "opengl"
             self.canvas.gl_canvas = self.gl_canvas
             # Repaint the GL background layer on scroll
-            self.vadjustment.connect("value-changed", lambda adj: self.gl_canvas.queue_draw())
+            self.vadjustment.connect("value-changed", lambda adj: self.gl_canvas.queue_draw() if self.gl_canvas else None)
 
         # Connect vertical scroll adjustment to track current page
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
@@ -386,8 +389,12 @@ class MainWindow(Adw.ApplicationWindow):
 
             # Calculate display DPI scale factors based on monitor properties
             display = Gdk.Display.get_default()
-            monitors = display.get_monitors()
-            monitor = monitors.get_item(0) if (monitors and monitors.get_n_items() > 0) else None
+            monitors = display.get_monitors() if display is not None else None
+            monitor = (
+                monitors.get_item(0)
+                if (monitors is not None and monitors.get_n_items() > 0)
+                else None
+            )
 
             if monitor:
                 geom = monitor.get_geometry()
@@ -637,6 +644,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         is_grid = getattr(self.settings, "search_layout", "grid") == "grid"
 
+        pinned_grid = None
+        live_grid = None
+
         # 1. Pinned Portals Header + FlowBox/List
         if self.pinned:
             pinned_label = Gtk.Label(label="📌 Pinned Portals", xalign=0)
@@ -659,6 +669,8 @@ class MainWindow(Adw.ApplicationWindow):
                 self.results_box.append(pinned_grid)
 
             for entry in self.pinned.values():
+                if not self.doc_model:
+                    break
                 row = ResultRow(
                     self.doc_model.filepath,
                     self.executor,
@@ -668,7 +680,7 @@ class MainWindow(Adw.ApplicationWindow):
                     on_toggle_pin=self._on_toggle_pin,
                     on_row_clicked=self._on_row_clicked,
                 )
-                if is_grid:
+                if is_grid and pinned_grid is not None:
                     child_wrapper = Gtk.FlowBoxChild()
                     child_wrapper.set_child(row)
                     child_wrapper.set_halign(Gtk.Align.CENTER)
@@ -706,6 +718,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.results_box.append(live_grid)
 
         for i, result in enumerate(live_results):
+            if not self.doc_model:
+                break
             already_pinned = result["id"] in self.pinned
             row = ResultRow(
                 self.doc_model.filepath,
@@ -716,7 +730,7 @@ class MainWindow(Adw.ApplicationWindow):
                 on_toggle_pin=self._on_toggle_pin,
                 on_row_clicked=self._on_row_clicked,
             )
-            if is_grid:
+            if is_grid and live_grid is not None:
                 child_wrapper = Gtk.FlowBoxChild()
                 child_wrapper.set_child(row)
                 child_wrapper.set_halign(Gtk.Align.CENTER)
@@ -980,11 +994,11 @@ class MainWindow(Adw.ApplicationWindow):
         crop_thread.start()
 
     def _crop_analysis_worker(self):
-        if not self.doc_model:
+        if not self.doc_model or not self.crop_analyzer:
             return
         page_count = self.doc_model.page_count
         for i in range(page_count):
-            if not self.doc_model:
+            if not self.doc_model or not self.crop_analyzer:
                 return
             try:
                 self.crop_analyzer.scan_page(i)
@@ -993,13 +1007,13 @@ class MainWindow(Adw.ApplicationWindow):
                 print(f"Error scanning page {i} for crop analysis: {e}")
 
         # Compute crop rectangles once scanning completes
-        if self.doc_model:
+        if self.doc_model and self.crop_analyzer:
             self.crop_analyzer.compute_crop_rects(self.settings)
             GLib.idle_add(self._on_crop_analysis_complete)
 
     def _on_crop_page_scanned(self, page_index):
         self.crop_scanned_count += 1
-        total = self.doc_model.page_count
+        total = self.doc_model.page_count if self.doc_model else 1
         self.progress_bar.set_fraction(self.crop_scanned_count / total)
 
     def _on_crop_analysis_complete(self):
@@ -1193,9 +1207,11 @@ class MainWindow(Adw.ApplicationWindow):
                 hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible()
             )
 
-            if is_minimap:
+            if is_minimap and self.minimap_dialog and self.screenshot_path:
                 # 1. Snapshot main window content box as base
                 base_widget = self.get_content()
+                if not base_widget:
+                    return False
                 bw = base_widget.get_width()
                 bh = base_widget.get_height()
                 b_rect = Graphene.Rect.alloc()
@@ -1220,12 +1236,13 @@ class MainWindow(Adw.ApplicationWindow):
 
                 base_path = self.screenshot_path + ".base.png"
                 modal_path = self.screenshot_path + ".modal.png"
-                b_texture.save_to_png(base_path)
-                m_texture.save_to_png(modal_path)
-                self._composite_minimap_screenshot(base_path, modal_path, self.screenshot_path)
+                if b_texture and m_texture:
+                    b_texture.save_to_png(base_path)
+                    m_texture.save_to_png(modal_path)
+                    self._composite_minimap_screenshot(base_path, modal_path, self.screenshot_path)
             else:
                 content_widget = self.get_content()
-                if not content_widget:
+                if not content_widget or not self.screenshot_path:
                     print("[Screenshot] Window has no content widget to snapshot", flush=True)
                     return False
 
@@ -1240,7 +1257,7 @@ class MainWindow(Adw.ApplicationWindow):
                 Gtk.WidgetPaintable.new(content_widget).snapshot(snapshot, float(w), float(h))
 
                 texture = renderer.render_texture(snapshot.to_node(), rect)
-                if texture:
+                if texture and self.screenshot_path:
                     texture.save_to_png(self.screenshot_path)
                     print("[Screenshot] Programmatic screenshot saved successfully.", flush=True)
                     self._apply_gnome_shadow(self.screenshot_path)

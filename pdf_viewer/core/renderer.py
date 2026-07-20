@@ -7,14 +7,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 import cairo
 import fitz
+import numpy as np
 from gi.repository import GLib
-
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ImportError:
-    HAS_NUMPY = False
 
 from .settings import CropSettings
 
@@ -159,25 +153,14 @@ class RenderWorker:
                     pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=True)
 
                     # 3. Swap R and B channels for Cairo BGRA format
-                    if HAS_NUMPY:
-                        arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
-                            (pix.height, pix.width, pix.n)
-                        )
-                        bgra = arr[:, :, [2, 1, 0, 3]].copy()
-                        surface = cairo.ImageSurface.create_for_data(
-                            bgra, cairo.FORMAT_ARGB32, pix.width, pix.height, pix.width * 4
-                        )
-                        buf = bgra
-                    else:
-                        data = bytearray(pix.samples)
-                        r = data[0::4]
-                        b = data[2::4]
-                        data[0::4] = b
-                        data[2::4] = r
-                        surface = cairo.ImageSurface.create_for_data(
-                            data, cairo.FORMAT_ARGB32, pix.width, pix.height, pix.width * 4
-                        )
-                        buf = data
+                    arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
+                        (pix.height, pix.width, pix.n)
+                    )
+                    bgra = arr[:, :, [2, 1, 0, 3]].copy()
+                    surface = cairo.ImageSurface.create_for_data(
+                        bgra, cairo.FORMAT_ARGB32, pix.width, pix.height, pix.width * 4
+                    )
+                    buf = bgra
 
                     # Apply dynamic scale factor to Cairo context
                     cairo_scale = physical_zoom / zoom

@@ -6,6 +6,7 @@ Caches indices in XDG cache directories indexed by PDF file hash.
 import hashlib
 import os
 import sqlite3
+from typing import Any, Dict, List, cast
 
 import fitz  # PyMuPDF
 
@@ -86,20 +87,23 @@ def extract_text_to_db(pdf_path: str, conn: sqlite3.Connection) -> int:
     rows = []
     for page_index in range(len(doc)):
         page = doc[page_index]
-        page_dict = page.get_text("dict")
-        for block in page_dict["blocks"]:
+        page_dict = cast(Dict[str, Any], page.get_text("dict"))
+        blocks: List[Dict[str, Any]] = page_dict.get("blocks", [])
+        for block in blocks:
             if block.get("type") != 0:
                 continue
-            x0, y0, x1, y1 = block["bbox"]
+            bbox = block.get("bbox", (0.0, 0.0, 0.0, 0.0))
+            x0, y0, x1, y1 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+            lines: List[Dict[str, Any]] = block.get("lines", [])
             text = "\n".join(
-                "".join(span["text"] for span in line["spans"]) for line in block["lines"]
+                "".join(str(span.get("text", "")) for span in line.get("spans", [])) for line in lines
             ).strip()
             if not text:
                 continue
             rows.append(
                 (
                     page_index + 1,
-                    block["number"],
+                    int(block.get("number", 0)),
                     x0,
                     y0,
                     x1,

@@ -3,12 +3,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
-try:
-    from OpenGL import GL as gl
-
-    HAS_OPENGL = True
-except ImportError:
-    HAS_OPENGL = False
+from OpenGL import GL as gl
 
 
 class GLCanvas(Gtk.GLArea):
@@ -44,12 +39,6 @@ class GLCanvas(Gtk.GLArea):
         self.connect("render", self._on_render)
 
     def _on_realize(self, area):
-        if not HAS_OPENGL:
-            self.set_error(
-                GLib.Error.new_literal(GLib.quark_from_string("opengl"), 0, "PyOpenGL not installed")
-            )
-            return
-
         self.make_current()
         err = self.get_error()
         if err is not None:
@@ -131,7 +120,7 @@ class GLCanvas(Gtk.GLArea):
 
         except Exception as e:
             print(f"[GLCanvas] Shader compiler error: {e}")
-            self.set_error(GLib.Error.new_literal(GLib.quark_from_string("opengl"), 1, str(e)))
+            self.set_error(GLib.Error.new_literal(GLib.quark_from_string("opengl"), str(e), 1))
             return
 
         # 2. Setup unit quad VAO/VBO [0, 1] range
@@ -218,7 +207,7 @@ class GLCanvas(Gtk.GLArea):
         self.textures.clear()
 
     def _on_render(self, area, context):
-        if not HAS_OPENGL or self.shader_program == 0:
+        if self.shader_program == 0:
             return False
 
         # Query layout and viewport parameters from parent scrolled window

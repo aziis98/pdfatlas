@@ -1,5 +1,6 @@
 import cairo
 import gi
+from typing import Any
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -26,7 +27,7 @@ class PageContainer(Gtk.Box):
         self.h = 0.0
         self.crop_rect = None
         self.drawing_area = None
-        self.is_visible = False
+        self.page_is_visible = False
 
         self.set_valign(Gtk.Align.CENTER)
         self.set_halign(Gtk.Align.CENTER)
@@ -54,7 +55,7 @@ class PageContainer(Gtk.Box):
 
         if visible:
             if self.canvas_parent.backend == "opengl":
-                self.is_visible = True
+                self.page_is_visible = True
                 return
 
             if not self.drawing_area:
@@ -64,15 +65,15 @@ class PageContainer(Gtk.Box):
                 self.drawing_area.set_content_height(int(self.h))
                 self.drawing_area.set_draw_func(self._draw_func)
                 self.append(self.drawing_area)
-            elif not self.is_visible:
+            elif not self.page_is_visible:
                 self.drawing_area.queue_draw()
-            self.is_visible = True
+            self.page_is_visible = True
         else:
             if self.drawing_area:
                 # Unmount and release GPU textures when offscreen
                 self.remove(self.drawing_area)
                 self.drawing_area = None
-            self.is_visible = False
+            self.page_is_visible = False
 
     def _draw_func(self, drawing_area, cr, width, height):
         canvas = self.canvas_parent
@@ -185,7 +186,7 @@ class PDFCanvas(Gtk.Box):
 
         # Backend settings
         self.backend = "opengl"
-        self.gl_canvas = None
+        self.gl_canvas: Any = None
 
     def set_document(
         self,
@@ -283,7 +284,7 @@ class PDFCanvas(Gtk.Box):
         for i in range(page_count):
             page_rect = self.doc_model.page_rect(i)
             crop_rect = None
-            if self.settings.enabled and self.crop_analyzer:
+            if self.settings and self.settings.enabled and self.crop_analyzer:
                 crop_rect = self.crop_analyzer.crop_rects[i]
 
             rect = crop_rect if crop_rect is not None else page_rect
@@ -340,9 +341,9 @@ class PDFCanvas(Gtk.Box):
                         if container.crop_rect is not None
                         else None
                     )
-                    if self.cache.get(i, self.zoom, scale_factor, container.crop_rect) is None:
+                    if self.cache and self.cache.get(i, self.zoom, scale_factor, container.crop_rect) is None:
                         job_key = (i, zoom_key, scale_factor, crop_key)
-                        if job_key not in self.in_flight:
+                        if job_key not in self.in_flight and self.render_worker:
                             self.in_flight.add(job_key)
 
                             def make_cb(p_idx, zk, sf, ck):
@@ -362,7 +363,7 @@ class PDFCanvas(Gtk.Box):
                             )
 
         # 2. Queue prefetch jobs for adjacent pages
-        if first_visible is not None and last_visible is not None:
+        if first_visible is not None and last_visible is not None and self.cache and self.render_worker:
             prefetch_targets = []
             page_count = len(self.containers)
             # Priority 1: Adjacent ±1

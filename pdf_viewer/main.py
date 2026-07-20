@@ -17,7 +17,10 @@ class PDFViewerApplication(Adw.Application):
 
     def __init__(self):
         super().__init__(application_id="org.antigravity.pdfviewer", flags=Gio.ApplicationFlags.NON_UNIQUE)
-        self.filepath_to_open = None
+        self.filepath_to_open: str | None = None
+        self.backend: str = "opengl"
+        self.state: str | None = None
+        self.screenshot: str | None = None
 
     def do_activate(self):
         # Create and present the main application window

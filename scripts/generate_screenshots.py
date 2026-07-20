@@ -5,7 +5,6 @@ Saves generated screenshots with GNOME Libadwaita window decorations
 and soft ambient drop-shadows to ./assets/screenshots/
 """
 
-import os
 import sys
 import subprocess
 from pathlib import Path
