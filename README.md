@@ -2,6 +2,9 @@
 
 A high-performance, modern PDF reader built with Python, GTK4, Libadwaita, Cairo, PyMuPDF, and OpenGL hardware acceleration. Key features include continuous page scrolling, dynamic auto-crop margins, a multi-column grid minimap navigator, and an integrated SQLite FTS5 search engine that presents results as cropped "portals" of matching text sections.
 
+> [!NOTE]
+> This project was built with a _reasonable amount of AI assistance_. As a result, parts of the codebase might be a bit sloppy, but this doesn't mean that I don't care and I will try my best to manage and maintain it.
+
 <p align="center">
   <img src="assets/screenshots/attention_hero.png" alt="PDF Atlas Reader View" width="100%" />
 </p>
@@ -159,6 +162,10 @@ uv run python main.py [path/to/document.pdf] --state '{"query": "attention"}' --
 | `Ctrl+Q` or `q`         | Quit                                       |
 
 ---
+
+## Contributing
+
+Issues and _smallish_ PRs are welcome. For larger features, prefer creating an issue tagged with **enhancement** to suggest new feature ideas rather than opening a large PR directly.
 
 ## License
 
