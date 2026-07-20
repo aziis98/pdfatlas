@@ -154,11 +154,13 @@ uv run python main.py [path/to/document.pdf] --state '{"query": "attention"}' --
 | `+` / `-` / `=`         | Zoom In / Out                              |
 | `Ctrl+scroll`           | Zoom centered on cursor                    |
 | `Ctrl+0`                | Reset Zoom to 100%                         |
+| `W`                     | Fit Page Width                             |
+| `F`                     | Fit Entire Page in Viewport                |
 | `M`                     | Toggle Pages Minimap Navigator             |
 | `C`                     | Toggle Auto-crop margins                   |
-| `Page Up` / `Page Down` | Scroll by one page/viewport height         |
-| `h` / `j` / `k` / `l`   | Vim navigation (scroll left / down / up / right) |
-| `Up` / `Down` / `Left` / `Right` | Scroll step up / down / left / right |
+| `Page Up` / `Page Down` | Scroll by viewport height                  |
+| `Left` / `Right` or `h` / `l` | Scroll Back / Forward by viewport height   |
+| `Up` / `Down` or `k` / `j` | Fine step scroll Up / Down                 |
 | `Escape`                | Clear/exit search or close Minimap modal   |
 | `Ctrl+Q` or `q`         | Quit                                       |
 

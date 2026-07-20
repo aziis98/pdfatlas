@@ -1,10 +1,11 @@
 import cairo
+import fitz
 import gi
 from typing import Any
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk
+from gi.repository import Gdk, Gtk
 
 from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
@@ -54,12 +55,8 @@ class PageContainer(Gtk.Box):
         visible = (page_y1 >= y_min - buffer) and (page_y0 <= y_max + buffer)
 
         if visible:
-            if self.canvas_parent.backend == "opengl":
-                self.page_is_visible = True
-                return
-
             if not self.drawing_area:
-                # Mount the page canvas
+                # Mount the page canvas overlay
                 self.drawing_area = Gtk.DrawingArea()
                 self.drawing_area.set_content_width(int(self.w))
                 self.drawing_area.set_content_height(int(self.h))
@@ -85,71 +82,116 @@ class PageContainer(Gtk.Box):
             else None
         )
 
-        # 1. Fill page background (white)
-        cr.set_source_rgb(1.0, 1.0, 1.0)
-        cr.paint()
-
-        # 2. Retrieve surface from RenderCache
-        surface = canvas.cache.get(self.page_index, canvas.zoom, scale_factor, self.crop_rect)
-        if surface is not None:
-            cr.save()
-            cr.set_source_surface(surface, 0, 0)
+        # 1. Fill page background and surface image (Cairo backend only)
+        if canvas.backend != "opengl":
+            cr.set_source_rgb(1.0, 1.0, 1.0)
             cr.paint()
-            cr.restore()
 
-            # 3. Draw block highlights if selected
-            if canvas.highlighted_block is not None:
-                h_page_idx, h_bbox = canvas.highlighted_block
-                if h_page_idx == self.page_index:
-                    bx0, by0, bx1, by1 = h_bbox
-                    crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
-                    crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
+            surface = (
+                canvas.cache.get(self.page_index, canvas.zoom, scale_factor, self.crop_rect)
+                if canvas.cache
+                else None
+            )
+            if surface is not None:
+                cr.save()
+                cr.set_source_surface(surface, 0, 0)
+                cr.paint()
+                cr.restore()
+            else:
+                # Loading placeholder
+                cr.save()
+                cr.set_source_rgb(0.95, 0.95, 0.95)
+                cr.paint()
+                cr.set_source_rgb(0.5, 0.5, 0.5)
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+                cr.set_font_size(14)
+                cr.move_to(width / 2 - 50, height / 2)
+                cr.show_text(f"Loading Page {self.page_index + 1}...")
+                cr.restore()
 
-                    cr.save()
-                    cr.set_source_rgba(1.0, 0.85, 0.0, 0.3)
-                    px0 = (bx0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
-                    py0 = (by0 - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
-                    pw = (bx1 - bx0) * canvas.zoom * canvas.dpi_scale_factor
-                    ph = (by1 - by0) * canvas.zoom * canvas.dpi_scale_factor
-                    cr.rectangle(px0, py0, pw, ph)
+                job_key = (self.page_index, zoom_key, scale_factor, crop_key)
+                if job_key not in canvas.in_flight and canvas.render_worker and canvas.cache:
+                    canvas.in_flight.add(job_key)
+
+                    def make_cb(idx, zk, sf, ck):
+                        return lambda: canvas._on_render_complete(idx, zk, sf, ck)
+
+                    canvas.render_worker.queue_render_job(
+                        priority=0,
+                        doc_model=canvas.doc_model,
+                        page_index=self.page_index,
+                        zoom=canvas.zoom * canvas.dpi_scale_factor,
+                        scale_factor=scale_factor,
+                        crop_rect=self.crop_rect,
+                        is_minimap=False,
+                        target_cache=canvas.cache,
+                        redraw_callback=make_cb(self.page_index, zoom_key, scale_factor, crop_key),
+                        screen_physical_dpi=canvas.screen_physical_dpi,
+                    )
+
+        # 2. Block Highlights (Search matches)
+        if canvas.highlighted_block is not None:
+            h_page_idx, h_bbox = canvas.highlighted_block
+            if h_page_idx == self.page_index:
+                bx0, by0, bx1, by1 = h_bbox
+                crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
+                crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
+
+                cr.save()
+                cr.set_source_rgba(1.0, 0.85, 0.0, 0.35)
+                px0 = (bx0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
+                py0 = (by0 - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
+                pw = (bx1 - bx0) * canvas.zoom * canvas.dpi_scale_factor
+                ph = (by1 - by0) * canvas.zoom * canvas.dpi_scale_factor
+                cr.rectangle(px0, py0, pw, ph)
+                cr.fill_preserve()
+
+                cr.set_source_rgba(0.85, 0.1, 0.1, 0.9)
+                cr.set_line_width(2.5)
+                cr.stroke()
+                cr.restore()
+
+        # 3. Interactive PDF Link Stroke Outlines (TOC, internal jumps, external URLs)
+        if canvas.doc_model:
+            links = canvas.doc_model.get_page_links(self.page_index)
+            crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
+            crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
+
+            for link in links:
+                from_rect = link.get("from")
+                if not from_rect:
+                    continue
+                lx0 = (from_rect.x0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
+                ly0 = (from_rect.y0 - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
+                lw = (from_rect.x1 - from_rect.x0) * canvas.zoom * canvas.dpi_scale_factor
+                lh = (from_rect.y1 - from_rect.y0) * canvas.zoom * canvas.dpi_scale_factor
+
+                is_hovered = (
+                    canvas.hovered_link is not None
+                    and canvas.hovered_link[0] == self.page_index
+                    and canvas.hovered_link[1] is link
+                )
+
+                cr.save()
+                is_uri = link.get("kind") == fitz.LINK_URI
+
+                if is_hovered:
+                    if is_uri:
+                        cr.set_source_rgba(0.18, 0.76, 0.49, 0.30)
+                    else:
+                        cr.set_source_rgba(0.20, 0.52, 0.90, 0.30)
+                    cr.rectangle(lx0, ly0, lw, lh)
                     cr.fill_preserve()
 
-                    cr.set_source_rgba(0.85, 0.1, 0.1, 0.9)
-                    cr.set_line_width(2.5)
-                    cr.stroke()
-                    cr.restore()
-        else:
-            # 4. Draw loading placeholder
-            cr.save()
-            cr.set_source_rgb(0.95, 0.95, 0.95)
-            cr.paint()
-            cr.set_source_rgb(0.5, 0.5, 0.5)
-            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-            cr.set_font_size(14)
-            cr.move_to(width / 2 - 50, height / 2)
-            cr.show_text(f"Loading Page {self.page_index + 1}...")
-            cr.restore()
+                if is_uri:
+                    cr.set_source_rgba(0.18, 0.76, 0.49, 0.85)  # Libadwaita Green outline
+                else:
+                    cr.set_source_rgba(0.20, 0.52, 0.90, 0.85)  # Libadwaita Blue outline
 
-            # Push render job
-            job_key = (self.page_index, zoom_key, scale_factor, crop_key)
-            if job_key not in canvas.in_flight:
-                canvas.in_flight.add(job_key)
-
-                def make_cb(idx, zk, sf, ck):
-                    return lambda: canvas._on_render_complete(idx, zk, sf, ck)
-
-                canvas.render_worker.queue_render_job(
-                    priority=0,
-                    doc_model=canvas.doc_model,
-                    page_index=self.page_index,
-                    zoom=canvas.zoom * canvas.dpi_scale_factor,
-                    scale_factor=scale_factor,
-                    crop_rect=self.crop_rect,
-                    is_minimap=False,
-                    target_cache=canvas.cache,
-                    redraw_callback=make_cb(self.page_index, zoom_key, scale_factor, crop_key),
-                    screen_physical_dpi=canvas.screen_physical_dpi,
-                )
+                cr.set_line_width(1.8)
+                cr.rectangle(lx0, ly0, lw, lh)
+                cr.stroke()
+                cr.restore()
 
 
 class PDFCanvas(Gtk.Box):
@@ -180,6 +222,11 @@ class PDFCanvas(Gtk.Box):
         self.page_layout = []
         self.vadjustment = None
 
+        # Interactive link state
+        self.hovered_link: tuple[int, dict] | None = None
+        self.on_link_clicked: Any = None
+        self.on_link_hovered: Any = None
+
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
         self.screen_physical_dpi = 192.0
@@ -187,6 +234,91 @@ class PDFCanvas(Gtk.Box):
         # Backend settings
         self.backend = "opengl"
         self.gl_canvas: Any = None
+
+        self._setup_link_controllers()
+
+    def _setup_link_controllers(self):
+        motion_controller = Gtk.EventControllerMotion.new()
+        motion_controller.connect("motion", self._on_motion)
+        motion_controller.connect("leave", self._on_leave)
+        self.add_controller(motion_controller)
+
+        click_gesture = Gtk.GestureClick.new()
+        click_gesture.set_button(1)
+        click_gesture.connect("pressed", self._on_click)
+        self.add_controller(click_gesture)
+
+    def _hit_test_link(self, x: float, y: float) -> tuple[int, dict] | None:
+        if not self.doc_model or not self.containers:
+            return None
+
+        scale = self.zoom * self.dpi_scale_factor
+        canvas_w = float(self.get_width())
+
+        for container in self.containers:
+            alloc = container.get_allocation()
+            if alloc.width > 0 and alloc.height > 0:
+                page_x0 = float(alloc.x)
+                page_y0 = float(alloc.y)
+                page_x1 = page_x0 + float(alloc.width)
+                page_y1 = page_y0 + float(alloc.height)
+            else:
+                page_x0 = max(0.0, (canvas_w - container.w) / 2) if canvas_w > container.w else 0.0
+                page_y0 = container.y_offset
+                page_x1 = page_x0 + container.w
+                page_y1 = page_y0 + container.h
+
+            if page_x0 <= x <= page_x1 and page_y0 <= y <= page_y1:
+                rel_x = x - page_x0
+                rel_y = y - page_y0
+
+                crop_off_x = container.crop_rect.x0 if container.crop_rect is not None else 0.0
+                crop_off_y = container.crop_rect.y0 if container.crop_rect is not None else 0.0
+
+                pt_x = (rel_x / scale) + crop_off_x
+                pt_y = (rel_y / scale) + crop_off_y
+
+                links = self.doc_model.get_page_links(container.page_index)
+                for link in links:
+                    from_rect = link.get("from")
+                    if from_rect and (from_rect.x0 <= pt_x <= from_rect.x1 and from_rect.y0 <= pt_y <= from_rect.y1):
+                        return (container.page_index, link)
+                break
+        return None
+
+    def queue_draw_overlays(self):
+        for c in self.containers:
+            if c.drawing_area:
+                c.drawing_area.queue_draw()
+
+    def _on_motion(self, controller, x, y):
+        hit = self._hit_test_link(x, y)
+        if hit != self.hovered_link:
+            self.hovered_link = hit
+            cursor_name = "pointer" if hit is not None else "default"
+            self.set_cursor(Gdk.Cursor.new_from_name(cursor_name))
+            self.queue_draw_overlays()
+            if self.on_link_hovered:
+                if hit is not None:
+                    self.on_link_hovered(hit[0], hit[1])
+                else:
+                    self.on_link_hovered(None, None)
+
+    def _on_leave(self, controller):
+        if self.hovered_link is not None:
+            self.hovered_link = None
+            self.set_cursor(Gdk.Cursor.new_from_name("default"))
+            self.queue_draw_overlays()
+            if self.on_link_hovered:
+                self.on_link_hovered(None, None)
+
+    def _on_click(self, gesture, n_press, x, y):
+        if n_press == 1:
+            hit = self._hit_test_link(x, y)
+            if hit is not None:
+                page_idx, link = hit
+                if self.on_link_clicked:
+                    self.on_link_clicked(page_idx, link)
 
     def set_document(
         self,

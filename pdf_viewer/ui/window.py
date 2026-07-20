@@ -38,7 +38,7 @@ class MainWindow(Adw.ApplicationWindow):
       - Click-to-navigate search portal coordinates mapping.
     """
 
-    def __init__(self, app, backend="opengl", state=None, screenshot_path=None):
+    def __init__(self, app, backend="opengl", state=None, screenshot_path=None, follow_link=None):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
@@ -46,6 +46,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_default_size(900, 700)
         self.initial_state = state
         self.screenshot_path = screenshot_path
+        self.follow_link = follow_link
         self._deferred_state_query = None
 
         if self.screenshot_path:
@@ -128,23 +129,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._add_shortcut("KP_Subtract", self.zoom_out)
         self._add_shortcut("<Control>0", self.zoom_reset)
 
-        # Modal window / mode triggers
+        # Modal window / mode / zoom fitting triggers
         self._add_nav_shortcut("m", self.toggle_minimap)
         self._add_nav_shortcut("c", self.toggle_crop)
+        self._add_nav_shortcut("w", self.zoom_fit_width)
+        self._add_nav_shortcut("f", self.zoom_fit_page)
 
         # Scrolling - Page and Arrow keys
         self._add_shortcut("Page_Up", lambda: self.scroll_page(forward=False))
         self._add_shortcut("Page_Down", lambda: self.scroll_page(forward=True))
         self._add_shortcut("Up", lambda: self.scroll_step(forward=False))
         self._add_shortcut("Down", lambda: self.scroll_step(forward=True))
-        self._add_shortcut("Left", lambda: self.scroll_step_h(forward=False))
-        self._add_shortcut("Right", lambda: self.scroll_step_h(forward=True))
+        self._add_shortcut("Left", lambda: self.scroll_page(forward=False))
+        self._add_shortcut("Right", lambda: self.scroll_page(forward=True))
 
-        # Scrolling - Vim Keys (h, j, k, l)
-        self._add_nav_shortcut("h", lambda: self.scroll_step_h(forward=False))
+        # Scrolling - Vim Keys (h & l: viewport height; j & k: step scroll)
+        self._add_nav_shortcut("h", lambda: self.scroll_page(forward=False))
         self._add_nav_shortcut("j", lambda: self.scroll_step(forward=True))
         self._add_nav_shortcut("k", lambda: self.scroll_step(forward=False))
-        self._add_nav_shortcut("l", lambda: self.scroll_step_h(forward=True))
+        self._add_nav_shortcut("l", lambda: self.scroll_page(forward=True))
 
         # Close/clear search or exit minimap
         self._add_shortcut("Escape", self._on_escape)
@@ -303,10 +306,13 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Inner Canvas Container
         self.canvas = PDFCanvas()
+        self.canvas.on_link_clicked = self._on_link_clicked
+        self.canvas.on_link_hovered = self._on_link_hovered
         self.scrolled_window.set_child(self.canvas)
 
-        # Build floating zoom controls box
+        # Build floating zoom controls box and link preview box
         self._build_floating_zoom_controls()
+        self._build_floating_link_preview()
 
         self.overlay = Gtk.Overlay()
         self.overlay.set_hexpand(True)
@@ -324,6 +330,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.overlay.set_child(self.scrolled_window)  # base layer (Cairo scroll container)
 
         self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
+        self.overlay.add_overlay(self.link_preview_box)  # top layer (Floating link preview label)
         self.stack.add_named(self.overlay, "document-view")
 
         # Child 2: Search View Setup
@@ -505,6 +512,10 @@ class MainWindow(Adw.ApplicationWindow):
                     GLib.idle_add(apply_deferred_state)
                 except Exception as e:
                     print(f"[MainWindow] Error restoring programmatic state: {e}", flush=True)
+
+            if self.follow_link is not None:
+                follow_idx: int = self.follow_link
+                GLib.timeout_add(400, lambda: self._follow_link_by_index(follow_idx))
 
         except Exception as e:
             self._show_error_dialog(f"Failed to open PDF document:\n{e}")
@@ -934,6 +945,98 @@ class MainWindow(Adw.ApplicationWindow):
         max_x = max(lower, upper - page_size)
         self.hadjustment.set_value(max(lower, min(max_x, new_val)))
 
+    def get_current_page_index(self) -> int:
+        if not self.doc_model or not self.canvas.page_layout:
+            return 0
+
+        y_val = self.vadjustment.get_value()
+        viewport_h = self.vadjustment.get_page_size()
+        y_center = y_val + (viewport_h / 2.0)
+
+        for i, layout in enumerate(self.canvas.page_layout):
+            y_offset, dw, dh, crop_rect = layout
+            page_y0 = y_offset
+            page_y1 = y_offset + dh + self.canvas.page_gap
+            if page_y0 <= y_center <= page_y1:
+                return i
+        return 0
+
+    def jump_to_page(self, page_index: int):
+        if not self.doc_model or not self.canvas.page_layout:
+            return
+        if page_index < 0 or page_index >= self.doc_model.page_count:
+            return
+
+        y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_index]
+        viewport_h = self.vadjustment.get_page_size()
+        target_y = (y_offset + self.canvas.page_gap + dh / 2.0) - (viewport_h / 2.0)
+
+        lower = self.vadjustment.get_lower()
+        upper = self.vadjustment.get_upper()
+        max_y = max(lower, upper - viewport_h)
+        self.vadjustment.set_value(max(lower, min(max_y, target_y)))
+
+    def page_step(self, forward: bool):
+        current_idx = self.get_current_page_index()
+        target_idx = current_idx + 1 if forward else current_idx - 1
+        self.jump_to_page(target_idx)
+
+    def _on_link_clicked(self, page_index: int, link: dict):
+        if not self.doc_model:
+            return
+
+        target_page = link.get("page")
+        uri = link.get("uri")
+
+        if target_page is not None and isinstance(target_page, int) and 0 <= target_page < self.doc_model.page_count:
+            target_rect = self.doc_model.page_rect(target_page)
+            to_point = link.get("to")
+
+            if to_point and to_point.y > 0.0:
+                # Convert PDF bottom-up Y coordinate to top-down page Y coordinate
+                y_offset_in_page = max(0.0, target_rect.height - to_point.y)
+            else:
+                y_offset_in_page = 0.0
+
+            if target_page < len(self.canvas.page_layout):
+                y_offset, dw, dh, crop_rect = self.canvas.page_layout[target_page]
+                crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+                pt_y = max(0.0, y_offset_in_page - crop_off_y)
+                scaled_y = pt_y * self.zoom * self.canvas.dpi_scale_factor
+
+                # Center target position in viewport vertically
+                viewport_h = self.vadjustment.get_page_size()
+                target_v_val = (y_offset + self.canvas.page_gap + scaled_y) - (viewport_h / 2)
+
+                lower = self.vadjustment.get_lower()
+                upper = self.vadjustment.get_upper()
+                max_y = max(lower, upper - viewport_h)
+                self.vadjustment.set_value(max(lower, min(max_y, target_v_val)))
+        elif uri:
+            try:
+                Gtk.show_uri(self, uri, Gdk.CURRENT_TIME)
+            except Exception as e:
+                print(f"[MainWindow] Error launching URI {uri}: {e}", flush=True)
+
+    def _follow_link_by_index(self, link_index: int) -> bool:
+        if not self.doc_model:
+            return False
+
+        current_count = 0
+        for page_idx in range(self.doc_model.page_count):
+            links = self.doc_model.get_page_links(page_idx)
+            for link in links:
+                if current_count == link_index:
+                    print(
+                        f"[MainWindow] Following link #{link_index} on page {page_idx + 1}: {link}",
+                        flush=True,
+                    )
+                    self._on_link_clicked(page_idx, link)
+                    return False
+                current_count += 1
+        print(f"[MainWindow] Link #{link_index} not found (total links: {current_count})", flush=True)
+        return False
+
     # --- Pages Minimap Window ---
 
     def toggle_minimap(self):
@@ -1124,6 +1227,15 @@ class MainWindow(Adw.ApplicationWindow):
                 padding: 0;
                 margin: 0;
             }
+            .link-preview-box {
+                background-color: rgba(30, 30, 30, 0.88);
+                color: #ffffff;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 500;
+                box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
+            }
         """
 
         if self.backend == "opengl":
@@ -1134,7 +1246,9 @@ class MainWindow(Adw.ApplicationWindow):
                 }}
                 .page-container {{
                     background-color: transparent;
-                    border: {"1px dashed rgba(0, 0, 0, 0.08)" if gap_size > 0 else "none"};
+                    border: none;
+                    margin: 0;
+                    padding: 0;
                     box-shadow: none;
                 }}
                 scrolledwindow, viewport {{
@@ -1180,6 +1294,37 @@ class MainWindow(Adw.ApplicationWindow):
         self.zoom_out_btn.set_tooltip_text("Zoom Out")
         self.zoom_out_btn.connect("clicked", lambda b: self.zoom_out())
         self.zoom_floating_box.append(self.zoom_out_btn)
+
+    def _build_floating_link_preview(self):
+        self.link_preview_label = Gtk.Label()
+        self.link_preview_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.link_preview_label.set_max_width_chars(65)
+
+        self.link_preview_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.link_preview_box.add_css_class("link-preview-box")
+        self.link_preview_box.set_halign(Gtk.Align.START)
+        self.link_preview_box.set_valign(Gtk.Align.END)
+        self.link_preview_box.set_margin_start(8)
+        self.link_preview_box.set_margin_bottom(8)
+        self.link_preview_box.append(self.link_preview_label)
+        self.link_preview_box.set_visible(False)
+
+    def _on_link_hovered(self, page_index: int | None, link: dict | None):
+        if not link or not self.doc_model:
+            self.link_preview_box.set_visible(False)
+            return
+
+        uri = link.get("uri")
+        target_page = link.get("page")
+
+        if uri:
+            self.link_preview_label.set_text(uri)
+            self.link_preview_box.set_visible(True)
+        elif target_page is not None and isinstance(target_page, int) and 0 <= target_page < self.doc_model.page_count:
+            self.link_preview_label.set_text(f"Jump to Page {target_page + 1}")
+            self.link_preview_box.set_visible(True)
+        else:
+            self.link_preview_box.set_visible(False)
 
     def _on_page_input_activate(self, entry):
         if not self.doc_model or not self.canvas.page_layout:

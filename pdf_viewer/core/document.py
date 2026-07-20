@@ -12,10 +12,25 @@ class DocumentModel:
         self._page_count = len(self.doc)
         # Pre-cache page rectangles to avoid retrieving them repeatedly
         self._page_rects = [self.doc[i].rect for i in range(self._page_count)]
+        self._page_links: list[list[dict] | None] = [None] * self._page_count
 
     @property
     def page_count(self) -> int:
         return self._page_count
+
+    def get_page_links(self, index: int) -> list[dict]:
+        """
+        Retrieve list of link dictionaries for a page.
+        Cached per page to avoid repeatedly parsing link annotations.
+        """
+        if 0 <= index < self._page_count:
+            if self._page_links[index] is None:
+                try:
+                    self._page_links[index] = self.doc[index].get_links()
+                except Exception:
+                    self._page_links[index] = []
+            return self._page_links[index] or []
+        return []
 
     def get_page(self, index: int) -> fitz.Page:
         """
