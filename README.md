@@ -53,7 +53,7 @@ Pressing `M` opens a multi-column grid thumbnail navigator overlay:
 ### Smart Auto-Crop Margins & Fast Index Caching
 
 - **Auto-Crop Margins (`C`):** Automatically detects page whitespace boundaries in background threads, eliminating margins to maximize font sizes on smaller screens.
-- **Cryptographic Cache:** Search indexes are cached locally in `~/.cache/pdf-reader-portals/<sha256>.db` keyed by the document's SHA-256 digest for instant subsequent document loads.
+- **Cryptographic Cache:** Search indexes are cached locally in `~/.cache/pdfatlas/<sha256>.db` keyed by the document's SHA-256 digest for instant subsequent document loads.
 
 ---
 

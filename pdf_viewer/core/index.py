@@ -25,7 +25,7 @@ def get_cache_dir() -> str:
     cache_base = os.environ.get("XDG_CACHE_HOME")
     if not cache_base:
         cache_base = os.path.expanduser("~/.cache")
-    app_cache_dir = os.path.join(cache_base, "pdf-reader-portals")
+    app_cache_dir = os.path.join(cache_base, "pdfatlas")
     os.makedirs(app_cache_dir, exist_ok=True)
     return app_cache_dir
 
