@@ -10,11 +10,12 @@ A high-performance, modern PDF reader built with Python, GTK4, Libadwaita, Cairo
 
 ## Key Features
 
+<img src="assets/screenshots/attention_portal_search.png" alt="FTS Search Portals" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+
 ### FTS5 Search Portals
 
-<img src="assets/screenshots/attention_portal_search.png" alt="FTS Search Portals" width="55%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
-
 Entering text in the headerbar instantly switches the application from Document View to Search View:
+
 - Excerpt results are presented as tightly cropped image strips ("portals") displaying exact visual context.
 - Cairo overlays highlight search term matches across both search portals and the continuous canvas.
 - Excerpt pinning allows users to bookmark key context snippets.
@@ -22,22 +23,24 @@ Entering text in the headerbar instantly switches the application from Document 
 
 <br clear="all" />
 
+<img src="assets/screenshots/attention_reader_view.png" alt="Continuous Reader & Gapless Mode" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
+
 ### Continuous Reader & Gap-less Mode
 
-<img src="assets/screenshots/attention_reader_view.png" alt="Continuous Reader & Gapless Mode" width="55%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
-
 Features smooth vertical page layout using PyMuPDF with dual Cairo vector and hardware-accelerated OpenGL (`PyOpenGL`) rendering backends:
+
 - Asynchronous background thread workers handle rendering to keep the interface responsive at 60 FPS.
 - Seamless gap-less mode connects pages continuously without artificial visual gaps.
 - Full viewport mouse-centered smooth zooming.
 
 <br clear="all" />
 
+<img src="assets/screenshots/attention_minimap_view.png" alt="Grid Minimap Navigator" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+
 ### Grid Minimap Navigator
 
-<img src="assets/screenshots/attention_minimap_view.png" alt="Grid Minimap Navigator" width="55%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
-
 Pressing `M` opens a multi-column grid thumbnail navigator overlay:
+
 - Displays all document page thumbnails in a wrapping multi-column grid.
 - Tracks the active viewport position in real time with translucent overlays.
 - Visualizes auto-crop boundaries across pages and allows instant grid navigation.
@@ -45,6 +48,7 @@ Pressing `M` opens a multi-column grid thumbnail navigator overlay:
 <br clear="all" />
 
 ### Smart Auto-Crop Margins & Fast Index Caching
+
 - **Auto-Crop Margins (`C`):** Automatically detects page whitespace boundaries in background threads, eliminating margins to maximize font sizes on smaller screens.
 - **Cryptographic Cache:** Search indexes are cached locally in `~/.cache/pdf-reader-portals/<sha256>.db` keyed by the document's SHA-256 digest for instant subsequent document loads.
 
