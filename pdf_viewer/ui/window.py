@@ -176,7 +176,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Left: Open Button & Filename Label
         left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        left_box.set_margin_start(12)
         
         self.open_btn = Gtk.Button()
         self.open_btn.set_icon_name("document-open-symbolic")
