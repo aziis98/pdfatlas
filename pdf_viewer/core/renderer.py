@@ -198,8 +198,61 @@ class RenderWorker:
                         if completion_callback:
                             GLib.idle_add(completion_callback)
 
+                elif job_type == "portal":
+                    doc_model, page_index, target_y, zoom, scale_factor, target_cache, completion_callback = args
+
+                    page = doc_model.get_page(page_index)
+                    page_rect = page.rect
+
+                    physical_zoom = zoom * scale_factor
+                    crop_h = 110.0 / zoom if zoom > 0 else 110.0
+                    crop_y0 = max(0.0, target_y - (crop_h / 2.0))
+                    crop_y1 = min(page_rect.height, crop_y0 + crop_h)
+                    crop_rect = fitz.Rect(0.0, crop_y0, page_rect.width, crop_y1)
+
+                    mat = fitz.Matrix(physical_zoom, physical_zoom)
+                    pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=True)
+
+                    arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
+                        (pix.height, pix.width, pix.n)
+                    )
+                    bgra = arr[:, :, [2, 1, 0, 3]].copy()
+                    surface = cairo.ImageSurface.create_for_data(
+                        bgra, cairo.FORMAT_ARGB32, pix.width, pix.height, pix.width * 4
+                    )
+                    buf = bgra
+                    surface.set_device_scale(scale_factor, scale_factor)
+
+                    target_cache.set(page_index, target_y, surface, buf)
+                    GLib.idle_add(completion_callback, page_index, target_y, surface)
+
             except Exception as e:
                 # Prevent background thread from dying if a page rendering fails (e.g. document closed)
                 print(f"Error in RenderWorker thread: {e}")
             finally:
                 self.queue.task_done()
+
+    def queue_portal_job(
+        self,
+        doc_model,
+        page_index: int,
+        target_y: float,
+        zoom: float,
+        scale_factor: int,
+        target_cache,
+        completion_callback,
+    ):
+        """
+        Pushes a portal crop rendering job to the queue.
+        """
+        with self.lock:
+            self.counter += 1
+            cnt = self.counter
+        self.queue.put(
+            (
+                2,
+                cnt,
+                "portal",
+                (doc_model, page_index, target_y, zoom, scale_factor, target_cache, completion_callback),
+            )
+        )

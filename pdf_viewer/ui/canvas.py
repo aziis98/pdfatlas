@@ -221,6 +221,7 @@ class PDFCanvas(Gtk.Box):
         self.in_flight = set()
         self.page_layout = []
         self.vadjustment = None
+        self.hadjustment = None
 
         # Interactive link state
         self.hovered_link: tuple[int, dict] | None = None
@@ -284,6 +285,53 @@ class PDFCanvas(Gtk.Box):
                     if from_rect and (from_rect.x0 <= pt_x <= from_rect.x1 and from_rect.y0 <= pt_y <= from_rect.y1):
                         return (container.page_index, link)
                 break
+        return None
+
+    def get_link_screen_rect(
+        self, page_index: int, link: dict, overlay_widget: Any = None
+    ) -> tuple[float, float, float, float] | None:
+        from_rect = link.get("from")
+        if not from_rect or not self.containers:
+            return None
+
+        scale = self.zoom * self.dpi_scale_factor
+        canvas_w = float(self.get_width())
+
+        for container in self.containers:
+            if container.page_index == page_index:
+                page_x0 = 0.0
+                page_y0 = 0.0
+                translated = False
+
+                if overlay_widget:
+                    res = container.translate_coordinates(overlay_widget, 0.0, 0.0)
+                    if res is not None:
+                        page_x0, page_y0 = float(res[0]), float(res[1])
+                        translated = True
+
+                if not translated:
+                    alloc = container.get_allocation()
+                    if alloc.width > 0 and alloc.height > 0:
+                        page_x0 = float(alloc.x)
+                        page_y0 = float(alloc.y)
+                    else:
+                        page_x0 = max(0.0, (canvas_w - container.w) / 2) if canvas_w > container.w else 0.0
+                        page_y0 = container.y_offset
+
+                    if self.vadjustment:
+                        page_y0 -= self.vadjustment.get_value()
+                    if self.hadjustment:
+                        page_x0 -= self.hadjustment.get_value()
+
+                crop_off_x = container.crop_rect.x0 if container.crop_rect is not None else 0.0
+                crop_off_y = container.crop_rect.y0 if container.crop_rect is not None else 0.0
+
+                link_screen_x0 = page_x0 + (from_rect.x0 - crop_off_x) * scale
+                link_screen_y0 = page_y0 + (from_rect.y0 - crop_off_y) * scale
+                link_screen_w = (from_rect.x1 - from_rect.x0) * scale
+                link_screen_h = (from_rect.y1 - from_rect.y0) * scale
+
+                return (link_screen_x0, link_screen_y0, link_screen_w, link_screen_h)
         return None
 
     def queue_draw_overlays(self):

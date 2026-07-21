@@ -73,3 +73,33 @@ class MiniMapCache:
 
     def clear(self):
         self.cache.clear()
+
+
+class LinkPortalCache:
+    """
+    LRU cache for cropped portal preview surfaces rendered for hovered PDF links.
+    Key: (page_index, target_y_rounded)
+    Value: tuple (cairo.ImageSurface, data_buffer)
+    """
+
+    def __init__(self, max_size: int = 50):
+        self.max_size = max_size
+        self.cache: OrderedDict[tuple[int, float], tuple[cairo.ImageSurface, object]] = OrderedDict()
+
+    def get(self, page_index: int, target_y: float) -> cairo.ImageSurface | None:
+        key = (page_index, round(target_y, 1))
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key][0]
+        return None
+
+    def set(self, page_index: int, target_y: float, surface: cairo.ImageSurface, data_buffer: object):
+        key = (page_index, round(target_y, 1))
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        self.cache[key] = (surface, data_buffer)
+        if len(self.cache) > self.max_size:
+            self.cache.popitem(last=False)
+
+    def clear(self):
+        self.cache.clear()

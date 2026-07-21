@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
-from ..core.cache import MiniMapCache, RenderCache
+from ..core.cache import LinkPortalCache, MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
 from ..core.index import get_db_for_pdf
@@ -23,6 +23,7 @@ from .canvas import PDFCanvas
 from .gl_canvas import GLCanvas
 from .minimap import MinimapWindow
 from .portal import ResultRow
+from .portal_preview import LinkPortalPreviewCard
 from .settings import SettingsWindow
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
@@ -63,6 +64,8 @@ class MainWindow(Adw.ApplicationWindow):
         # LRU Caches and background thread pool for canvas rendering
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
+        self.portal_cache = LinkPortalCache(50)
+        self._portal_debounce_id = None
         self.render_worker = RenderWorker()
 
         # Thread pool for search indexing & result portal rendering
@@ -329,8 +332,12 @@ class MainWindow(Adw.ApplicationWindow):
             self.gl_canvas = None
             self.overlay.set_child(self.scrolled_window)  # base layer (Cairo scroll container)
 
+        self.portal_card = LinkPortalPreviewCard()
+        self.portal_card.set_visible(False)
+
         self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
         self.overlay.add_overlay(self.link_preview_box)  # top layer (Floating link preview label)
+        self.overlay.add_overlay(self.portal_card)  # top layer (Floating link portal card)
         self.stack.add_named(self.overlay, "document-view")
 
         # Child 2: Search View Setup
@@ -507,6 +514,9 @@ class MainWindow(Adw.ApplicationWindow):
                                 self._deferred_state_query = query
                         if "minimap" in state and state["minimap"]:
                             GLib.timeout_add(500, self.toggle_minimap)
+                        if "hover_link" in state:
+                            hover_idx = int(state["hover_link"])
+                            GLib.timeout_add(400, lambda: self._simulate_link_hover(hover_idx))
                         return False
 
                     GLib.idle_add(apply_deferred_state)
@@ -1236,6 +1246,13 @@ class MainWindow(Adw.ApplicationWindow):
                 font-weight: 500;
                 box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
             }
+            .link-portal-card {
+                background-color: #ffffff;
+                border: 1px solid rgba(0, 0, 0, 0.2);
+                border-radius: 8px;
+                padding: 0px;
+                box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.35);
+            }
         """
 
         if self.backend == "opengl":
@@ -1310,8 +1327,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.link_preview_box.set_visible(False)
 
     def _on_link_hovered(self, page_index: int | None, link: dict | None):
+        if self._portal_debounce_id:
+            GLib.source_remove(self._portal_debounce_id)
+            self._portal_debounce_id = None
+
         if not link or not self.doc_model:
             self.link_preview_box.set_visible(False)
+            self.portal_card.set_visible(False)
             return
 
         uri = link.get("uri")
@@ -1320,11 +1342,99 @@ class MainWindow(Adw.ApplicationWindow):
         if uri:
             self.link_preview_label.set_text(uri)
             self.link_preview_box.set_visible(True)
+            self.portal_card.set_visible(False)
         elif target_page is not None and isinstance(target_page, int) and 0 <= target_page < self.doc_model.page_count:
             self.link_preview_label.set_text(f"Jump to Page {target_page + 1}")
             self.link_preview_box.set_visible(True)
+            # Schedule 150ms hover debounce for portal preview card
+            self._portal_debounce_id = GLib.timeout_add(150, self._show_link_portal_preview, page_index, link)
         else:
             self.link_preview_box.set_visible(False)
+            self.portal_card.set_visible(False)
+
+    def _show_link_portal_preview(self, source_page_index: int | None, link: dict) -> bool:
+        self._portal_debounce_id = None
+        if not link or not self.doc_model:
+            self.portal_card.set_visible(False)
+            return False
+
+        target_page = link.get("page")
+        if target_page is None or not isinstance(target_page, int) or not (0 <= target_page < self.doc_model.page_count):
+            self.portal_card.set_visible(False)
+            return False
+
+        target_rect = self.doc_model.page_rect(target_page)
+        to_point = link.get("to")
+        target_y = max(0.0, target_rect.height - to_point.y) if (to_point and to_point.y > 0.0) else 0.0
+
+        scale_factor = self.canvas.get_scale_factor()
+        cached_surface = self.portal_cache.get(target_page, target_y)
+        if cached_surface:
+            self.portal_card.set_surface(cached_surface)
+        else:
+            self.portal_card.set_loading()
+            self.render_worker.queue_portal_job(
+                self.doc_model,
+                target_page,
+                target_y,
+                self.zoom,
+                scale_factor,
+                self.portal_cache,
+                self._on_portal_render_complete,
+            )
+
+        viewport_w = self.scrolled_window.get_width()
+        viewport_h = self.scrolled_window.get_height()
+
+        if self.canvas.containers and self.canvas.containers[0].get_allocation().width > 0:
+            portal_w = self.canvas.containers[0].get_allocation().width
+        else:
+            scale = self.zoom * self.canvas.dpi_scale_factor
+            portal_w = int(target_rect.width * scale)
+
+        portal_h = int(110.0 * self.zoom * self.canvas.dpi_scale_factor)
+        self.portal_card.set_portal_size(portal_w, portal_h)
+
+        # Center portal horizontally in viewport (equal left and right margins)
+        pos_x = int((viewport_w - portal_w) / 2.0)
+
+        # Vertical positioning relative to link position using link_center_y
+        link_rect = self.canvas.get_link_screen_rect(source_page_index, link, self.overlay) if source_page_index is not None else None
+        if link_rect:
+            link_x, link_y, link_w, link_h = link_rect
+            link_center_y = link_y + (link_h / 2.0)
+            gap_offset = 10.0
+
+            if link_center_y < (viewport_h / 2.0):
+                pos_y = int(link_y + link_h + gap_offset)
+            else:
+                pos_y = int(max(8, link_y - portal_h - gap_offset))
+        else:
+            pos_y = int((viewport_h - portal_h) / 2.0)
+
+        self.portal_card.set_margin_start(pos_x)
+        self.portal_card.set_margin_top(pos_y)
+        self.portal_card.set_valign(Gtk.Align.START)
+        self.portal_card.set_halign(Gtk.Align.START)
+        self.portal_card.set_visible(True)
+        return False
+
+    def _on_portal_render_complete(self, page_index: int, target_y: float, surface):
+        if self.portal_card.get_visible():
+            self.portal_card.set_surface(surface)
+
+    def _simulate_link_hover(self, link_index: int) -> bool:
+        if not self.doc_model:
+            return False
+        current_count = 0
+        for page_idx in range(self.doc_model.page_count):
+            links = self.doc_model.get_page_links(page_idx)
+            for link in links:
+                if current_count == link_index:
+                    self._on_link_hovered(page_idx, link)
+                    return False
+                current_count += 1
+        return False
 
     def _on_page_input_activate(self, entry):
         if not self.doc_model or not self.canvas.page_layout:
