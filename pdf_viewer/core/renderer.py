@@ -205,7 +205,7 @@ class RenderWorker:
                     page_rect = page.rect
 
                     physical_zoom = zoom * scale_factor
-                    crop_h = 110.0 / zoom if zoom > 0 else 110.0
+                    crop_h = 160.0 / zoom if zoom > 0 else 160.0
                     crop_y0 = max(0.0, target_y - (crop_h / 2.0))
                     crop_y1 = min(page_rect.height, crop_y0 + crop_h)
                     crop_rect = fitz.Rect(0.0, crop_y0, page_rect.width, crop_y1)

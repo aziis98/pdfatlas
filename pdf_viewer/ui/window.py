@@ -79,7 +79,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.zoom = 1.0
 
         # Define window actions for the menu
-        gapless_state = getattr(self.settings, "page_gaps", True)
+        gapless_state = not getattr(self.settings, "page_gaps", True)
         self.gapless_action = Gio.SimpleAction.new_stateful(
             "gapless-mode", None, GLib.Variant.new_boolean(gapless_state)
         )
@@ -137,6 +137,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._add_nav_shortcut("c", self.toggle_crop)
         self._add_nav_shortcut("w", self.zoom_fit_width)
         self._add_nav_shortcut("f", self.zoom_fit_page)
+        self._add_nav_shortcut("g", self.toggle_gapless)
 
         # Scrolling - Page and Arrow keys
         self._add_shortcut("Page_Up", lambda: self.scroll_page(forward=False))
@@ -258,6 +259,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.page_input.set_hexpand(False)
         self.page_input.set_halign(Gtk.Align.CENTER)
         self.page_input.connect("activate", self._on_page_input_activate)
+        page_input_focus = Gtk.EventControllerFocus.new()
+        page_input_focus.connect("leave", lambda ctrl: self._on_scroll_page_changed(self.vadjustment))
+        self.page_input.add_controller(page_input_focus)
         right_box.append(self.page_input)
 
         self.page_total_label = Gtk.Label(label="of 0")
@@ -381,6 +385,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.add_controller(click_gesture)
 
     def _on_canvas_clicked(self, gesture, n_press, x, y):
+        self.canvas.grab_focus()
         if self.canvas.highlighted_block is not None:
             self.canvas.set_highlighted_block(0, None)
             self.canvas.queue_draw()
@@ -799,6 +804,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.grab_focus()
             return True
 
+        if self.page_input.has_focus():
+            self._on_scroll_page_changed(self.vadjustment)
+            self.canvas.grab_focus()
+            return True
+
         if self.stack.get_visible_child_name() == "search-view" or self.entry.has_focus():
             self.entry.set_text("")
             self.stack.set_visible_child_name("document-view")
@@ -1101,6 +1111,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings.enabled = not self.settings.enabled
         self._on_crop_settings_updated()
 
+    def toggle_gapless(self):
+        self.settings.page_gaps = not self.settings.page_gaps
+        self.gapless_action.set_state(GLib.Variant.new_boolean(not self.settings.page_gaps))
+        self._on_crop_settings_updated()
+
     def _on_crop_btn_toggled(self, btn):
         self.settings.enabled = btn.get_active()
         self._on_crop_settings_updated()
@@ -1392,7 +1407,7 @@ class MainWindow(Adw.ApplicationWindow):
             scale = self.zoom * self.canvas.dpi_scale_factor
             portal_w = int(target_rect.width * scale)
 
-        portal_h = int(110.0 * self.zoom * self.canvas.dpi_scale_factor)
+        portal_h = int(160.0 * self.zoom * self.canvas.dpi_scale_factor)
         self.portal_card.set_portal_size(portal_w, portal_h)
 
         # Center portal horizontally in viewport (equal left and right margins)
@@ -1444,22 +1459,10 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             page_num = int(text)
             page_idx = page_num - 1
-            if 0 <= page_idx < len(self.canvas.page_layout):
-                y_offset = self.canvas.page_layout[page_idx][0]
-                target_y = y_offset + self.canvas.page_gap
-
-                lower = self.vadjustment.get_lower()
-                upper = self.vadjustment.get_upper()
-                viewport_h = self.vadjustment.get_page_size()
-                if viewport_h <= 1.0:
-                    viewport_h = 700.0
-                max_y = upper - viewport_h
-                target_y = max(lower, min(max_y, target_y))
-
-                self.vadjustment.set_value(target_y)
+            if 0 <= page_idx < self.doc_model.page_count:
+                self.jump_to_page(page_idx)
                 self.canvas.grab_focus()
         except ValueError:
-            # Revert to actual page index on parse failure
             self._on_scroll_page_changed(self.vadjustment)
 
     def _on_gapless_action_activated(self, action, parameter):
@@ -1467,7 +1470,7 @@ class MainWindow(Adw.ApplicationWindow):
         new_state = not old_state
         action.set_state(GLib.Variant.new_boolean(new_state))
 
-        self.settings.page_gaps = new_state
+        self.settings.page_gaps = not new_state
         self._on_crop_settings_updated()
 
     def _on_crop_action_activated(self, action, parameter):

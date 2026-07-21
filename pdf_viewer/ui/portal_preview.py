@@ -23,18 +23,18 @@ class LinkPortalPreviewCard(Gtk.Box):
 
         self.surface: cairo.ImageSurface | None = None
         self.portal_width = 340
-        self.portal_height = 110
+        self.portal_height = 160
 
         self.drawing_area = Gtk.DrawingArea()
         self.drawing_area.set_can_target(False)
         self.drawing_area.set_hexpand(False)
         self.drawing_area.set_vexpand(False)
         self.drawing_area.set_draw_func(self._draw_func)
-        self.drawing_area.set_size_request(340, 110)
+        self.drawing_area.set_size_request(340, 160)
 
         self.append(self.drawing_area)
 
-    def set_portal_size(self, width: int, height: int = 110):
+    def set_portal_size(self, width: int, height: int = 160):
         self.portal_width = width
         self.portal_height = height
         self.set_size_request(width, height)
