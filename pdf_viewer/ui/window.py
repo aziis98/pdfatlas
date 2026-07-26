@@ -97,6 +97,10 @@ class MainWindow(Adw.ApplicationWindow):
         settings_action.connect("activate", lambda act, param: self._on_settings_btn_clicked(None))
         self.add_action(settings_action)
 
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", lambda act, param: self._on_about_action_activated(None))
+        self.add_action(about_action)
+
         # Build UI layout
         self._build_ui()
 
@@ -180,6 +184,18 @@ class MainWindow(Adw.ApplicationWindow):
         if not display:
             return
         theme = Gtk.IconTheme.get_for_display(display)
+
+        # Register local project assets directory and user hicolor icons for application logos
+        assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets"))
+        if os.path.exists(assets_dir):
+            theme.add_search_path(assets_dir)
+
+        user_icons = os.path.expanduser("~/.local/share/icons")
+        if os.path.exists(user_icons):
+            theme.add_search_path(user_icons)
+
+        Gtk.Window.set_default_icon_name("com.aziis98.pdfatlas")
+        self.set_icon_name("com.aziis98.pdfatlas")
 
         icon_roots = [
             "/usr/share/icons",
@@ -274,6 +290,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         section = Gio.Menu.new()
         section.append("Open Settings", "win.open-settings")
+        section.append("About PDF Atlas", "win.about")
         menu.append_section(None, section)
 
         # Three-dot Action Menu
@@ -1128,6 +1145,16 @@ class MainWindow(Adw.ApplicationWindow):
             on_reanalyze=self._on_reanalyze,
         )
         dialog.present()
+
+    def _on_about_action_activated(self, action=None, param=None):
+        about = Adw.AboutDialog(
+            application_name="PDF Atlas",
+            application_icon="logo",
+            developer_name="PDF Atlas Team",
+            version="1.0.0",
+            comments="High-performance PDF document viewer with spatial navigator and FTS5 search.",
+        )
+        about.present(self)
 
     def _on_settings_changed(self):
         self._on_crop_settings_updated()
