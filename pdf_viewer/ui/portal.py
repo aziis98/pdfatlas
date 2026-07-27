@@ -3,6 +3,7 @@ import threading
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 import cairo
 import fitz
@@ -89,21 +90,24 @@ def _thread_doc(pdf_path):
     return doc
 
 
+from .portal_preview import LinkPortalPreviewCard
+
+
 def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     """
     Renders one search result page-strip directly to a cairo.ImageSurface.
-    Crops to the block's width (x0 to x1) plus some horizontal padding,
-    and a fixed-height vertical window (about 3-4 lines of text) centered on the block.
+    Crops across the full page width (0 to page.rect.width) and a fixed-height
+    vertical window (about 3-4 lines of text) centered on the block midpoint.
     """
     doc = _thread_doc(pdf_path)
     page = doc[page_no - 1]
 
-    # 1. Horizontal bounds: block width with 6pt padding
-    clip_x0 = max(0.0, x0 - 6.0)
-    clip_x1 = min(page.rect.width, x1 + 6.0)
+    # 1. Full page width bounds
+    clip_x0 = 0.0
+    clip_x1 = page.rect.width
 
-    # 2. Vertical bounds: fixed height window (52 points, ~4 lines of text) centered on block midpoint
-    WINDOW_HEIGHT_PT = 52.0
+    # 2. Vertical bounds: 160pt height window centered on block midpoint to match card aspect ratio
+    WINDOW_HEIGHT_PT = 160.0
     mid_y = (y0 + y1) / 2.0
     clip_y0 = max(0.0, mid_y - WINDOW_HEIGHT_PT / 2.0)
     clip_y1 = min(page.rect.height, mid_y + WINDOW_HEIGHT_PT / 2.0)
@@ -138,25 +142,13 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
             ctx.rectangle(px0, py0, pw, ph)
     ctx.fill()
 
-    # 4. Scale down surface if it is wider than 380 pixels to limit the widget request width
-    max_w = 380
-    if w > max_w:
-        scale = max_w / w
-        new_h = max(1, int(h * scale))
-        scaled_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, max_w, new_h)
-        scaled_ctx = cairo.Context(scaled_surface)
-        scaled_ctx.scale(scale, scale)
-        scaled_ctx.set_source_surface(surface, 0, 0)
-        scaled_ctx.paint()
-        return scaled_surface, scaled_surface
-
-    return surface, bgra
+    return surface
 
 
 class ResultRow(Gtk.Box):
     """
     A single Search Result card: location header with pin button, and a
-    horizontally cropped & highlighted page clip (portal view) loaded in the background.
+    full-width, uniform fixed-height page clip rendered via LinkPortalPreviewCard.
     """
 
     def __init__(
@@ -206,19 +198,13 @@ class ResultRow(Gtk.Box):
 
         self.append(header_box)
 
-        display_h = _display_height(y0, y1)
-        self.spinner = Gtk.Spinner()
-        self.spinner.set_size_request(20, 20)
-        self.spinner.start()
-        placeholder_box = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        placeholder_box.set_size_request(380, display_h)
-        placeholder_box.append(self.spinner)
-
-        self.frame = Gtk.Frame()
-        self.frame.set_child(placeholder_box)
-        self.frame.set_hexpand(False)
-        self.frame.set_halign(Gtk.Align.CENTER)
-        self.append(self.frame)
+        # Uniform LinkPortalPreviewCard widget for uniform search portal preview UI
+        self.portal_card = LinkPortalPreviewCard()
+        self.portal_card.set_portal_size(450, 120)
+        self.portal_card.set_loading()
+        self.portal_card.set_hexpand(False)
+        self.portal_card.set_halign(Gtk.Align.CENTER)
+        self.append(self.portal_card)
 
         # Handle mouse clicks on the row
         click = Gtk.GestureClick.new()
@@ -240,43 +226,16 @@ class ResultRow(Gtk.Box):
 
     def _render_worker(self, pdf_path, page_no, x0, y0, x1, y1, query_terms):
         try:
-            surface, bgra = render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms)
+            surface = render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms)
         except Exception as e:
             print(f"Error rendering portal strip surface: {e}")
-            surface, bgra = None, None
-        GLib.idle_add(self._apply_render, y0, y1, surface, bgra)
+            surface = None
+        GLib.idle_add(self._apply_render, surface)
 
-    def _apply_render(self, y0, y1, surface, bgra):
+    def _apply_render(self, surface):
         if surface is not None:
-            # Create a Gdk.MemoryTexture directly from the Cairo surface data buffer
-            w = surface.get_width()
-            h = surface.get_height()
-            stride = surface.get_stride()
-            data = surface.get_data()
-
-            # Wrap bytes in GLib.Bytes
-            gbytes = GLib.Bytes.new(data.tobytes())
-
-            # B8G8R8A8_PREMULTIPLIED maps exactly to cairo.FORMAT_ARGB32 in little-endian RAM
-            texture = Gdk.MemoryTexture.new(w, h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, gbytes, stride)
-
-            # Store references to keep everything alive on the ResultRow instance
             self._cached_surface = surface
-            self._cached_bgra = bgra
-            self._cached_gbytes = gbytes
-            self._cached_texture = texture
-
-            picture = Gtk.Picture.new_for_paintable(texture)
-            picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-            picture.set_size_request(380, _display_height(y0, y1))
-            picture.set_hexpand(False)
-            picture.set_halign(Gtk.Align.CENTER)
-            self.frame.set_child(picture)
-        else:
-            self.spinner.stop()
-            err_label = Gtk.Label(label="(render failed)")
-            err_label.add_css_class("dim-label")
-            self.frame.set_child(err_label)
+            self.portal_card.set_surface(surface)
         if self.on_render_done:
             self.on_render_done()
         return False

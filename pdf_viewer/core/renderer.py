@@ -93,6 +93,32 @@ class RenderWorker:
             )
         )
 
+    def queue_portal_job(
+        self,
+        doc_model,
+        page_index: int,
+        target_y: float,
+        target_w: int,
+        target_h: int,
+        scale_factor: float,
+        target_cache,
+        completion_callback,
+    ):
+        """
+        Pushes a portal crop rendering job to the queue.
+        """
+        with self.lock:
+            self.counter += 1
+            cnt = self.counter
+        self.queue.put(
+            (
+                2,
+                cnt,
+                "portal",
+                (doc_model, page_index, target_y, target_w, target_h, scale_factor, target_cache, completion_callback),
+            )
+        )
+
     def clear_canvas_render_jobs(self):
         """
         Removes all page rendering jobs from the queue (retaining crop and thumbnail jobs).
@@ -124,20 +150,10 @@ class RenderWorker:
                         redraw_callback,
                     ) = args
 
-                    # 1. Retrieve the page from PyMuPDF document
                     page = doc_model.get_page(page_index)
-
-                    # 2. Render to Pixmap using physical zoom (capped at screen's physical DPI)
-                    physical_zoom = zoom * scale_factor
-
-                    if not is_minimap:
-                        max_physical_zoom = screen_physical_dpi / 72.0
-                        if physical_zoom > max_physical_zoom:
-                            physical_zoom = max_physical_zoom
+                    physical_zoom = zoom * scale_factor if not is_minimap else 0.2
 
                     mat = fitz.Matrix(physical_zoom, physical_zoom)
-
-                    # Calculate output dimensions and resolution beforehand for logging
                     rect_to_render = crop_rect if crop_rect is not None else page.rect
                     out_w = int(rect_to_render.width * physical_zoom)
                     out_h = int(rect_to_render.height * physical_zoom)
@@ -150,23 +166,21 @@ class RenderWorker:
                     )
                     sys.stderr.flush()
 
-                    pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=True)
+                    pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=False)
 
-                    # 3. Swap R and B channels for Cairo BGRA format
                     arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
                         (pix.height, pix.width, pix.n)
                     )
-                    bgra = arr[:, :, [2, 1, 0, 3]].copy()
+                    bgr = arr[:, :, [2, 1, 0]]
+                    bgra = np.dstack((bgr, np.full((pix.height, pix.width, 1), 255, dtype=np.uint8))).copy()
                     surface = cairo.ImageSurface.create_for_data(
-                        bgra, cairo.FORMAT_ARGB32, pix.width, pix.height, pix.width * 4
+                        bgra, cairo.FORMAT_RGB24, pix.width, pix.height, pix.width * 4
                     )
                     buf = bgra
 
-                    # Apply dynamic scale factor to Cairo context
                     cairo_scale = physical_zoom / zoom
                     surface.set_device_scale(cairo_scale, cairo_scale)
 
-                    # 4. Cache the resulting surface
                     if is_minimap:
                         target_cache.set(page_index, surface, buf)
                     else:
@@ -177,7 +191,6 @@ class RenderWorker:
                         )
                         target_cache.set(page_index, zoom, scale_factor, crop_key, surface, buf)
 
-                    # 5. Notify main thread to redraw
                     GLib.idle_add(redraw_callback)
 
                 elif job_type == "crop":
@@ -185,74 +198,54 @@ class RenderWorker:
                         args
                     )
 
-                    # Analyze page
                     crop_analyzer.scan_page(page_index)
 
-                    # Report progress
                     if progress_callback:
                         GLib.idle_add(progress_callback, page_index)
 
-                    # Check if all pages are done
                     if all(crop_analyzer.scanned):
                         crop_analyzer.compute_crop_rects(settings)
                         if completion_callback:
                             GLib.idle_add(completion_callback)
 
                 elif job_type == "portal":
-                    doc_model, page_index, target_y, zoom, scale_factor, target_cache, completion_callback = args
+                    doc_model, page_index, target_y, target_w, target_h, scale_factor, target_cache, completion_callback = args
 
                     page = doc_model.get_page(page_index)
                     page_rect = page.rect
 
-                    physical_zoom = zoom * scale_factor
-                    crop_h = 160.0 / zoom if zoom > 0 else 160.0
+                    crop_h = 160.0
                     crop_y0 = max(0.0, target_y - (crop_h / 2.0))
                     crop_y1 = min(page_rect.height, crop_y0 + crop_h)
-                    crop_rect = fitz.Rect(0.0, crop_y0, page_rect.width, crop_y1)
+                    actual_crop_h = max(1.0, crop_y1 - crop_y0)
 
-                    mat = fitz.Matrix(physical_zoom, physical_zoom)
-                    pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=True)
+                    # Check LinkPortalCache directly for cached portal surface
+                    cached_portal = target_cache.get(page_index, target_y, target_w, target_h)
+                    if cached_portal:
+                        surface = cached_portal
+                    else:
+                        matrix_x = target_w / page_rect.width if page_rect.width > 0 else 1.0
+                        matrix_y = target_h / actual_crop_h if actual_crop_h > 0 else 1.0
 
-                    arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
-                        (pix.height, pix.width, pix.n)
-                    )
-                    bgra = arr[:, :, [2, 1, 0, 3]].copy()
-                    surface = cairo.ImageSurface.create_for_data(
-                        bgra, cairo.FORMAT_ARGB32, pix.width, pix.height, pix.width * 4
-                    )
-                    buf = bgra
-                    surface.set_device_scale(scale_factor, scale_factor)
+                        crop_rect = fitz.Rect(0.0, crop_y0, page_rect.width, crop_y1)
+                        mat = fitz.Matrix(matrix_x, matrix_y)
+                        pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=False)
 
-                    target_cache.set(page_index, target_y, surface, buf)
+                        arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
+                            (pix.height, pix.width, pix.n)
+                        )
+                        bgr = arr[:, :, [2, 1, 0]]
+                        bgra = np.dstack((bgr, np.full((pix.height, pix.width, 1), 255, dtype=np.uint8))).copy()
+                        surface = cairo.ImageSurface.create_for_data(
+                            bgra, cairo.FORMAT_RGB24, pix.width, pix.height, pix.width * 4
+                        )
+                        surface.set_device_scale(scale_factor, scale_factor)
+                        buf = bgra
+                        target_cache.set(page_index, target_y, target_w, target_h, surface, buf)
+
                     GLib.idle_add(completion_callback, page_index, target_y, surface)
 
             except Exception as e:
-                # Prevent background thread from dying if a page rendering fails (e.g. document closed)
                 print(f"Error in RenderWorker thread: {e}")
             finally:
                 self.queue.task_done()
-
-    def queue_portal_job(
-        self,
-        doc_model,
-        page_index: int,
-        target_y: float,
-        zoom: float,
-        scale_factor: int,
-        target_cache,
-        completion_callback,
-    ):
-        """
-        Pushes a portal crop rendering job to the queue.
-        """
-        with self.lock:
-            self.counter += 1
-            cnt = self.counter
-        self.queue.put(
-            (
-                2,
-                cnt,
-                "portal",
-                (doc_model, page_index, target_y, zoom, scale_factor, target_cache, completion_callback),
-            )
-        )

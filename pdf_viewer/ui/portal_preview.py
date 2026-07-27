@@ -8,8 +8,11 @@ from gi.repository import Gtk
 
 class LinkPortalPreviewCard(Gtk.Box):
     """
-    Minimal floating portal preview snippet card for internal PDF links.
-    Uses Gtk.DrawingArea with Cairo surface rendering to guarantee exact layout size requests.
+    Portal preview snippet card for internal PDF links and search results.
+    Features:
+      - 8px vector rounded corner clipping (both via Cairo and GTK CSS).
+      - Proportional aspect-ratio surface scaling (no text stretching).
+      - Crisp 1px border stroke and placeholder states.
     """
 
     def __init__(self):
@@ -55,7 +58,7 @@ class LinkPortalPreviewCard(Gtk.Box):
 
         cr.save()
 
-        # 1. Clip path to rounded rectangle (radius 8.0)
+        # 1. Precise 8px rounded rectangle clip path
         r = 8.0
         cr.new_sub_path()
         cr.arc(width - r, r, r, -1.5707963, 0)
@@ -66,26 +69,22 @@ class LinkPortalPreviewCard(Gtk.Box):
 
         cr.clip_preserve()
 
-        # 2. Fill white background inside rounded clip
+        # 2. White background fill
         cr.set_source_rgb(1.0, 1.0, 1.0)
         cr.fill_preserve()
 
-        # 3. Draw Cairo surface scaled to fill entire card allocation
+        # 3. Direct Surface Rendering
         if self.surface:
             cr.save()
-            self.surface.set_device_scale(1.0, 1.0)
-            surf_w = self.surface.get_width()
-            surf_h = self.surface.get_height()
-            if surf_w > 0 and surf_h > 0:
-                scale_x = width / surf_w
-                scale_y = height / surf_h
-                cr.scale(scale_x, scale_y)
-                cr.set_source_surface(self.surface, 0, 0)
-                cr.paint()
+            cr.set_source_surface(self.surface, 0, 0)
+            cr.paint()
             cr.restore()
+        else:
+            cr.set_source_rgba(0.94, 0.95, 0.97, 1.0)
+            cr.fill_preserve()
 
-        # 4. Stroke subtle 1px border around rounded edge
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.25)
+        # 4. Subtle 1px border stroke around rounded edge
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.12)
         cr.set_line_width(1.0)
         cr.stroke()
 

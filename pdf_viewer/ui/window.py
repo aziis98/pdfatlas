@@ -29,6 +29,11 @@ from .settings import SettingsWindow
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
 
+def clamp(min_val: float, val: float, max_val: float) -> float:
+    """Clamps a numeric value within the range [min_val, max_val]."""
+    return max(min_val, min(max_val, val))
+
+
 class MainWindow(Adw.ApplicationWindow):
     """
     Main Adwaita application window.
@@ -39,11 +44,12 @@ class MainWindow(Adw.ApplicationWindow):
       - Click-to-navigate search portal coordinates mapping.
     """
 
-    def __init__(self, app, backend="opengl", state=None, screenshot_path=None, follow_link=None):
+    def __init__(self, app, backend="opengl", state=None, screenshot_path=None, follow_link=None, debug_mode=False):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
         self.backend = backend
+        self.debug_mode = debug_mode
         self.set_default_size(900, 700)
         self.initial_state = state
         self.screenshot_path = screenshot_path
@@ -328,10 +334,24 @@ class MainWindow(Adw.ApplicationWindow):
         self.scrolled_window.set_vexpand(True)
         self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.ALWAYS)
 
+        # ScrolledWindow Mouse Event Controllers (100% coverage for hover & link clicks)
+        scroll_click = Gtk.GestureClick.new()
+        scroll_click.set_button(1)
+        scroll_click.connect("pressed", lambda ctrl, n_press, x, y: self._on_scrolled_window_click(n_press, x, y))
+        self.scrolled_window.add_controller(scroll_click)
+
+        scroll_motion = Gtk.EventControllerMotion.new()
+        scroll_motion.connect("motion", lambda ctrl, x, y: self.canvas._on_motion(ctrl, x, y))
+        scroll_motion.connect("leave", lambda ctrl: self.canvas._on_leave(ctrl))
+        self.scrolled_window.add_controller(scroll_motion)
+
         # Inner Canvas Container
         self.canvas = PDFCanvas()
+        self.canvas.backend = self.backend
+        self.canvas.debug_mode = self.debug_mode
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_link_hovered = self._on_link_hovered
+        self.canvas.on_page_hovered = self._on_page_hovered
         self.scrolled_window.set_child(self.canvas)
 
         # Build floating zoom controls box and link preview box
@@ -672,18 +692,15 @@ class MainWindow(Adw.ApplicationWindow):
             block_absolute_y = y_offset + self.canvas.page_gap + block_pixel_y
 
             viewport_h = self.vadjustment.get_page_size()
-            if viewport_h <= 1.0:
-                viewport_h = 700.0  # Fallback layout height
-
-            target_y = block_absolute_y - (viewport_h / 2.0)
-
             lower = self.vadjustment.get_lower()
             upper = self.vadjustment.get_upper()
-            max_y = upper - viewport_h
-            target_y = max(lower, min(max_y, target_y))
+            max_y = max(lower, upper - viewport_h)
+            target_y = clamp(lower, block_absolute_y - (viewport_h / 2.0), max_y)
 
             self.canvas.grab_focus()
             self.vadjustment.set_value(target_y)
+            self._on_scroll_page_changed(self.vadjustment)
+            self._queue_canvas_redraw()
             return False
 
         GLib.idle_add(scroll_to_target)
@@ -841,46 +858,66 @@ class MainWindow(Adw.ApplicationWindow):
 
         old_zoom = self.zoom
         new_zoom = max(0.25, min(8.0, zoom))
+
+        # Max out zoom at window width size if page width exceeds viewport width
+        viewport_w = float(self.scrolled_window.get_width())
+        if viewport_w > 50 and self.doc_model:
+            max_page_w = 0.0
+            for i in range(self.doc_model.page_count):
+                rect = None
+                if self.settings.enabled and self.crop_analyzer:
+                    rect = self.crop_analyzer.crop_rects[i]
+                if rect is None:
+                    rect = self.doc_model.page_rect(i)
+                if rect.width > max_page_w:
+                    max_page_w = rect.width
+            if max_page_w > 0:
+                max_zoom_fit = (viewport_w - 16.0) / (max_page_w * self.canvas.dpi_scale_factor)
+                if max_zoom_fit > 0.1:
+                    new_zoom = min(new_zoom, max_zoom_fit)
+
         if old_zoom == new_zoom:
             return
 
-        # Save old scroll positions
-        val_h = self.hadjustment.get_value()
+        # Stop GTK 4 kinetic / inertial scroll animation immediately
+        self.scrolled_window.set_kinetic_scrolling(False)
+        self.scrolled_window.set_kinetic_scrolling(True)
+
+        # Save old scroll position & viewport height
         val_v = self.vadjustment.get_value()
+        viewport_h = self.vadjustment.get_page_size()
+        if viewport_h <= 1.0:
+            viewport_h = 700.0
 
-        # Default center to viewport midpoint
-        if center_x is None or center_y is None:
-            viewport_w = self.hadjustment.get_page_size()
-            viewport_h = self.vadjustment.get_page_size()
-            center_x = val_h + viewport_w / 2
-            center_y = val_v + viewport_h / 2
+        # Vertical midpoint of viewport in pre-zoom layout space
+        center_y = val_v + (viewport_h / 2.0)
 
+        # Determine page index at center_y to separate unscaled page_gaps from scaled content height
+        current_page_idx = self.get_current_page_index()
+        gap_count = current_page_idx + 1
+        fixed_gaps = gap_count * self.canvas.page_gap
+
+        content_y = max(0.0, center_y - fixed_gaps)
         ratio = new_zoom / old_zoom
 
         self.zoom = new_zoom
         self.zoom_label.set_label(f"{int(new_zoom * 100)}%")
 
-        # Apply to canvas (recomputes layout / bounds)
+        # Apply to canvas (recomputes layout & updates vadjustment upper bounds instantly)
         self.canvas.set_zoom(new_zoom)
 
-        # Defer updating scroll positions until after the GTK layout pass
-        # has updated the adjustment bounds.
-        def apply_scroll_deferred():
-            lh = self.hadjustment.get_lower()
-            uh = self.hadjustment.get_upper()
-            ph = self.hadjustment.get_page_size()
-            new_val_h_clamped = max(lh, min(uh - ph, val_h + center_x * (ratio - 1)))
+        # Re-accumulate new center_y: unscaled fixed_gaps + scaled content_y
+        new_center_y = fixed_gaps + content_y * ratio
+        new_val_v = new_center_y - (viewport_h / 2.0)
 
-            lv = self.vadjustment.get_lower()
-            uv = self.vadjustment.get_upper()
-            pv = self.vadjustment.get_page_size()
-            new_val_v_clamped = max(lv, min(uv - pv, val_v + center_y * (ratio - 1)))
+        lower = self.vadjustment.get_lower()
+        upper = self.vadjustment.get_upper()
+        max_y = max(lower, upper - viewport_h)
+        target_v = clamp(lower, new_val_v, max_y)
 
-            self.hadjustment.set_value(new_val_h_clamped)
-            self.vadjustment.set_value(new_val_v_clamped)
-            return False
-
-        GLib.idle_add(apply_scroll_deferred)
+        self.vadjustment.set_value(target_v)
+        self._on_scroll_page_changed(self.vadjustment)
+        self._queue_canvas_redraw()
 
     def zoom_in(self):
         self.set_zoom_level(self.zoom * 1.2)
@@ -948,9 +985,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         lower = self.vadjustment.get_lower()
         upper = self.vadjustment.get_upper()
-        max_y = upper - page_size
-        new_val = max(lower, min(max_y, new_val))
-        self.vadjustment.set_value(new_val)
+        max_y = max(lower, upper - page_size)
+        self.vadjustment.set_value(clamp(lower, new_val, max_y))
 
     def scroll_step(self, forward: bool):
         if not self.vadjustment:
@@ -964,8 +1000,8 @@ class MainWindow(Adw.ApplicationWindow):
         lower = self.vadjustment.get_lower()
         upper = self.vadjustment.get_upper()
         page_size = self.vadjustment.get_page_size()
-        max_y = upper - page_size
-        self.vadjustment.set_value(max(lower, min(max_y, new_val)))
+        max_y = max(lower, upper - page_size)
+        self.vadjustment.set_value(clamp(lower, new_val, max_y))
 
     def scroll_step_h(self, forward: bool):
         if not self.hadjustment:
@@ -980,7 +1016,7 @@ class MainWindow(Adw.ApplicationWindow):
         upper = self.hadjustment.get_upper()
         page_size = self.hadjustment.get_page_size()
         max_x = max(lower, upper - page_size)
-        self.hadjustment.set_value(max(lower, min(max_x, new_val)))
+        self.hadjustment.set_value(clamp(lower, new_val, max_x))
 
     def get_current_page_index(self) -> int:
         if not self.doc_model or not self.canvas.page_layout:
@@ -998,6 +1034,18 @@ class MainWindow(Adw.ApplicationWindow):
                 return i
         return 0
 
+    def _on_scrolled_window_click(self, n_press: int, x: float, y: float):
+        self.set_focus(None)
+        if hasattr(self, "canvas") and self.canvas:
+            self.canvas._on_click(None, n_press, x, y)
+
+    def _queue_canvas_redraw(self):
+        """Redraws the active canvas depending on whether OpenGL or Cairo backend is active."""
+        if self.backend == "opengl" and self.gl_canvas:
+            self.gl_canvas.queue_draw()
+        else:
+            self.canvas.queue_draw()
+
     def jump_to_page(self, page_index: int):
         if not self.doc_model or not self.canvas.page_layout:
             return
@@ -1006,12 +1054,14 @@ class MainWindow(Adw.ApplicationWindow):
 
         y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_index]
         viewport_h = self.vadjustment.get_page_size()
-        target_y = (y_offset + self.canvas.page_gap + dh / 2.0) - (viewport_h / 2.0)
-
         lower = self.vadjustment.get_lower()
         upper = self.vadjustment.get_upper()
         max_y = max(lower, upper - viewport_h)
-        self.vadjustment.set_value(max(lower, min(max_y, target_y)))
+        target_y = clamp(lower, y_offset, max_y)
+
+        self.vadjustment.set_value(target_y)
+        self._on_scroll_page_changed(self.vadjustment)
+        self._queue_canvas_redraw()
 
     def page_step(self, forward: bool):
         current_idx = self.get_current_page_index()
@@ -1019,41 +1069,45 @@ class MainWindow(Adw.ApplicationWindow):
         self.jump_to_page(target_idx)
 
     def _on_link_clicked(self, page_index: int, link: dict):
-        if not self.doc_model:
+        if not self.doc_model or not self.canvas.page_layout:
             return
 
         target_page = link.get("page")
         uri = link.get("uri")
 
-        if target_page is not None and isinstance(target_page, int) and 0 <= target_page < self.doc_model.page_count:
-            target_rect = self.doc_model.page_rect(target_page)
-            to_point = link.get("to")
+        if target_page is None or not isinstance(target_page, int) or target_page < 0 or target_page >= self.doc_model.page_count:
+            if uri:
+                try:
+                    Gtk.show_uri(self, uri, Gdk.CURRENT_TIME)
+                except Exception as e:
+                    print(f"[MainWindow] Error launching URI {uri}: {e}", flush=True)
+            return
 
-            if to_point and to_point.y > 0.0:
-                # Convert PDF bottom-up Y coordinate to top-down page Y coordinate
-                y_offset_in_page = max(0.0, target_rect.height - to_point.y)
-            else:
-                y_offset_in_page = 0.0
+        target_rect = self.doc_model.page_rect(target_page)
+        to_point = link.get("to")
+        if to_point and hasattr(to_point, "y") and to_point.y is not None and to_point.y > 0.0:
+            # PyMuPDF to_point coordinates are PDF native bottom-up (0 is page bottom)
+            y_offset_in_page = max(0.0, target_rect.height - float(to_point.y))
+        else:
+            y_offset_in_page = 0.0
 
-            if target_page < len(self.canvas.page_layout):
-                y_offset, dw, dh, crop_rect = self.canvas.page_layout[target_page]
-                crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-                pt_y = max(0.0, y_offset_in_page - crop_off_y)
-                scaled_y = pt_y * self.zoom * self.canvas.dpi_scale_factor
+        y_offset, dw, dh, crop_rect = self.canvas.page_layout[target_page]
+        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+        pt_y = max(0.0, y_offset_in_page - crop_off_y)
+        scaled_y = pt_y * self.zoom * self.canvas.dpi_scale_factor
 
-                # Center target position in viewport vertically
-                viewport_h = self.vadjustment.get_page_size()
-                target_v_val = (y_offset + self.canvas.page_gap + scaled_y) - (viewport_h / 2)
+        viewport_h = self.vadjustment.get_page_size()
+        if viewport_h <= 1.0:
+            viewport_h = 700.0
 
-                lower = self.vadjustment.get_lower()
-                upper = self.vadjustment.get_upper()
-                max_y = max(lower, upper - viewport_h)
-                self.vadjustment.set_value(max(lower, min(max_y, target_v_val)))
-        elif uri:
-            try:
-                Gtk.show_uri(self, uri, Gdk.CURRENT_TIME)
-            except Exception as e:
-                print(f"[MainWindow] Error launching URI {uri}: {e}", flush=True)
+        lower = self.vadjustment.get_lower()
+        upper = self.vadjustment.get_upper()
+        max_y = max(lower, upper - viewport_h)
+        target_y = clamp(lower, (y_offset + scaled_y) - (viewport_h / 2.0), max_y)
+
+        self.vadjustment.set_value(target_y)
+        self._on_scroll_page_changed(self.vadjustment)
+        self._queue_canvas_redraw()
 
     def _follow_link_by_index(self, link_index: int) -> bool:
         if not self.doc_model:
@@ -1106,21 +1160,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present()
 
     def _on_minimap_page_clicked(self, page_index):
-        if not self.doc_model or page_index < 0 or page_index >= self.doc_model.page_count:
-            return
-
-        if page_index < len(self.canvas.page_layout):
-            y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_index]
-            viewport_h = self.vadjustment.get_page_size()
-
-            target_y = y_offset + dh / 2 - viewport_h / 2
-
-            lower = self.vadjustment.get_lower()
-            upper = self.vadjustment.get_upper()
-            max_y = upper - viewport_h
-            target_y = max(lower, min(max_y, target_y))
-
-            self.vadjustment.set_value(target_y)
+        self.jump_to_page(page_index)
 
     # --- Toggles & Settings ---
 
@@ -1288,12 +1328,22 @@ class MainWindow(Adw.ApplicationWindow):
                 font-weight: 500;
                 box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
             }
+            .debug-info-label {
+                font-family: monospace, monospace;
+                font-size: 10px;
+                color: #00ff66;
+                background-color: rgba(15, 20, 25, 0.92);
+                border: 1px solid rgba(0, 255, 102, 0.35);
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
             .link-portal-card {
                 background-color: #ffffff;
-                border: 1px solid rgba(0, 0, 0, 0.2);
+                border: 1px solid rgba(0, 0, 0, 0.12);
                 border-radius: 8px;
+                overflow: hidden;
                 padding: 0px;
-                box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.35);
+                box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.12), 0px 1px 3px rgba(0, 0, 0, 0.08);
             }
         """
 
@@ -1301,7 +1351,7 @@ class MainWindow(Adw.ApplicationWindow):
             css_data = f"""
                 .pdf-canvas {{
                     background-color: transparent;
-                    padding: {gap_size}px 0;
+                    padding: 0px;
                 }}
                 .page-container {{
                     background-color: transparent;
@@ -1319,7 +1369,7 @@ class MainWindow(Adw.ApplicationWindow):
             css_data = f"""
                 .pdf-canvas {{
                     background-color: #e0e0e0;
-                    padding: {gap_size}px 0;
+                    padding: 0px;
                 }}
                 .page-container {{
                     background-color: #ffffff;
@@ -1359,13 +1409,29 @@ class MainWindow(Adw.ApplicationWindow):
         self.link_preview_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.link_preview_label.set_max_width_chars(65)
 
-        self.link_preview_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.link_preview_box.add_css_class("link-preview-box")
+        self.link_preview_card_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.link_preview_card_box.add_css_class("link-preview-box")
+        self.link_preview_card_box.set_halign(Gtk.Align.START)
+        self.link_preview_card_box.append(self.link_preview_label)
+        self.link_preview_card_box.set_visible(False)
+
+        self.link_preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.link_preview_box.set_halign(Gtk.Align.START)
         self.link_preview_box.set_valign(Gtk.Align.END)
         self.link_preview_box.set_margin_start(8)
         self.link_preview_box.set_margin_bottom(8)
-        self.link_preview_box.append(self.link_preview_label)
+        self.link_preview_box.append(self.link_preview_card_box)
+
+        if self.debug_mode:
+            self.debug_info_label = Gtk.Label(xalign=0.0)
+            self.debug_info_label.set_halign(Gtk.Align.START)
+            self.debug_info_label.set_justify(Gtk.Justification.LEFT)
+            self.debug_info_label.add_css_class("debug-info-label")
+            self.debug_info_label.set_visible(False)
+            self.link_preview_box.append(self.debug_info_label)
+        else:
+            self.debug_info_label = None
+
         self.link_preview_box.set_visible(False)
 
     def _on_link_hovered(self, page_index: int | None, link: dict | None):
@@ -1374,8 +1440,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._portal_debounce_id = None
 
         if not link or not self.doc_model:
-            self.link_preview_box.set_visible(False)
+            self.link_preview_card_box.set_visible(False)
             self.portal_card.set_visible(False)
+            if not self.debug_info_label or not self.debug_info_label.get_visible():
+                self.link_preview_box.set_visible(False)
             return
 
         uri = link.get("uri")
@@ -1383,16 +1451,47 @@ class MainWindow(Adw.ApplicationWindow):
 
         if uri:
             self.link_preview_label.set_text(uri)
+            self.link_preview_card_box.set_visible(True)
             self.link_preview_box.set_visible(True)
             self.portal_card.set_visible(False)
         elif target_page is not None and isinstance(target_page, int) and 0 <= target_page < self.doc_model.page_count:
             self.link_preview_label.set_text(f"Jump to Page {target_page + 1}")
+            self.link_preview_card_box.set_visible(True)
             self.link_preview_box.set_visible(True)
-            # Schedule 150ms hover debounce for portal preview card
-            self._portal_debounce_id = GLib.timeout_add(150, self._show_link_portal_preview, page_index, link)
+            self._show_link_portal_preview(page_index, link)
         else:
-            self.link_preview_box.set_visible(False)
+            self.link_preview_card_box.set_visible(False)
             self.portal_card.set_visible(False)
+            if not self.debug_info_label or not self.debug_info_label.get_visible():
+                self.link_preview_box.set_visible(False)
+
+    def _on_page_hovered(self, page_index: int | None, x: float, y: float):
+        if not self.debug_mode or not self.debug_info_label:
+            return
+
+        if page_index is not None and self.canvas.page_layout and 0 <= page_index < len(self.canvas.page_layout):
+            y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_index]
+            crop_str = (
+                f"({crop_rect.x0:.1f}, {crop_rect.y0:.1f}, {crop_rect.x1:.1f}, {crop_rect.y1:.1f})"
+                if crop_rect is not None
+                else "uncropped"
+            )
+            scroll_y = self.vadjustment.get_value()
+            total_pages = self.doc_model.page_count if self.doc_model else "?"
+            debug_txt = (
+                f"PAGE:     {page_index + 1} / {total_pages} (index {page_index})\n"
+                f"LAYOUT:   y_off={y_offset:.1f}px | width={dw:.1f}px | height={dh:.1f}px\n"
+                f"CROP:     {crop_str}\n"
+                f"VIEWPORT: zoom={self.zoom:.2f} | scale={self.canvas.dpi_scale_factor:.1f} | scroll_y={scroll_y:.1f}px | backend={self.backend}"
+            )
+            self.debug_info_label.set_text(debug_txt)
+            self.debug_info_label.set_visible(True)
+            self.link_preview_box.set_visible(True)
+        else:
+            self.debug_info_label.set_text("")
+            self.debug_info_label.set_visible(False)
+            if not self.link_preview_card_box.get_visible():
+                self.link_preview_box.set_visible(False)
 
     def _show_link_portal_preview(self, source_page_index: int | None, link: dict) -> bool:
         self._portal_debounce_id = None
@@ -1407,10 +1506,28 @@ class MainWindow(Adw.ApplicationWindow):
 
         target_rect = self.doc_model.page_rect(target_page)
         to_point = link.get("to")
-        target_y = max(0.0, target_rect.height - to_point.y) if (to_point and to_point.y > 0.0) else 0.0
+        target_y = (
+            max(0.0, target_rect.height - float(to_point.y))
+            if (to_point and hasattr(to_point, "y") and to_point.y is not None and to_point.y > 0.0)
+            else (target_rect.height / 2.0)
+        )
 
-        scale_factor = self.canvas.get_scale_factor()
-        cached_surface = self.portal_cache.get(target_page, target_y)
+        viewport_w = max(300.0, float(self.scrolled_window.get_width()))
+        viewport_h = max(300.0, float(self.scrolled_window.get_height()))
+
+        scale_factor = float(self.canvas.get_scale_factor())
+        scale = self.zoom * self.canvas.dpi_scale_factor
+        page_dw = target_rect.width * scale
+        raw_portal_w = int(page_dw - 2.0 * self.canvas.page_gap)
+        raw_portal_h = int(160.0 * scale)
+        portal_w = max(200, min(int(viewport_w - 32.0), raw_portal_w))
+        portal_h = max(100, min(int(viewport_h - 40.0), raw_portal_h))
+        self.portal_card.set_portal_size(portal_w, portal_h)
+
+        render_w = int(portal_w * scale_factor)
+        render_h = int(portal_h * scale_factor)
+
+        cached_surface = self.portal_cache.get(target_page, target_y, render_w, render_h)
         if cached_surface:
             self.portal_card.set_surface(cached_surface)
         else:
@@ -1419,26 +1536,15 @@ class MainWindow(Adw.ApplicationWindow):
                 self.doc_model,
                 target_page,
                 target_y,
-                self.zoom,
+                render_w,
+                render_h,
                 scale_factor,
                 self.portal_cache,
                 self._on_portal_render_complete,
             )
 
-        viewport_w = self.scrolled_window.get_width()
-        viewport_h = self.scrolled_window.get_height()
-
-        if self.canvas.containers and self.canvas.containers[0].get_allocation().width > 0:
-            portal_w = self.canvas.containers[0].get_allocation().width
-        else:
-            scale = self.zoom * self.canvas.dpi_scale_factor
-            portal_w = int(target_rect.width * scale)
-
-        portal_h = int(160.0 * self.zoom * self.canvas.dpi_scale_factor)
-        self.portal_card.set_portal_size(portal_w, portal_h)
-
-        # Center portal horizontally in viewport (equal left and right margins)
-        pos_x = int((viewport_w - portal_w) / 2.0)
+        # Center portal horizontally in viewport
+        pos_x = max(16, int((viewport_w - portal_w) / 2.0))
 
         # Vertical positioning relative to link position using link_center_y
         link_rect = self.canvas.get_link_screen_rect(source_page_index, link, self.overlay) if source_page_index is not None else None
@@ -1448,11 +1554,13 @@ class MainWindow(Adw.ApplicationWindow):
             gap_offset = 10.0
 
             if link_center_y < (viewport_h / 2.0):
-                pos_y = int(link_y + link_h + gap_offset)
+                pos_y = int(max(8.0, link_y + link_h + gap_offset))
             else:
-                pos_y = int(max(8, link_y - portal_h - gap_offset))
+                pos_y = int(max(8.0, link_y - portal_h - gap_offset))
         else:
-            pos_y = int((viewport_h - portal_h) / 2.0)
+            pos_y = max(8, int((viewport_h - portal_h) / 2.0))
+
+        pos_y = max(8, min(int(viewport_h - portal_h - 8), pos_y))
 
         self.portal_card.set_margin_start(pos_x)
         self.portal_card.set_margin_top(pos_y)

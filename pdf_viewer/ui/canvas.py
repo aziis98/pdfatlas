@@ -32,6 +32,7 @@ class PageContainer(Gtk.Box):
 
         self.set_valign(Gtk.Align.CENTER)
         self.set_halign(Gtk.Align.CENTER)
+        self.set_focusable(False)
         self.add_css_class("page-container")
 
     def set_layout_params(self, y_offset, w, h, crop_rect):
@@ -151,8 +152,8 @@ class PageContainer(Gtk.Box):
                 cr.stroke()
                 cr.restore()
 
-        # 3. Interactive PDF Link Stroke Outlines (TOC, internal jumps, external URLs)
-        if canvas.doc_model:
+        # 3. Interactive PDF Link Stroke Outlines (Cairo backend only)
+        if canvas.backend != "opengl" and canvas.doc_model:
             links = canvas.doc_model.get_page_links(self.page_index)
             crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
             crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
@@ -193,6 +194,15 @@ class PageContainer(Gtk.Box):
                 cr.stroke()
                 cr.restore()
 
+        # 4. Debug Mode: Magenta border for Cairo page canvas
+        if canvas.backend != "opengl" and getattr(canvas, "debug_mode", False):
+            cr.save()
+            cr.set_source_rgba(1.0, 0.0, 1.0, 0.9)  # Magenta (#ff00ff)
+            cr.set_line_width(2.0)
+            cr.rectangle(0.5, 0.5, width - 1.0, height - 1.0)
+            cr.stroke()
+            cr.restore()
+
 
 class PDFCanvas(Gtk.Box):
     """
@@ -211,6 +221,9 @@ class PDFCanvas(Gtk.Box):
         self.cache = None
         self.render_worker = None
         self.crop_analyzer = None
+        self.gl_canvas = None
+        self.backend: str = "cairo"
+        self.debug_mode: bool = False
         self.settings = None
 
         self.zoom = 1.0
@@ -227,6 +240,7 @@ class PDFCanvas(Gtk.Box):
         self.hovered_link: tuple[int, dict] | None = None
         self.on_link_clicked: Any = None
         self.on_link_hovered: Any = None
+        self.on_page_hovered: Any = None
 
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
@@ -235,6 +249,7 @@ class PDFCanvas(Gtk.Box):
         # Backend settings
         self.backend = "opengl"
         self.gl_canvas: Any = None
+        self.set_focusable(False)
 
         self._setup_link_controllers()
 
@@ -249,41 +264,50 @@ class PDFCanvas(Gtk.Box):
         click_gesture.connect("pressed", self._on_click)
         self.add_controller(click_gesture)
 
+    def _hit_test_page(self, x: float, y: float) -> int | None:
+        if not self.page_layout:
+            return None
+        half_gap = self.page_gap / 2.0
+        scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
+        for i, layout in enumerate(self.page_layout):
+            y_offset, dw, dh, crop_rect = layout
+            page_y0 = y_offset - scroll_y
+            page_y1 = page_y0 + dh
+
+            if page_y0 - half_gap <= y <= page_y1 + half_gap:
+                return i
+        return None
+
     def _hit_test_link(self, x: float, y: float) -> tuple[int, dict] | None:
-        if not self.doc_model or not self.containers:
+        if not self.doc_model or not self.page_layout:
             return None
 
         scale = self.zoom * self.dpi_scale_factor
         canvas_w = float(self.get_width())
+        scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
 
-        for container in self.containers:
-            alloc = container.get_allocation()
-            if alloc.width > 0 and alloc.height > 0:
-                page_x0 = float(alloc.x)
-                page_y0 = float(alloc.y)
-                page_x1 = page_x0 + float(alloc.width)
-                page_y1 = page_y0 + float(alloc.height)
-            else:
-                page_x0 = max(0.0, (canvas_w - container.w) / 2) if canvas_w > container.w else 0.0
-                page_y0 = container.y_offset
-                page_x1 = page_x0 + container.w
-                page_y1 = page_y0 + container.h
+        for i, layout in enumerate(self.page_layout):
+            y_offset, dw, dh, crop_rect = layout
+            page_x0 = (canvas_w - dw) / 2.0
+            page_y0 = y_offset - scroll_y
+            page_x1 = page_x0 + dw
+            page_y1 = page_y0 + dh
 
             if page_x0 <= x <= page_x1 and page_y0 <= y <= page_y1:
                 rel_x = x - page_x0
                 rel_y = y - page_y0
 
-                crop_off_x = container.crop_rect.x0 if container.crop_rect is not None else 0.0
-                crop_off_y = container.crop_rect.y0 if container.crop_rect is not None else 0.0
+                crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+                crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
 
                 pt_x = (rel_x / scale) + crop_off_x
                 pt_y = (rel_y / scale) + crop_off_y
 
-                links = self.doc_model.get_page_links(container.page_index)
+                links = self.doc_model.get_page_links(i)
                 for link in links:
                     from_rect = link.get("from")
                     if from_rect and (from_rect.x0 <= pt_x <= from_rect.x1 and from_rect.y0 <= pt_y <= from_rect.y1):
-                        return (container.page_index, link)
+                        return (i, link)
                 break
         return None
 
@@ -291,57 +315,48 @@ class PDFCanvas(Gtk.Box):
         self, page_index: int, link: dict, overlay_widget: Any = None
     ) -> tuple[float, float, float, float] | None:
         from_rect = link.get("from")
-        if not from_rect or not self.containers:
+        if not from_rect or not self.page_layout:
             return None
 
         scale = self.zoom * self.dpi_scale_factor
         canvas_w = float(self.get_width())
+        scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
 
-        for container in self.containers:
-            if container.page_index == page_index:
-                page_x0 = 0.0
-                page_y0 = 0.0
-                translated = False
+        if 0 <= page_index < len(self.page_layout):
+            y_offset, dw, dh, crop_rect = self.page_layout[page_index]
+            page_x0 = (canvas_w - dw) / 2.0
+            page_y0 = y_offset - scroll_y
 
-                if overlay_widget:
-                    res = container.translate_coordinates(overlay_widget, 0.0, 0.0)
-                    if res is not None:
-                        page_x0, page_y0 = float(res[0]), float(res[1])
-                        translated = True
+            crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+            crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
 
-                if not translated:
-                    alloc = container.get_allocation()
-                    if alloc.width > 0 and alloc.height > 0:
-                        page_x0 = float(alloc.x)
-                        page_y0 = float(alloc.y)
-                    else:
-                        page_x0 = max(0.0, (canvas_w - container.w) / 2) if canvas_w > container.w else 0.0
-                        page_y0 = container.y_offset
+            link_screen_x0 = page_x0 + (from_rect.x0 - crop_off_x) * scale
+            link_screen_y0 = page_y0 + (from_rect.y0 - crop_off_y) * scale
+            link_screen_w = (from_rect.x1 - from_rect.x0) * scale
+            link_screen_h = (from_rect.y1 - from_rect.y0) * scale
 
-                    if self.vadjustment:
-                        page_y0 -= self.vadjustment.get_value()
-                    if self.hadjustment:
-                        page_x0 -= self.hadjustment.get_value()
-
-                crop_off_x = container.crop_rect.x0 if container.crop_rect is not None else 0.0
-                crop_off_y = container.crop_rect.y0 if container.crop_rect is not None else 0.0
-
-                link_screen_x0 = page_x0 + (from_rect.x0 - crop_off_x) * scale
-                link_screen_y0 = page_y0 + (from_rect.y0 - crop_off_y) * scale
-                link_screen_w = (from_rect.x1 - from_rect.x0) * scale
-                link_screen_h = (from_rect.y1 - from_rect.y0) * scale
-
-                return (link_screen_x0, link_screen_y0, link_screen_w, link_screen_h)
+            return (link_screen_x0, link_screen_y0, link_screen_w, link_screen_h)
+        return None
         return None
 
     def queue_draw_overlays(self):
-        for c in self.containers:
-            if c.drawing_area:
-                c.drawing_area.queue_draw()
+        if self.backend == "opengl" and self.gl_canvas:
+            self.gl_canvas.queue_draw()
+        else:
+            for c in self.containers:
+                if c.drawing_area:
+                    c.drawing_area.queue_draw()
 
     def _on_motion(self, controller, x, y):
         hit = self._hit_test_link(x, y)
-        if hit != self.hovered_link:
+        is_same = (
+            self.hovered_link is not None
+            and hit is not None
+            and self.hovered_link[0] == hit[0]
+            and self.hovered_link[1].get("xref") == hit[1].get("xref")
+            and self.hovered_link[1].get("from") == hit[1].get("from")
+        )
+        if not is_same and (hit is not None or self.hovered_link is not None):
             self.hovered_link = hit
             cursor_name = "pointer" if hit is not None else "default"
             self.set_cursor(Gdk.Cursor.new_from_name(cursor_name))
@@ -352,6 +367,10 @@ class PDFCanvas(Gtk.Box):
                 else:
                     self.on_link_hovered(None, None)
 
+        if self.on_page_hovered:
+            hovered_page_idx = self._hit_test_page(x, y)
+            self.on_page_hovered(hovered_page_idx, x, y)
+
     def _on_leave(self, controller):
         if self.hovered_link is not None:
             self.hovered_link = None
@@ -359,9 +378,15 @@ class PDFCanvas(Gtk.Box):
             self.queue_draw_overlays()
             if self.on_link_hovered:
                 self.on_link_hovered(None, None)
+        if self.on_page_hovered:
+            self.on_page_hovered(None, 0.0, 0.0)
 
     def _on_click(self, gesture, n_press, x, y):
         if n_press == 1:
+            root = self.get_root()
+            if root and hasattr(root, "set_focus"):
+                root.set_focus(None)
+
             hit = self._hit_test_link(x, y)
             if hit is not None:
                 page_idx, link = hit
@@ -409,7 +434,12 @@ class PDFCanvas(Gtk.Box):
             self.render_worker.clear_canvas_render_jobs()
         if self.cache:
             self.cache.clear()
+        if self.hovered_link is not None:
+            self.hovered_link = None
+            if self.on_link_hovered:
+                self.on_link_hovered(None, None)
         self.update_layout()
+        self.queue_draw_overlays()
 
     def on_crop_changed(self):
         self.in_flight.clear()
@@ -443,6 +473,8 @@ class PDFCanvas(Gtk.Box):
 
         page_count = self.doc_model.page_count
         self.set_spacing(self.page_gap)
+        self.set_margin_top(int(self.page_gap))
+        self.set_margin_bottom(int(self.page_gap))
 
         # Rebuild/recreate container widgets if size differs
         if len(self.containers) != page_count:
@@ -458,7 +490,7 @@ class PDFCanvas(Gtk.Box):
                 self.append(container)
                 self.containers.append(container)
 
-        current_y = 0.0
+        current_y = float(self.page_gap)
         self.page_layout = []
 
         for i in range(page_count):
@@ -479,6 +511,9 @@ class PDFCanvas(Gtk.Box):
             container.set_layout_params(current_y, dw, dh, crop_rect)
 
             current_y += dh + self.page_gap
+
+        if self.vadjustment:
+            self.vadjustment.set_upper(current_y)
 
         self._update_visibility()
 

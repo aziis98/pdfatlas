@@ -23,6 +23,7 @@ class PDFViewerApplication(Adw.Application):
         self.state: str | None = None
         self.screenshot: str | None = None
         self.follow_link: int | None = None
+        self.debug: bool = False
 
     def do_activate(self):
         # Create and present the main application window
@@ -30,6 +31,7 @@ class PDFViewerApplication(Adw.Application):
         state = getattr(self, "state", None)
         screenshot = getattr(self, "screenshot", None)
         follow_link = getattr(self, "follow_link", None)
+        debug_mode = getattr(self, "debug", False)
 
         win = MainWindow(
             self,
@@ -37,6 +39,7 @@ class PDFViewerApplication(Adw.Application):
             state=state,
             screenshot_path=screenshot,
             follow_link=follow_link,
+            debug_mode=debug_mode,
         )
         win.present()
 
@@ -140,6 +143,7 @@ def main():
     parser.add_argument("--state", default=None, help="Initial application state as a JSON string")
     parser.add_argument("--screenshot", default=None, help="Path to save window screenshot after 2 seconds")
     parser.add_argument("--follow-link", type=int, default=None, help="Index of N-th link in document to follow on open")
+    parser.add_argument("--debug", action="store_true", help="Enable debug overlay for page layout values")
     parser.add_argument("--headless", action="store_true", help="Run inside a virtual display using xvfb-run if available")
 
     args = parser.parse_args(sys.argv[1:])
@@ -157,6 +161,7 @@ def main():
     app.state = args.state
     app.screenshot = args.screenshot
     app.follow_link = args.follow_link
+    app.debug = args.debug
 
     sys.exit(app.run([sys.argv[0]]))
 

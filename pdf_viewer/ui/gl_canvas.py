@@ -3,6 +3,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
+import numpy as np
 from OpenGL import GL as gl
 
 
@@ -118,105 +119,81 @@ class GLCanvas(Gtk.GLArea):
             self.u_is_placeholder = gl.glGetUniformLocation(self.shader_program, "u_is_placeholder")
             self.u_color = gl.glGetUniformLocation(self.shader_program, "u_color")
 
+            # 2. Quad Mesh VAO/VBO Setup (Position vec2, TexCoord vec2)
+            # Full unit quad [0,0] to [1,1]
+            vertices = np.array(
+                [
+                    # Pos    # TexCoord
+                    0.0, 0.0, 0.0, 0.0,
+                    1.0, 0.0, 1.0, 0.0,
+                    0.0, 1.0, 0.0, 1.0,
+                    0.0, 1.0, 0.0, 1.0,
+                    1.0, 0.0, 1.0, 0.0,
+                    1.0, 1.0, 1.0, 1.0,
+                ],
+                dtype=np.float32,
+            )
+
+            self.vao = gl.glGenVertexArrays(1)
+            self.vbo = gl.glGenBuffers(1)
+
+            gl.glBindVertexArray(self.vao)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices.nbytes, vertices, gl.GL_STATIC_DRAW)
+
+            # Attribute 0: Position (2 floats)
+            gl.glVertexAttribPointer(0, 2, gl.GL_FLOAT, gl.GL_FALSE, 4 * 4, gl.ctypes.c_void_p(0))
+            gl.glEnableVertexAttribArray(0)
+
+            # Attribute 1: TexCoord (2 floats)
+            gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 4 * 4, gl.ctypes.c_void_p(2 * 4))
+            gl.glEnableVertexAttribArray(1)
+
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+            gl.glBindVertexArray(0)
+            print("[GLCanvas] OpenGL pipeline initialized successfully.")
         except Exception as e:
-            print(f"[GLCanvas] Shader compiler error: {e}")
+            print(f"[GLCanvas] Failed to initialize OpenGL pipeline: {e}")
             self.set_error(GLib.Error.new_literal(GLib.quark_from_string("opengl"), str(e), 1))
-            return
 
-        # 2. Setup unit quad VAO/VBO [0, 1] range
-        vertices = [
-            # pos_x, pos_y,  tex_u, tex_v
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-            1.0,
-            0.0,
-            1.0,
-            0.0,
-            1.0,
-            1.0,
-            0.0,
-            1.0,
-            0.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-        ]
-
-        import ctypes
-
-        vertex_data = (ctypes.c_float * len(vertices))(*vertices)
-
-        self.vao = gl.glGenVertexArrays(1)
-        self.vbo = gl.glGenBuffers(1)
-
-        gl.glBindVertexArray(self.vao)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(vertex_data), vertex_data, gl.GL_STATIC_DRAW)
-
-        # Position attribute (x, y)
-        gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(
-            0, 2, gl.GL_FLOAT, gl.GL_FALSE, 4 * ctypes.sizeof(ctypes.c_float), ctypes.c_void_p(0)
-        )
-
-        # Texture coordinates attribute (u, v)
-        gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(
-            1,
-            2,
-            gl.GL_FLOAT,
-            gl.GL_FALSE,
-            4 * ctypes.sizeof(ctypes.c_float),
-            ctypes.c_void_p(2 * ctypes.sizeof(ctypes.c_float)),
-        )
-
-        gl.glBindVertexArray(0)
-        print("[GLCanvas] OpenGL pipeline initialized successfully.")
-
-    def _compile_shader(self, shader_type, source):
+    def _compile_shader(self, shader_type, source: str) -> int:
         shader = gl.glCreateShader(shader_type)
         gl.glShaderSource(shader, source)
         gl.glCompileShader(shader)
-        if gl.glGetShaderiv(shader, gl.GL_COMPILE_STATUS) != gl.GL_TRUE:
-            info = gl.glGetShaderInfoLog(shader)
-            raise RuntimeError(f"Shader compilation failed: {info}")
-        return shader
+        if not gl.glGetShaderiv(shader, gl.GL_COMPILE_STATUS):
+            info_log = gl.glGetShaderInfoLog(shader)
+            raise RuntimeError(f"Shader compilation failed:\n{info_log.decode()}")
+        return int(shader or 0)
+
+    def _link_program(self, vs: int, fs: int) -> int:
+        program = gl.glCreateProgram()
+        gl.glAttachShader(program, vs)
+        gl.glAttachShader(program, fs)
+        gl.glLinkProgram(program)
+        if not gl.glGetProgramiv(program, gl.GL_LINK_STATUS):
+            info_log = gl.glGetProgramInfoLog(program)
+            raise RuntimeError(f"Program linking failed:\n{info_log.decode()}")
+        return int(program or 0)
 
     def _on_unrealize(self, area):
         self.make_current()
-        if self.shader_program:
-            gl.glDeleteProgram(self.shader_program)
         if self.vao:
             gl.glDeleteVertexArrays(1, [self.vao])
         if self.vbo:
             gl.glDeleteBuffers(1, [self.vbo])
-
-        # Clean up OpenGL textures
+        if self.shader_program:
+            gl.glDeleteProgram(self.shader_program)
         for tex_id in self.textures.values():
-            gl.glDeleteTextures([tex_id])
+            gl.glDeleteTextures(1, [tex_id])
         self.textures.clear()
 
     def _on_render(self, area, context):
-        if self.shader_program == 0:
+        canvas = self.layout_provider
+        if not canvas or not canvas.page_layout:
             return False
 
-        # Query layout and viewport parameters from parent scrolled window
-        canvas = self.layout_provider
-        if not canvas or not canvas.doc_model or not canvas.vadjustment:
-            # Clear screen to default background color
-            gl.glClearColor(0.88, 0.88, 0.88, 1.0)
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-            return True
+        if not canvas.vadjustment:
+            return False
 
         y_min = canvas.vadjustment.get_value()
         page_size = canvas.vadjustment.get_page_size()
@@ -238,7 +215,7 @@ class GLCanvas(Gtk.GLArea):
 
         gl.glUseProgram(self.shader_program)
         gl.glUniform2f(self.u_resolution, float(viewport_w), float(viewport_h))
-        gl.glUniform2f(self.u_offset, 0.0, float(y_min))
+        gl.glUniform2f(self.u_offset, 0.0, float(round(y_min)))
 
         # Enable Alpha Blending for clean page anti-aliasing
         gl.glEnable(gl.GL_BLEND)
@@ -253,13 +230,12 @@ class GLCanvas(Gtk.GLArea):
         page_count = len(canvas.page_layout)
         for i in range(page_count):
             y_offset, dw, dh, crop_rect = canvas.page_layout[i]
-            # Shift Y positions by canvas top padding (page_gap size)
-            page_y0 = y_offset + canvas.page_gap
+            page_y0 = float(round(y_offset))
             page_y1 = page_y0 + dh
 
             if page_y1 >= y_min and page_y0 <= y_max:
                 # Center page horizontally inside viewport
-                x_offset = max(0.0, (viewport_w - dw) / 2)
+                x_offset = float(round((viewport_w - dw) / 2.0))
 
                 # Draw white page background card
                 gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
@@ -354,6 +330,93 @@ class GLCanvas(Gtk.GLArea):
                             gl.glUniform2f(self.u_page_pos, float(hx + hw - border_t), float(hy))
                             gl.glUniform2f(self.u_page_size, float(border_t), float(hh))
                             gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                    # Draw Interactive PDF Links directly in OpenGL
+                    if canvas.doc_model:
+                        links = canvas.doc_model.get_page_links(i)
+                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        scale = canvas.zoom * canvas.dpi_scale_factor
+
+                        for link in links:
+                            from_rect = link.get("from")
+                            if not from_rect:
+                                continue
+
+                            lx0 = x_offset + (from_rect.x0 - crop_off_x) * scale
+                            ly0 = page_y0 + (from_rect.y0 - crop_off_y) * scale
+                            lw = (from_rect.x1 - from_rect.x0) * scale
+                            lh = (from_rect.y1 - from_rect.y0) * scale
+
+                            is_hovered = (
+                                canvas.hovered_link is not None
+                                and canvas.hovered_link[0] == i
+                                and canvas.hovered_link[1] is link
+                            )
+                            is_uri = link.get("kind") == 2  # fitz.LINK_URI (2)
+
+                            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+                            gl.glUniform1i(self.u_is_placeholder, 2)
+
+                            if is_hovered:
+                                if is_uri:
+                                    # Premultiplied green [0.18, 0.76, 0.49, 0.30]
+                                    gl.glUniform4f(self.u_color, 0.054, 0.228, 0.147, 0.30)
+                                else:
+                                    # Premultiplied blue [0.20, 0.52, 0.90, 0.30]
+                                    gl.glUniform4f(self.u_color, 0.06, 0.156, 0.27, 0.30)
+                                gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0))
+                                gl.glUniform2f(self.u_page_size, float(lw), float(lh))
+                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                            # Stroke outline border quads (1.8px)
+                            border_t = 1.8
+                            if is_uri:
+                                # Premultiplied green outline [0.18, 0.76, 0.49, 0.85]
+                                gl.glUniform4f(self.u_color, 0.153, 0.646, 0.4165, 0.85)
+                            else:
+                                # Premultiplied blue outline [0.20, 0.52, 0.90, 0.85]
+                                gl.glUniform4f(self.u_color, 0.17, 0.442, 0.765, 0.85)
+
+                            # Top Edge
+                            gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0))
+                            gl.glUniform2f(self.u_page_size, float(lw), float(border_t))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            # Bottom Edge
+                            gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0 + lh - border_t))
+                            gl.glUniform2f(self.u_page_size, float(lw), float(border_t))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            # Left Edge
+                            gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0))
+                            gl.glUniform2f(self.u_page_size, float(border_t), float(lh))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            # Right Edge
+                            gl.glUniform2f(self.u_page_pos, float(lx0 + lw - border_t), float(ly0))
+                            gl.glUniform2f(self.u_page_size, float(border_t), float(lh))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                    # Draw Debug Magenta Border if in debug_mode
+                    if getattr(canvas, "debug_mode", False):
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+                        gl.glUniform1i(self.u_is_placeholder, 2)
+                        gl.glUniform4f(self.u_color, 0.9, 0.0, 0.9, 0.9)  # Magenta
+                        mb_t = 2.0
+                        # Top Edge
+                        gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0))
+                        gl.glUniform2f(self.u_page_size, float(dw), float(mb_t))
+                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                        # Bottom Edge
+                        gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0 + dh - mb_t))
+                        gl.glUniform2f(self.u_page_size, float(dw), float(mb_t))
+                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                        # Left Edge
+                        gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0))
+                        gl.glUniform2f(self.u_page_size, float(mb_t), float(dh))
+                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                        # Right Edge
+                        gl.glUniform2f(self.u_page_pos, float(x_offset + dw - mb_t), float(page_y0))
+                        gl.glUniform2f(self.u_page_size, float(mb_t), float(dh))
+                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
                 else:
                     # Draw a nice loading placeholder (grey)
                     gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
