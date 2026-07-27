@@ -93,11 +93,21 @@ def _thread_doc(pdf_path):
 from .portal_preview import LinkPortalPreviewCard
 
 
-def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
+def render_strip_surface(
+    pdf_path,
+    page_no,
+    x0,
+    y0,
+    x1,
+    y1,
+    query_terms,
+    target_w: int = 450,
+    target_h: int = 140,
+    scale_factor: float = 2.0,
+):
     """
-    Renders one search result page-strip directly to a cairo.ImageSurface.
-    Crops across the full page width (0 to page.rect.width) and a fixed-height
-    vertical window (about 3-4 lines of text) centered on the block midpoint.
+    Renders one search result page-strip pre-scaled to target card pixel dimensions
+    and sets device scale so GTK scroll passes perform a direct 1:1 memory blit.
     """
     doc = _thread_doc(pdf_path)
     page = doc[page_no - 1]
@@ -106,16 +116,26 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
     clip_x0 = 0.0
     clip_x1 = page.rect.width
 
-    # 2. Vertical bounds: 160pt height window centered on block midpoint to match card aspect ratio
-    WINDOW_HEIGHT_PT = 160.0
+    # 2. Fixed height vertical window clamped strictly within page bounds
+    WINDOW_HEIGHT_PT = 180.0
     mid_y = (y0 + y1) / 2.0
-    clip_y0 = max(0.0, mid_y - WINDOW_HEIGHT_PT / 2.0)
-    clip_y1 = min(page.rect.height, mid_y + WINDOW_HEIGHT_PT / 2.0)
+
+    clip_y0 = mid_y - (WINDOW_HEIGHT_PT / 2.0)
+    clip_y1 = mid_y + (WINDOW_HEIGHT_PT / 2.0)
+
+    if clip_y0 < 0.0:
+        clip_y0 = 0.0
+        clip_y1 = min(page.rect.height, WINDOW_HEIGHT_PT)
+    elif clip_y1 > page.rect.height:
+        clip_y1 = page.rect.height
+        clip_y0 = max(0.0, page.rect.height - WINDOW_HEIGHT_PT)
 
     clip = fitz.Rect(clip_x0, clip_y0, clip_x1, clip_y1)
 
-    mat = fitz.Matrix(STRIP_ZOOM, STRIP_ZOOM)
-    # Render with alpha so we get a clean buffer
+    zoom_x = (target_w * scale_factor) / page.rect.width
+    zoom_y = (target_h * scale_factor) / WINDOW_HEIGHT_PT
+    mat = fitz.Matrix(zoom_x, zoom_y)
+
     pix = page.get_pixmap(matrix=mat, clip=clip, alpha=True)
 
     # Convert the pixmap raw bytes into a NumPy array
@@ -126,6 +146,7 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
 
     h, w, _ = bgra.shape
     surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_ARGB32, w, h, w * 4)
+    surface.set_device_scale(scale_factor, scale_factor)
 
     # 3. Draw Highlights with Cairo
     ctx = cairo.Context(surface)
@@ -135,20 +156,20 @@ def render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms):
         # Get precise character-level matched ranges
         match_rects = get_query_match_rects(page, query_terms, clip_y0, clip_y1)
         for ux0, uy0, ux1, uy1 in match_rects:
-            px0 = (ux0 - clip.x0) * STRIP_ZOOM
-            py0 = (uy0 - clip.y0) * STRIP_ZOOM
-            pw = (ux1 - ux0) * STRIP_ZOOM
-            ph = (uy1 - uy0) * STRIP_ZOOM
+            px0 = (ux0 - clip.x0) * (zoom_x / scale_factor)
+            py0 = (uy0 - clip.y0) * (zoom_y / scale_factor)
+            pw = (ux1 - ux0) * (zoom_x / scale_factor)
+            ph = (uy1 - uy0) * (zoom_y / scale_factor)
             ctx.rectangle(px0, py0, pw, ph)
-    ctx.fill()
+        ctx.fill()
 
     return surface
 
 
-class ResultRow(Gtk.Box):
+class ResultRow(Gtk.Overlay):
     """
-    A single Search Result card: location header with pin button, and a
-    full-width, uniform fixed-height page clip rendered via LinkPortalPreviewCard.
+    A single compact Search Result card: full-width portal snippet with floating top-left pin button
+    (visible on hover or when pinned) and floating bottom-left page location pill.
     """
 
     def __init__(
@@ -162,11 +183,11 @@ class ResultRow(Gtk.Box):
         on_render_done=None,
         on_row_clicked=None,
     ):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.set_margin_top(6)
-        self.set_margin_bottom(6)
-        self.set_margin_start(12)
-        self.set_margin_end(12)
+        super().__init__()
+        self.set_margin_top(4)
+        self.set_margin_bottom(4)
+        self.set_margin_start(6)
+        self.set_margin_end(6)
         self.set_hexpand(False)
         self.set_halign(Gtk.Align.CENTER)
 
@@ -179,32 +200,46 @@ class ResultRow(Gtk.Box):
         page = result["page"]
         x0, y0, x1, y1 = result["x0"], result["y0"], result["x1"], result["y1"]
 
-        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-
-        label = Gtk.Label(
-            label=f"Page {page}  ·  y {int(y0)}–{int(y1)} pt",
-            xalign=0,
-        )
-        label.add_css_class("dim-label")
-        label.add_css_class("caption")
-        label.set_hexpand(True)
-        header_box.append(label)
-
-        self.pin_button = Gtk.ToggleButton(label="📌 Pinned" if pinned else "📌 Pin")
-        self.pin_button.add_css_class("flat")
-        self.pin_button.set_active(pinned)
-        self.pin_button.connect("toggled", self._on_pin_toggled)
-        header_box.append(self.pin_button)
-
-        self.append(header_box)
-
-        # Uniform LinkPortalPreviewCard widget for uniform search portal preview UI
+        # Main Child: Uniform LinkPortalPreviewCard widget
         self.portal_card = LinkPortalPreviewCard()
-        self.portal_card.set_portal_size(450, 120)
+        self.portal_card.set_portal_size(450, 140)
         self.portal_card.set_loading()
         self.portal_card.set_hexpand(False)
         self.portal_card.set_halign(Gtk.Align.CENTER)
-        self.append(self.portal_card)
+        self.set_child(self.portal_card)
+
+        # Top-Right Overlay: Floating Pin Button (view-pin-symbolic icon, visible on hover or if pinned)
+        self.pin_button = Gtk.ToggleButton()
+        self.pin_button.set_icon_name("view-pin-symbolic")
+        self.pin_button.add_css_class("flat")
+        self.pin_button.add_css_class("circular")
+        self.pin_button.add_css_class("portal-overlay-pin")
+        self.pin_button.set_tooltip_text("Pin result")
+        self.pin_button.set_active(pinned)
+        self.pin_button.set_margin_top(8)
+        self.pin_button.set_margin_end(8)
+        self.pin_button.set_halign(Gtk.Align.END)
+        self.pin_button.set_valign(Gtk.Align.START)
+        self.pin_button.set_opacity(1.0 if pinned else 0.0)
+        self.pin_button.connect("toggled", self._on_pin_toggled)
+        self.add_overlay(self.pin_button)
+
+        # Bottom-Left Overlay: Floating Page Info Pill (opacity 0.5 by default, 1.0 on hover)
+        self.page_label = Gtk.Label(label=f"Page {page}")
+        self.page_label.add_css_class("caption")
+        self.page_label.add_css_class("portal-overlay-pill")
+        self.page_label.set_margin_bottom(8)
+        self.page_label.set_margin_start(8)
+        self.page_label.set_halign(Gtk.Align.START)
+        self.page_label.set_valign(Gtk.Align.END)
+        self.page_label.set_opacity(0.5)
+        self.add_overlay(self.page_label)
+
+        # Motion Controller to update overlays on hover
+        motion = Gtk.EventControllerMotion.new()
+        motion.connect("enter", lambda ctrl, x, y: self._on_hover_changed(True))
+        motion.connect("leave", lambda ctrl: self._on_hover_changed(False))
+        self.add_controller(motion)
 
         # Handle mouse clicks on the row
         click = Gtk.GestureClick.new()
@@ -214,9 +249,16 @@ class ResultRow(Gtk.Box):
 
         executor.submit(self._render_worker, pdf_path, page, x0, y0, x1, y1, query_terms)
 
+    def _on_hover_changed(self, is_hovered: bool):
+        if self.pin_button.get_active():
+            self.pin_button.set_opacity(1.0)
+        else:
+            self.pin_button.set_opacity(1.0 if is_hovered else 0.0)
+        self.page_label.set_opacity(1.0 if is_hovered else 0.5)
+
     def _on_pin_toggled(self, btn):
         active = btn.get_active()
-        btn.set_label("📌 Pinned" if active else "📌 Pin")
+        btn.set_opacity(1.0 if active else 0.0)
         if self.on_toggle_pin:
             self.on_toggle_pin(self.result, self.query_terms, active)
 
@@ -226,7 +268,19 @@ class ResultRow(Gtk.Box):
 
     def _render_worker(self, pdf_path, page_no, x0, y0, x1, y1, query_terms):
         try:
-            surface = render_strip_surface(pdf_path, page_no, x0, y0, x1, y1, query_terms)
+            scale_factor = float(self.get_scale_factor()) if hasattr(self, "get_scale_factor") and self.get_scale_factor() > 0 else 2.0
+            surface = render_strip_surface(
+                pdf_path,
+                page_no,
+                x0,
+                y0,
+                x1,
+                y1,
+                query_terms,
+                target_w=450,
+                target_h=140,
+                scale_factor=scale_factor,
+            )
         except Exception as e:
             print(f"Error rendering portal strip surface: {e}")
             surface = None
