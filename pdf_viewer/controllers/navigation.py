@@ -93,8 +93,8 @@ class NavigationController:
 
         # Update zoom label
         pct = int(round(new_zoom * 100))
-        self.win.zoom_btn.set_label(f"{pct}%")
-        self.win.zoom_floating_label.set_text(f"{pct}%")
+        if hasattr(self.win, "zoom_label") and self.win.zoom_label is not None:
+            self.win.zoom_label.set_label(f"{pct}%")
 
         self.win.render_cache.clear()
         self.win.render_worker.clear_canvas_render_jobs()
