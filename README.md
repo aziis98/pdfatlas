@@ -1,4 +1,4 @@
-# PDF Atlas
+# <img src="assets/logo.png" width="36" height="36" style="vertical-align: middle; margin-right: 10px;" alt="logo" /> PDF Atlas
 
 > [!NOTE]
 > This project was built with a _reasonable amount of AI assistance_. As a result, parts of the codebase might be a bit sloppy, but this doesn't mean that I don't care and I will try my best to manage and maintain it. Issues and _smallish_ PRs are welcome.
