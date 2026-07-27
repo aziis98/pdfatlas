@@ -59,7 +59,7 @@ class LinkPreviewManager:
             self._active_hover_link = None
             self.portal_card.set_visible(False)
 
-            if not self.win.debug_info_label.get_visible():
+            if not self.win.debug_info_label or not self.win.debug_info_label.get_visible():
                 self.win.link_preview_box.set_visible(False)
 
     def show_link_portal_preview(self, source_page_index: int | None, link: dict) -> bool:
