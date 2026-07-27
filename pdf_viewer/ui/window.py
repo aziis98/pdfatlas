@@ -51,7 +51,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_title("PDF Viewer")
         self.backend = backend
         self.debug_mode = debug_mode
-        self.set_default_size(900, 700)
+        self.set_default_size(1000, 700)
         self.initial_state = state
         self.screenshot_path = screenshot_path
         self.follow_link = follow_link
@@ -897,6 +897,19 @@ class MainWindow(Adw.ApplicationWindow):
                 overflow: hidden;
                 padding: 0px;
                 box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.12), 0px 1px 3px rgba(0, 0, 0, 0.08);
+            }
+            .portal-overlay-pin {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 4px;
+            }
+            .portal-overlay-pill {
+                background-color: rgba(60, 60, 60, 0.85);
+                color: #ffffff;
+                border-radius: 12px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 500;
             }
         """
 

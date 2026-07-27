@@ -151,7 +151,7 @@ class RenderWorker:
                     ) = args
 
                     page = doc_model.get_page(page_index)
-                    physical_zoom = zoom * scale_factor if not is_minimap else 0.2
+                    physical_zoom = zoom * scale_factor
 
                     mat = fitz.Matrix(physical_zoom, physical_zoom)
                     rect_to_render = crop_rect if crop_rect is not None else page.rect
