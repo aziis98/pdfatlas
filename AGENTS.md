@@ -32,7 +32,7 @@ Ensure both commands report **0 errors**.
 
 ## 3. Screenshot Policy
 
-- The standalone script [`scripts/generate_screenshots.py`](file:///home/aziis98/Projects/pdfatlas/scripts/generate_screenshots.py) programmatically re-generates all README screenshots with GNOME window drop-shadows.
+- The standalone script [`scripts/generate_screenshots.py`](scripts/generate_screenshots.py) programmatically re-generates all README screenshots with GNOME window drop-shadows.
 
 - **Rule:** **Only run `scripts/generate_screenshots.py` if explicitly asked by the user.** Do not automatically re-generate screenshots after routine bug fixes or refactorings.
 
@@ -64,3 +64,10 @@ pdfatlas/
 ├── scripts/                 # Maintenance and benchmark scripts
 └── pyproject.toml           # Package configuration & tool settings
 ```
+
+---
+
+## 5. Research Log & Technical Knowledge Base
+
+- **Rule:** Maintain and update [`RESEARCH.md`](RESEARCH.md) periodically whenever discovering durable technical findings, architectural tradeoffs, coordinate system math, or rejected approaches.
+- Always document **why** an approach failed and **how** the durable solution works to prevent regression loops.
