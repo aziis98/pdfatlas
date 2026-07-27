@@ -3,7 +3,7 @@
 > [!NOTE]
 > This project was built with a _reasonable amount of AI assistance_. As a result, parts of the codebase might be a bit sloppy, but this doesn't mean that I don't care and I will try my best to manage and maintain it. Issues and _smallish_ PRs are welcome.
 
-<img src="assets/logo.png" width="80" style="vertical-align: middle; margin-right: 10px;" alt="logo" align="left" />
+<img src="assets/logo.png" width="96" style="vertical-align: middle; margin-right: 10px;" alt="logo" align="right" />
 
 A modern PDF reader built with Python, GTK4, Libadwaita, Cairo, PyMuPDF, and OpenGL hardware acceleration. Key features include continuous page scrolling, dynamic auto-crop margins, a multi-column grid minimap navigator, and an integrated SQLite FTS5 search engine that presents results as cropped "portals" of matching text sections.
 
