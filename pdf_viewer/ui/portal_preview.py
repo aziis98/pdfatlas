@@ -75,7 +75,13 @@ class LinkPortalPreviewCard(Gtk.Box):
 
         # 3. Direct Surface Rendering
         if self.surface:
+            surf_w = self.surface.get_width()
+            sx, _sy = self.surface.get_device_scale()
             cr.save()
+            if sx == 1.0 and surf_w > width:
+                # Unscaled search strip surface: scale full page width to fit card width
+                scale = width / float(surf_w)
+                cr.scale(scale, scale)
             cr.set_source_surface(self.surface, 0, 0)
             cr.paint()
             cr.restore()

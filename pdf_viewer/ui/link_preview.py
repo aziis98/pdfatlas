@@ -4,15 +4,20 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk
 
 from ..core.cache import LinkPortalCache
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .window import MainWindow
+
 from .portal_preview import LinkPortalPreviewCard
 
 
 class LinkPreviewManager:
     """
-    Manager for link hover previews and portal preview card positioning.
+    Manager for link hover previews, popup positioning, and snippet rendering callbacks.
     """
 
-    def __init__(self, main_window):
+    def __init__(self, main_window: "MainWindow"):
         self.win = main_window
         self.portal_cache = LinkPortalCache(max_size=50)
         self.portal_card = LinkPortalPreviewCard()

@@ -1,4 +1,8 @@
 import gi
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .window import MainWindow
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk
@@ -9,7 +13,7 @@ class ShortcutsController:
     Controller handling keyboard shortcuts, keybindings, and gesture triggers.
     """
 
-    def __init__(self, main_window):
+    def __init__(self, main_window: "MainWindow"):
         self.win = main_window
         self.shortcut_controller = Gtk.ShortcutController.new()
         self.shortcut_controller.set_scope(Gtk.ShortcutScope.GLOBAL)

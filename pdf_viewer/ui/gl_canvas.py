@@ -304,31 +304,10 @@ class GLCanvas(Gtk.GLArea):
                             gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
                             gl.glUniform1i(self.u_is_placeholder, 2)
 
-                            # 1. Draw yellow fill quad (premultiplied: yellow is [1, 0.85, 0, 1], multiplied by alpha 0.3)
-                            gl.glUniform4f(self.u_color, 0.3, 0.255, 0.0, 0.3)
+                            # Light yellow fill quad with no border (premultiplied RGBA)
+                            gl.glUniform4f(self.u_color, 0.35, 0.2975, 0.0, 0.35)
                             gl.glUniform2f(self.u_page_pos, float(hx), float(hy))
                             gl.glUniform2f(self.u_page_size, float(hw), float(hh))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-
-                            # 2. Draw red border edges (thin 2px quads)
-                            gl.glUniform4f(self.u_color, 0.85, 0.1, 0.1, 0.9)  # red border
-                            border_t = 2.0
-
-                            # Top Edge
-                            gl.glUniform2f(self.u_page_pos, float(hx), float(hy))
-                            gl.glUniform2f(self.u_page_size, float(hw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Bottom Edge
-                            gl.glUniform2f(self.u_page_pos, float(hx), float(hy + hh - border_t))
-                            gl.glUniform2f(self.u_page_size, float(hw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Left Edge
-                            gl.glUniform2f(self.u_page_pos, float(hx), float(hy))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(hh))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Right Edge
-                            gl.glUniform2f(self.u_page_pos, float(hx + hw - border_t), float(hy))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(hh))
                             gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
 
                     # Draw Interactive PDF Links directly in OpenGL

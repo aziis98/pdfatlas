@@ -130,8 +130,8 @@ class PageContainer(Gtk.Box):
                         screen_physical_dpi=canvas.screen_physical_dpi,
                     )
 
-        # 2. Block Highlights (Search matches)
-        if canvas.highlighted_block is not None:
+        # 2. Block Highlights (Search matches - Cairo backend only)
+        if canvas.backend != "opengl" and canvas.highlighted_block is not None:
             h_page_idx, h_bbox = canvas.highlighted_block
             if h_page_idx == self.page_index:
                 bx0, by0, bx1, by1 = h_bbox
@@ -145,11 +145,7 @@ class PageContainer(Gtk.Box):
                 pw = (bx1 - bx0) * canvas.zoom * canvas.dpi_scale_factor
                 ph = (by1 - by0) * canvas.zoom * canvas.dpi_scale_factor
                 cr.rectangle(px0, py0, pw, ph)
-                cr.fill_preserve()
-
-                cr.set_source_rgba(0.85, 0.1, 0.1, 0.9)
-                cr.set_line_width(2.5)
-                cr.stroke()
+                cr.fill()
                 cr.restore()
 
         # 3. Interactive PDF Link Stroke Outlines (Cairo backend only)
@@ -428,7 +424,7 @@ class PDFCanvas(Gtk.Box):
         self._update_visibility()
 
     def set_zoom(self, zoom: float):
-        self.zoom = max(0.25, min(8.0, zoom))
+        self.zoom = zoom
         self.in_flight.clear()
         if self.render_worker:
             self.render_worker.clear_canvas_render_jobs()
