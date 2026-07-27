@@ -12,19 +12,20 @@ from concurrent.futures import ThreadPoolExecutor
 
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
-from ..core.cache import LinkPortalCache, MiniMapCache, RenderCache
+from ..controllers.navigation import NavigationController
+from ..controllers.search import SearchController
+from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
 from ..core.index import get_db_for_pdf
-from ..core.index import search as fts_search
 from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
 from .canvas import PDFCanvas
 from .gl_canvas import GLCanvas
+from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
-from .portal import ResultRow
-from .portal_preview import LinkPortalPreviewCard
 from .settings import SettingsWindow
+from .shortcuts import ShortcutsController
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
@@ -70,8 +71,6 @@ class MainWindow(Adw.ApplicationWindow):
         # LRU Caches and background thread pool for canvas rendering
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
-        self.portal_cache = LinkPortalCache(50)
-        self._portal_debounce_id = None
         self.render_worker = RenderWorker()
 
         # Thread pool for search indexing & result portal rendering
@@ -107,13 +106,15 @@ class MainWindow(Adw.ApplicationWindow):
         about_action.connect("activate", lambda act, param: self._on_about_action_activated(None))
         self.add_action(about_action)
 
+        # Controllers setup
+        self.nav_controller = NavigationController(self)
+        self.search_controller = SearchController(self)
+
         # Build UI layout
         self._build_ui()
 
-        # Setup shortcut controller
-        self.shortcut_controller = Gtk.ShortcutController.new()
-        self.add_controller(self.shortcut_controller)
-        self._setup_shortcuts()
+        # Setup shortcuts controller
+        self.shortcuts_controller = ShortcutsController(self)
 
     def _is_entry_focused(self) -> bool:
         focus = self.get_focus()
@@ -122,68 +123,6 @@ class MainWindow(Adw.ApplicationWindow):
         if self.entry.has_focus() or self.page_input.has_focus():
             return True
         return False
-
-    def _setup_shortcuts(self):
-        # File operations
-        self._add_shortcut("<Control>o", self._open_file_dialog)
-        self._add_shortcut("<Control>q", self.close)
-        self._add_nav_shortcut("q", self.close)
-
-        # Focus search bar
-        self._add_shortcut("<Control>l", self.entry.grab_focus)
-
-        # Zoom keys
-        self._add_shortcut("plus", self.zoom_in)
-        self._add_shortcut("<Shift>plus", self.zoom_in)
-        self._add_shortcut("equal", self.zoom_in)
-        self._add_shortcut("<Shift>equal", self.zoom_in)
-        self._add_shortcut("KP_Add", self.zoom_in)
-        self._add_shortcut("minus", self.zoom_out)
-        self._add_shortcut("KP_Subtract", self.zoom_out)
-        self._add_shortcut("<Control>0", self.zoom_reset)
-
-        # Modal window / mode / zoom fitting triggers
-        self._add_nav_shortcut("m", self.toggle_minimap)
-        self._add_nav_shortcut("c", self.toggle_crop)
-        self._add_nav_shortcut("w", self.zoom_fit_width)
-        self._add_nav_shortcut("f", self.zoom_fit_page)
-        self._add_nav_shortcut("g", self.toggle_gapless)
-
-        # Scrolling - Page and Arrow keys
-        self._add_shortcut("Page_Up", lambda: self.scroll_page(forward=False))
-        self._add_shortcut("Page_Down", lambda: self.scroll_page(forward=True))
-        self._add_shortcut("Up", lambda: self.scroll_step(forward=False))
-        self._add_shortcut("Down", lambda: self.scroll_step(forward=True))
-        self._add_shortcut("Left", lambda: self.scroll_page(forward=False))
-        self._add_shortcut("Right", lambda: self.scroll_page(forward=True))
-
-        # Scrolling - Vim Keys (h & l: viewport height; j & k: step scroll)
-        self._add_nav_shortcut("h", lambda: self.scroll_page(forward=False))
-        self._add_nav_shortcut("j", lambda: self.scroll_step(forward=True))
-        self._add_nav_shortcut("k", lambda: self.scroll_step(forward=False))
-        self._add_nav_shortcut("l", lambda: self.scroll_page(forward=True))
-
-        # Close/clear search or exit minimap
-        self._add_shortcut("Escape", self._on_escape)
-
-    def _add_shortcut(self, trigger_str, callback):
-        trigger = Gtk.ShortcutTrigger.parse_string(trigger_str)
-        action = Gtk.CallbackAction.new(lambda w, a: (callback(), True)[1])
-        shortcut = Gtk.Shortcut.new(trigger, action)
-        self.shortcut_controller.add_shortcut(shortcut)
-
-    def _add_nav_shortcut(self, trigger_str, callback):
-        trigger = Gtk.ShortcutTrigger.parse_string(trigger_str)
-
-        def _handler(w, a):
-            if self._is_entry_focused():
-                return False
-            callback()
-            return True
-
-        action = Gtk.CallbackAction.new(_handler)
-        shortcut = Gtk.Shortcut.new(trigger, action)
-        self.shortcut_controller.add_shortcut(shortcut)
 
     def _setup_system_icons(self):
         display = Gdk.Display.get_default()
@@ -260,8 +199,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.entry.set_halign(Gtk.Align.CENTER)
         self.entry.set_size_request(300, -1)
         self.entry.set_max_width_chars(45)
-        self.entry.connect("search-changed", self._on_search_changed_debounced)
-        self.entry.connect("activate", self._on_activate_immediate)
+        self.entry.connect("search-changed", self.search_controller.on_search_changed_debounced)
+        self.entry.connect("activate", self.search_controller.on_activate_immediate)
         header.set_title_widget(self.entry)
 
         # Right: Page Navigation Entry + Total Pages Label, Menu Button
@@ -350,13 +289,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.backend = self.backend
         self.canvas.debug_mode = self.debug_mode
         self.canvas.on_link_clicked = self._on_link_clicked
-        self.canvas.on_link_hovered = self._on_link_hovered
         self.canvas.on_page_hovered = self._on_page_hovered
         self.scrolled_window.set_child(self.canvas)
 
         # Build floating zoom controls box and link preview box
         self._build_floating_zoom_controls()
         self._build_floating_link_preview()
+
+        # Link Preview Manager setup
+        self.link_preview_manager = LinkPreviewManager(self)
+        self.canvas.on_link_hovered = self.link_preview_manager.on_link_hovered
 
         self.overlay = Gtk.Overlay()
         self.overlay.set_hexpand(True)
@@ -373,12 +315,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.gl_canvas = None
             self.overlay.set_child(self.scrolled_window)  # base layer (Cairo scroll container)
 
-        self.portal_card = LinkPortalPreviewCard()
-        self.portal_card.set_visible(False)
-
         self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
         self.overlay.add_overlay(self.link_preview_box)  # top layer (Floating link preview label)
-        self.overlay.add_overlay(self.portal_card)  # top layer (Floating link portal card)
+        self.overlay.add_overlay(self.link_preview_manager.portal_card)  # top layer (Floating link portal card)
         self.stack.add_named(self.overlay, "document-view")
 
         # Child 2: Search View Setup
@@ -624,211 +563,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- Search Engine Wiring ---
 
-    def _on_search_changed_debounced(self, entry):
-        if self._debounce_source_id is not None:
-            GLib.source_remove(self._debounce_source_id)
-        self._debounce_source_id = GLib.timeout_add(DEBOUNCE_MS, self._debounced_fire)
-
-    def _debounced_fire(self):
-        self._debounce_source_id = None
-        self.run_search(self.entry.get_text())
-        return False
-
-    def _on_activate_immediate(self, entry):
-        if self._debounce_source_id is not None:
-            GLib.source_remove(self._debounce_source_id)
-            self._debounce_source_id = None
-        self.run_search(entry.get_text())
-
-    def _clear_results_box(self):
-        child = self.results_box.get_first_child()
-        while child is not None:
-            nxt = child.get_next_sibling()
-            self.results_box.remove(child)
-            child = nxt
-
-    def _on_toggle_pin(self, result, query_terms, pinned):
-        if pinned:
-            self.pinned[result["id"]] = {"result": result, "query_terms": query_terms}
-        else:
-            self.pinned.pop(result["id"], None)
-        self.run_search(self.entry.get_text())
-
-    def _on_row_clicked(self, result, query_terms):
-        """Scrolls the document canvas to center the selected matched block."""
-        if not self.doc_model:
-            return
-
-        page_no = result["page"]
-        page_idx = page_no - 1
-
-        if page_idx < 0 or page_idx >= len(self.canvas.page_layout):
-            return
-
-        # Set visual outline highlight on main canvas
-        self.canvas.set_highlighted_block(page_idx, (result["x0"], result["y0"], result["x1"], result["y1"]))
-
-        # Switch view back to reader mode
-        self.stack.set_visible_child_name("document-view")
-
-        # Defer coordinate calculation and scrolling until the stack widget transition/layout has finished
-        def scroll_to_target():
-            if not self.doc_model or page_idx >= len(self.canvas.page_layout):
-                return False
-
-            y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_idx]
-            crop_y0 = crop_rect.y0 if crop_rect is not None else 0.0
-
-            # Calculate midpoint of the match block relative to cropped Y top boundary
-            block_rel_y0 = max(0.0, result["y0"] - crop_y0)
-            block_rel_y1 = max(0.0, result["y1"] - crop_y0)
-            block_rel_mid = block_rel_y0 + (block_rel_y1 - block_rel_y0) / 2.0
-
-            # Convert points to layout pixels (taking zoom and dpi scale multiplier into account)
-            scale = self.zoom * self.canvas.dpi_scale_factor
-            block_pixel_y = block_rel_mid * scale
-
-            # Absolute target Y including the page gap offset
-            block_absolute_y = y_offset + self.canvas.page_gap + block_pixel_y
-
-            viewport_h = self.vadjustment.get_page_size()
-            lower = self.vadjustment.get_lower()
-            upper = self.vadjustment.get_upper()
-            max_y = max(lower, upper - viewport_h)
-            target_y = clamp(lower, block_absolute_y - (viewport_h / 2.0), max_y)
-
-            self.canvas.grab_focus()
-            self.vadjustment.set_value(target_y)
-            self._on_scroll_page_changed(self.vadjustment)
-            self._queue_canvas_redraw()
-            return False
-
-        GLib.idle_add(scroll_to_target)
-
-    def run_search(self, query):
-        query = query or ""
-        if not query.strip():
-            self._clear_results_box()
-            self._last_query = ""
-            if self.stack.get_visible_child_name() == "search-view":
-                self.stack.set_visible_child_name("document-view")
-                self.canvas.grab_focus()
-            return
-
-        # Cancel any previous/pending search result renderings by shutting down and recreating the thread pool.
-        # This prevents CPU saturation and typing lags when the user types rapidly.
-        self.executor.shutdown(wait=False, cancel_futures=True)
-        self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
-
-        self._last_query = query
-        self._clear_results_box()
-        self.stack.set_visible_child_name("search-view")
-
-        # Normalize query words
-        import string
-
-        query_terms = {t.strip(string.punctuation).lower() for t in query.strip().split() if t}
-
-        live_results = fts_search(self.index_conn, query, limit=30) if self.index_conn else []
-
-        is_grid = getattr(self.settings, "search_layout", "grid") == "grid"
-
-        pinned_grid = None
-        live_grid = None
-
-        # 1. Pinned Portals Header + FlowBox/List
-        if self.pinned:
-            pinned_label = Gtk.Label(label="📌 Pinned Portals", xalign=0)
-            pinned_label.add_css_class("heading")
-            pinned_label.set_margin_top(14)
-            pinned_label.set_margin_start(16)
-            pinned_label.set_margin_bottom(6)
-            self.results_box.append(pinned_label)
-
-            if is_grid:
-                pinned_grid = Gtk.FlowBox()
-                pinned_grid.set_valign(Gtk.Align.START)
-                pinned_grid.set_halign(Gtk.Align.CENTER)
-                pinned_grid.set_hexpand(True)
-                pinned_grid.set_selection_mode(Gtk.SelectionMode.NONE)
-                pinned_grid.set_column_spacing(8)
-                pinned_grid.set_row_spacing(8)
-                pinned_grid.set_margin_start(12)
-                pinned_grid.set_margin_end(12)
-                self.results_box.append(pinned_grid)
-
-            for entry in self.pinned.values():
-                if not self.doc_model:
-                    break
-                row = ResultRow(
-                    self.doc_model.filepath,
-                    self.executor,
-                    entry["result"],
-                    entry["query_terms"],
-                    pinned=True,
-                    on_toggle_pin=self._on_toggle_pin,
-                    on_row_clicked=self._on_row_clicked,
-                )
-                if is_grid and pinned_grid is not None:
-                    child_wrapper = Gtk.FlowBoxChild()
-                    child_wrapper.set_child(row)
-                    child_wrapper.set_halign(Gtk.Align.CENTER)
-                    child_wrapper.set_valign(Gtk.Align.CENTER)
-                    pinned_grid.append(child_wrapper)
-                else:
-                    self.results_box.append(row)
-                    self.results_box.append(Gtk.Separator())
-
-            if live_results:
-                live_label = Gtk.Label(label="Search Results", xalign=0)
-                live_label.add_css_class("heading")
-                live_label.set_margin_top(10)
-                live_label.set_margin_start(16)
-                live_label.set_margin_bottom(6)
-                self.results_box.append(live_label)
-
-        # 2. Main Search Results List/FlowBox
-        if not live_results:
-            placeholder = Gtk.Label(label="No matches found.", margin_top=32)
-            placeholder.add_css_class("dim-label")
-            self.results_box.append(placeholder)
-            return
-
-        if is_grid:
-            live_grid = Gtk.FlowBox()
-            live_grid.set_valign(Gtk.Align.START)
-            live_grid.set_halign(Gtk.Align.CENTER)
-            live_grid.set_hexpand(True)
-            live_grid.set_selection_mode(Gtk.SelectionMode.NONE)
-            live_grid.set_column_spacing(8)
-            live_grid.set_row_spacing(8)
-            live_grid.set_margin_start(12)
-            live_grid.set_margin_end(12)
-            self.results_box.append(live_grid)
-
-        for i, result in enumerate(live_results):
-            if not self.doc_model:
-                break
-            already_pinned = result["id"] in self.pinned
-            row = ResultRow(
-                self.doc_model.filepath,
-                self.executor,
-                result,
-                query_terms,
-                pinned=already_pinned,
-                on_toggle_pin=self._on_toggle_pin,
-                on_row_clicked=self._on_row_clicked,
-            )
-            if is_grid and live_grid is not None:
-                child_wrapper = Gtk.FlowBoxChild()
-                child_wrapper.set_child(row)
-                child_wrapper.set_halign(Gtk.Align.CENTER)
-                child_wrapper.set_valign(Gtk.Align.CENTER)
-                live_grid.append(child_wrapper)
-            else:
-                self.results_box.append(row)
-                if i < len(live_results) - 1:
-                    self.results_box.append(Gtk.Separator())
+    def run_search(self, query: str):
+        self.search_controller.run_search(query)
 
     def _on_escape(self):
         """Clears search input or closes minimap modal and returns focus to reader view."""
@@ -851,172 +587,6 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     # --- Zoom Operations ---
-
-    def set_zoom_level(self, zoom: float, center_x=None, center_y=None):
-        if not self.doc_model:
-            return
-
-        old_zoom = self.zoom
-        new_zoom = max(0.25, min(8.0, zoom))
-
-        # Max out zoom at window width size if page width exceeds viewport width
-        viewport_w = float(self.scrolled_window.get_width())
-        if viewport_w > 50 and self.doc_model:
-            max_page_w = 0.0
-            for i in range(self.doc_model.page_count):
-                rect = None
-                if self.settings.enabled and self.crop_analyzer:
-                    rect = self.crop_analyzer.crop_rects[i]
-                if rect is None:
-                    rect = self.doc_model.page_rect(i)
-                if rect.width > max_page_w:
-                    max_page_w = rect.width
-            if max_page_w > 0:
-                max_zoom_fit = (viewport_w - 16.0) / (max_page_w * self.canvas.dpi_scale_factor)
-                if max_zoom_fit > 0.1:
-                    new_zoom = min(new_zoom, max_zoom_fit)
-
-        if old_zoom == new_zoom:
-            return
-
-        # Stop GTK 4 kinetic / inertial scroll animation immediately
-        self.scrolled_window.set_kinetic_scrolling(False)
-        self.scrolled_window.set_kinetic_scrolling(True)
-
-        # Save old scroll position & viewport height
-        val_v = self.vadjustment.get_value()
-        viewport_h = self.vadjustment.get_page_size()
-        if viewport_h <= 1.0:
-            viewport_h = 700.0
-
-        # Vertical midpoint of viewport in pre-zoom layout space
-        center_y = val_v + (viewport_h / 2.0)
-
-        # Determine page index at center_y to separate unscaled page_gaps from scaled content height
-        current_page_idx = self.get_current_page_index()
-        gap_count = current_page_idx + 1
-        fixed_gaps = gap_count * self.canvas.page_gap
-
-        content_y = max(0.0, center_y - fixed_gaps)
-        ratio = new_zoom / old_zoom
-
-        self.zoom = new_zoom
-        self.zoom_label.set_label(f"{int(new_zoom * 100)}%")
-
-        # Apply to canvas (recomputes layout & updates vadjustment upper bounds instantly)
-        self.canvas.set_zoom(new_zoom)
-
-        # Re-accumulate new center_y: unscaled fixed_gaps + scaled content_y
-        new_center_y = fixed_gaps + content_y * ratio
-        new_val_v = new_center_y - (viewport_h / 2.0)
-
-        lower = self.vadjustment.get_lower()
-        upper = self.vadjustment.get_upper()
-        max_y = max(lower, upper - viewport_h)
-        target_v = clamp(lower, new_val_v, max_y)
-
-        self.vadjustment.set_value(target_v)
-        self._on_scroll_page_changed(self.vadjustment)
-        self._queue_canvas_redraw()
-
-    def zoom_in(self):
-        self.set_zoom_level(self.zoom * 1.2)
-
-    def zoom_out(self):
-        self.set_zoom_level(self.zoom / 1.2)
-
-    def zoom_reset(self):
-        self.set_zoom_level(1.0)
-
-    def zoom_fit_width(self):
-        if not self.doc_model:
-            return
-
-        viewport_w = self.scrolled_window.get_width()
-
-        max_w = 0.0
-        for i in range(self.doc_model.page_count):
-            rect = None
-            if self.settings.enabled and self.crop_analyzer:
-                rect = self.crop_analyzer.crop_rects[i]
-            if rect is None:
-                rect = self.doc_model.page_rect(i)
-            if rect.width > max_w:
-                max_w = rect.width
-
-        if max_w > 0:
-            target_zoom = (viewport_w - 24.0) / max_w
-            self.set_zoom_level(target_zoom)
-
-    def zoom_fit_page(self):
-        if not self.doc_model:
-            return
-
-        viewport_w = self.scrolled_window.get_width()
-        viewport_h = self.scrolled_window.get_height()
-
-        max_w = 0.0
-        max_h = 0.0
-        for i in range(self.doc_model.page_count):
-            rect = None
-            if self.settings.enabled and self.crop_analyzer:
-                rect = self.crop_analyzer.crop_rects[i]
-            if rect is None:
-                rect = self.doc_model.page_rect(i)
-            if rect.width > max_w:
-                max_w = rect.width
-            if rect.height > max_h:
-                max_h = rect.height
-
-        if max_w > 0 and max_h > 0:
-            target_zoom_w = (viewport_w - 24.0) / max_w
-            target_zoom_h = (viewport_h - 24.0) / max_h
-            target_zoom = min(target_zoom_w, target_zoom_h)
-            self.set_zoom_level(target_zoom)
-
-    # --- Scrolling ---
-
-    def scroll_page(self, forward: bool):
-        val = self.vadjustment.get_value()
-        page_size = self.vadjustment.get_page_size()
-        step = page_size * 0.9
-
-        new_val = val + step if forward else val - step
-
-        lower = self.vadjustment.get_lower()
-        upper = self.vadjustment.get_upper()
-        max_y = max(lower, upper - page_size)
-        self.vadjustment.set_value(clamp(lower, new_val, max_y))
-
-    def scroll_step(self, forward: bool):
-        if not self.vadjustment:
-            return
-        val = self.vadjustment.get_value()
-        step = self.vadjustment.get_step_increment()
-        if step <= 0:
-            step = 40.0
-
-        new_val = val + step if forward else val - step
-        lower = self.vadjustment.get_lower()
-        upper = self.vadjustment.get_upper()
-        page_size = self.vadjustment.get_page_size()
-        max_y = max(lower, upper - page_size)
-        self.vadjustment.set_value(clamp(lower, new_val, max_y))
-
-    def scroll_step_h(self, forward: bool):
-        if not self.hadjustment:
-            return
-        val = self.hadjustment.get_value()
-        step = self.hadjustment.get_step_increment()
-        if step <= 0:
-            step = 40.0
-
-        new_val = val + step if forward else val - step
-        lower = self.hadjustment.get_lower()
-        upper = self.hadjustment.get_upper()
-        page_size = self.hadjustment.get_page_size()
-        max_x = max(lower, upper - page_size)
-        self.hadjustment.set_value(clamp(lower, new_val, max_x))
 
     def get_current_page_index(self) -> int:
         if not self.doc_model or not self.canvas.page_layout:
@@ -1045,23 +615,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.gl_canvas.queue_draw()
         else:
             self.canvas.queue_draw()
-
-    def jump_to_page(self, page_index: int):
-        if not self.doc_model or not self.canvas.page_layout:
-            return
-        if page_index < 0 or page_index >= self.doc_model.page_count:
-            return
-
-        y_offset, dw, dh, crop_rect = self.canvas.page_layout[page_index]
-        viewport_h = self.vadjustment.get_page_size()
-        lower = self.vadjustment.get_lower()
-        upper = self.vadjustment.get_upper()
-        max_y = max(lower, upper - viewport_h)
-        target_y = clamp(lower, y_offset, max_y)
-
-        self.vadjustment.set_value(target_y)
-        self._on_scroll_page_changed(self.vadjustment)
-        self._queue_canvas_redraw()
 
     def page_step(self, forward: bool):
         current_idx = self.get_current_page_index()
@@ -1434,37 +987,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.link_preview_box.set_visible(False)
 
-    def _on_link_hovered(self, page_index: int | None, link: dict | None):
-        if self._portal_debounce_id:
-            GLib.source_remove(self._portal_debounce_id)
-            self._portal_debounce_id = None
-
-        if not link or not self.doc_model:
-            self.link_preview_card_box.set_visible(False)
-            self.portal_card.set_visible(False)
-            if not self.debug_info_label or not self.debug_info_label.get_visible():
-                self.link_preview_box.set_visible(False)
-            return
-
-        uri = link.get("uri")
-        target_page = link.get("page")
-
-        if uri:
-            self.link_preview_label.set_text(uri)
-            self.link_preview_card_box.set_visible(True)
-            self.link_preview_box.set_visible(True)
-            self.portal_card.set_visible(False)
-        elif target_page is not None and isinstance(target_page, int) and 0 <= target_page < self.doc_model.page_count:
-            self.link_preview_label.set_text(f"Jump to Page {target_page + 1}")
-            self.link_preview_card_box.set_visible(True)
-            self.link_preview_box.set_visible(True)
-            self._show_link_portal_preview(page_index, link)
-        else:
-            self.link_preview_card_box.set_visible(False)
-            self.portal_card.set_visible(False)
-            if not self.debug_info_label or not self.debug_info_label.get_visible():
-                self.link_preview_box.set_visible(False)
-
     def _on_page_hovered(self, page_index: int | None, x: float, y: float):
         if not self.debug_mode or not self.debug_info_label:
             return
@@ -1493,85 +1015,9 @@ class MainWindow(Adw.ApplicationWindow):
             if not self.link_preview_card_box.get_visible():
                 self.link_preview_box.set_visible(False)
 
-    def _show_link_portal_preview(self, source_page_index: int | None, link: dict) -> bool:
-        self._portal_debounce_id = None
-        if not link or not self.doc_model:
-            self.portal_card.set_visible(False)
-            return False
-
-        target_page = link.get("page")
-        if target_page is None or not isinstance(target_page, int) or not (0 <= target_page < self.doc_model.page_count):
-            self.portal_card.set_visible(False)
-            return False
-
-        target_rect = self.doc_model.page_rect(target_page)
-        to_point = link.get("to")
-        target_y = (
-            max(0.0, target_rect.height - float(to_point.y))
-            if (to_point and hasattr(to_point, "y") and to_point.y is not None and to_point.y > 0.0)
-            else (target_rect.height / 2.0)
-        )
-
-        viewport_w = max(300.0, float(self.scrolled_window.get_width()))
-        viewport_h = max(300.0, float(self.scrolled_window.get_height()))
-
-        scale_factor = float(self.canvas.get_scale_factor())
-        scale = self.zoom * self.canvas.dpi_scale_factor
-        page_dw = target_rect.width * scale
-        raw_portal_w = int(page_dw - 2.0 * self.canvas.page_gap)
-        raw_portal_h = int(160.0 * scale)
-        portal_w = max(200, min(int(viewport_w - 32.0), raw_portal_w))
-        portal_h = max(100, min(int(viewport_h - 40.0), raw_portal_h))
-        self.portal_card.set_portal_size(portal_w, portal_h)
-
-        render_w = int(portal_w * scale_factor)
-        render_h = int(portal_h * scale_factor)
-
-        cached_surface = self.portal_cache.get(target_page, target_y, render_w, render_h)
-        if cached_surface:
-            self.portal_card.set_surface(cached_surface)
-        else:
-            self.portal_card.set_loading()
-            self.render_worker.queue_portal_job(
-                self.doc_model,
-                target_page,
-                target_y,
-                render_w,
-                render_h,
-                scale_factor,
-                self.portal_cache,
-                self._on_portal_render_complete,
-            )
-
-        # Center portal horizontally in viewport
-        pos_x = max(16, int((viewport_w - portal_w) / 2.0))
-
-        # Vertical positioning relative to link position using link_center_y
-        link_rect = self.canvas.get_link_screen_rect(source_page_index, link, self.overlay) if source_page_index is not None else None
-        if link_rect:
-            link_x, link_y, link_w, link_h = link_rect
-            link_center_y = link_y + (link_h / 2.0)
-            gap_offset = 10.0
-
-            if link_center_y < (viewport_h / 2.0):
-                pos_y = int(max(8.0, link_y + link_h + gap_offset))
-            else:
-                pos_y = int(max(8.0, link_y - portal_h - gap_offset))
-        else:
-            pos_y = max(8, int((viewport_h - portal_h) / 2.0))
-
-        pos_y = max(8, min(int(viewport_h - portal_h - 8), pos_y))
-
-        self.portal_card.set_margin_start(pos_x)
-        self.portal_card.set_margin_top(pos_y)
-        self.portal_card.set_valign(Gtk.Align.START)
-        self.portal_card.set_halign(Gtk.Align.START)
-        self.portal_card.set_visible(True)
-        return False
-
-    def _on_portal_render_complete(self, page_index: int, target_y: float, surface):
-        if self.portal_card.get_visible():
-            self.portal_card.set_surface(surface)
+    @property
+    def portal_cache(self):
+        return self.link_preview_manager.portal_cache
 
     def _simulate_link_hover(self, link_index: int) -> bool:
         if not self.doc_model:
@@ -1581,10 +1027,46 @@ class MainWindow(Adw.ApplicationWindow):
             links = self.doc_model.get_page_links(page_idx)
             for link in links:
                 if current_count == link_index:
-                    self._on_link_hovered(page_idx, link)
+                    self.link_preview_manager.on_link_hovered(page_idx, link)
                     return False
                 current_count += 1
         return False
+
+    def jump_to_page(self, page_index: int, smooth: bool = True):
+        self.nav_controller.jump_to_page(page_index, smooth=smooth)
+
+    def set_zoom_level(
+        self,
+        new_zoom: float,
+        anchor_x: float | None = None,
+        anchor_y: float | None = None,
+        center_x: float | None = None,
+        center_y: float | None = None,
+    ):
+        self.nav_controller.set_zoom_level(
+            new_zoom, anchor_x=anchor_x, anchor_y=anchor_y, center_x=center_x, center_y=center_y
+        )
+
+    def zoom_in(self):
+        self.nav_controller.zoom_in()
+
+    def zoom_out(self):
+        self.nav_controller.zoom_out()
+
+    def zoom_reset(self):
+        self.nav_controller.zoom_reset()
+
+    def zoom_fit_width(self):
+        self.nav_controller.zoom_fit_width()
+
+    def zoom_fit_page(self):
+        self.nav_controller.zoom_fit_page()
+
+    def scroll_page(self, forward: bool = True):
+        self.nav_controller.scroll_page(forward=forward)
+
+    def scroll_step(self, forward: bool = True):
+        self.nav_controller.scroll_step(forward=forward)
 
     def _on_page_input_activate(self, entry):
         if not self.doc_model or not self.canvas.page_layout:
