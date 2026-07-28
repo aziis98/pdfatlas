@@ -7,6 +7,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib
 
+from .core.pdf_source import PdfSource
 from .ui.window import MainWindow
 
 
@@ -45,7 +46,12 @@ class PDFViewerApplication(Adw.Application):
 
         # Load document if passed via command line
         if self.filepath_to_open:
-            win.open_document(self.filepath_to_open)
+            source = PdfSource(
+                source_type="file",
+                uri=self.filepath_to_open,
+                display_name=os.path.basename(self.filepath_to_open),
+            )
+            win.open_document(source)
 
     def do_startup(self):
         Adw.Application.do_startup(self)

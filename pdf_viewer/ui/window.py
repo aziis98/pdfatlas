@@ -21,6 +21,8 @@ from ..core.document import DocumentModel
 from ..core.index import get_db_for_pdf
 from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
+from ..core.pdf_source import PdfSource, RecentFilesManager
+from .arxiv_dialog import ArxivDialog
 from .canvas import PDFCanvas
 from .gl_canvas import GLCanvas
 from .link_preview import LinkPreviewManager
@@ -68,6 +70,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.doc_model = None
         self.crop_analyzer = None
         self.settings = CropSettings()
+        self.current_source: PdfSource | None = None
+        self.recent_files = RecentFilesManager()
 
         # LRU Caches and background thread pool for canvas rendering
         self.render_cache = RenderCache(20)
@@ -106,6 +110,18 @@ class MainWindow(Adw.ApplicationWindow):
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", lambda act, param: self._on_about_action_activated(None))
         self.add_action(about_action)
+
+        open_file_action = Gio.SimpleAction.new("open-file", None)
+        open_file_action.connect("activate", lambda act, param: self._open_file_dialog())
+        self.add_action(open_file_action)
+
+        open_arxiv_action = Gio.SimpleAction.new("open-arxiv", None)
+        open_arxiv_action.connect("activate", lambda act, param: self._open_arxiv_dialog())
+        self.add_action(open_arxiv_action)
+
+        open_recent_action = Gio.SimpleAction.new("open-recent", GLib.VariantType.new("s"))
+        open_recent_action.connect("activate", self._on_open_recent)
+        self.add_action(open_recent_action)
 
         # Controllers setup
         self.nav_controller = NavigationController(self)
@@ -177,10 +193,12 @@ class MainWindow(Adw.ApplicationWindow):
         # Left: Open Button & Filename Label
         left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
-        self.open_btn = Gtk.Button()
+        self.open_btn = Adw.SplitButton()
         self.open_btn.set_icon_name("document-open-symbolic")
         self.open_btn.set_tooltip_text("Open PDF [Ctrl+O]")
+        self.open_btn.add_css_class("raised")
         self.open_btn.connect("clicked", lambda b: self._open_file_dialog())
+        self._rebuild_open_menu()
         left_box.append(self.open_btn)
 
         self.filename_label = Gtk.Label(label="No document loaded")
@@ -417,7 +435,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- Document Loading & Indexing ---
 
-    def open_document(self, filepath: str):
+    def open_document(self, source: PdfSource):
+        filepath = source.uri
         if not os.path.exists(filepath):
             self._show_error_dialog(f"File not found: {filepath}")
             return
@@ -433,6 +452,10 @@ class MainWindow(Adw.ApplicationWindow):
             if self.index_conn:
                 self.index_conn.close()
                 self.index_conn = None
+
+            self.current_source = source
+            self.recent_files.add(source)
+            self._rebuild_open_menu()
 
             self.doc_model = DocumentModel(filepath)
             self.crop_analyzer = CropAnalyzer(self.doc_model)
@@ -480,9 +503,8 @@ class MainWindow(Adw.ApplicationWindow):
                 self.doc_model, self.render_cache, self.render_worker, self.crop_analyzer, self.settings
             )
 
-            filename = os.path.basename(filepath)
-            self.set_title(f"PDF Viewer — {filename}")
-            self.filename_label.set_label(filename)
+            self.set_title(f"PDF Viewer — {source.display_name}")
+            self.filename_label.set_label(source.display_name)
             self.page_total_label.set_label(f"of {self.doc_model.page_count}")
             self.page_input.set_text("1")
             self.page_input.set_sensitive(True)
@@ -580,7 +602,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_open_response(self, dialog, response_id):
         if response_id == Gtk.ResponseType.ACCEPT:
             file = dialog.get_file()
-            self.open_document(file.get_path())
+            path = file.get_path()
+            source = PdfSource(source_type="file", uri=path, display_name=os.path.basename(path))
+            self.open_document(source)
         dialog.destroy()
 
     def _show_error_dialog(self, message):
@@ -593,6 +617,37 @@ class MainWindow(Adw.ApplicationWindow):
         )
         dialog.connect("response", lambda d, r: d.destroy())
         dialog.show()
+
+    def _rebuild_open_menu(self):
+        menu = Gio.Menu.new()
+
+        open_file_section = Gio.Menu.new()
+        open_file_section.append("Open File\u2026", "win.open-file")
+        menu.append_section(None, open_file_section)
+
+        recent = self.recent_files.get_recent(5)
+        if recent:
+            recent_section = Gio.Menu.new()
+            for source in recent:
+                recent_section.append(source.display_name, f"win.open-recent::{source.uri}")
+            menu.append_section(None, recent_section)
+
+        arxiv_section = Gio.Menu.new()
+        arxiv_section.append("Open from arXiv\u2026", "win.open-arxiv")
+        menu.append_section(None, arxiv_section)
+
+        self.open_btn.set_menu_model(menu)
+
+    def _on_open_recent(self, action, parameter):
+        uri = parameter.get_string()
+        source = PdfSource(source_type="file", uri=uri, display_name=os.path.basename(uri))
+        self.open_document(source)
+
+    def _open_arxiv_dialog(self):
+        ArxivDialog(parent_window=self, on_source=self._on_arxiv_source, recent_files=self.recent_files).present()
+
+    def _on_arxiv_source(self, source: PdfSource):
+        self.open_document(source)
 
     # --- Search Engine Wiring ---
 
