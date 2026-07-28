@@ -189,6 +189,13 @@ class GLCanvas(Gtk.GLArea):
             gl.glDeleteTextures(1, [tex_id])
         self.textures.clear()
 
+    def texture_bytes(self) -> int:
+        """Sum of all uploaded OpenGL texture pixel memory in bytes."""
+        total = 0
+        for surface in self.textures:
+            total += surface.get_width() * surface.get_height() * 4
+        return total
+
     def _on_render(self, area, context):
         sys.stderr.write("[GLCanvas] _on_render fired\n")
         sys.stderr.flush()

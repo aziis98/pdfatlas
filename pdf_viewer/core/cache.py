@@ -103,6 +103,18 @@ class PageCache:
         ctx.paint()
         return sub_surface
 
+    def total_entries(self) -> int:
+        with self._lock:
+            return len(self.cache)
+
+    def total_bytes(self) -> int:
+        """Sum of all cached Cairo image surface pixel memory in bytes."""
+        with self._lock:
+            total = 0
+            for (_key, (surface, _buf)) in self.cache.items():
+                total += surface.get_width() * surface.get_height() * 4
+            return total
+
     def clear(self):
         with self._lock:
             self.cache.clear()
@@ -150,6 +162,12 @@ class RenderCache:
         self, page_index: int, scale: float, clip_y0: float, clip_y1: float
     ) -> cairo.ImageSurface | None:
         return self._page_cache.get_sub_surface(page_index, scale, clip_y0, clip_y1)
+
+    def total_entries(self) -> int:
+        return self._page_cache.total_entries()
+
+    def total_bytes(self) -> int:
+        return self._page_cache.total_bytes()
 
     def clear(self):
         self._page_cache.clear()

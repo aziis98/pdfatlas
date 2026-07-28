@@ -319,6 +319,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
         self.overlay.add_overlay(self.link_preview_box)  # top layer (Floating link preview label)
         self.overlay.add_overlay(self.link_preview_manager.portal_card)  # top layer (Floating link portal card)
+        if self.debug_mode:
+            self._build_debug_cache_box()
         self.stack.add_named(self.overlay, "document-view")
 
         # Child 2: Search View Setup
@@ -917,11 +919,11 @@ class MainWindow(Adw.ApplicationWindow):
             .debug-info-label {
                 font-family: monospace, monospace;
                 font-size: 10px;
-                color: #00ff66;
-                background-color: rgba(15, 20, 25, 0.92);
-                border: 1px solid rgba(0, 255, 102, 0.35);
-                border-radius: 4px;
-                padding: 4px 8px;
+                color: #ffffff;
+                background-color: rgba(30, 30, 30, 0.88);
+                border-radius: 6px;
+                padding: 4px 10px;
+                box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
             }
             .link-portal-card {
                 background-color: #ffffff;
@@ -1032,6 +1034,31 @@ class MainWindow(Adw.ApplicationWindow):
             self.debug_info_label = None
 
         self.link_preview_box.set_visible(False)
+
+    def _build_debug_cache_box(self):
+        self.debug_cache_label = Gtk.Label(xalign=0.0)
+        self.debug_cache_label.set_halign(Gtk.Align.START)
+        self.debug_cache_label.set_justify(Gtk.Justification.LEFT)
+        self.debug_cache_label.add_css_class("debug-info-label")
+        self.debug_cache_label.set_visible(True)
+
+        self.link_preview_box.append(self.debug_cache_label)
+
+        self._refresh_debug_cache()
+        GLib.timeout_add(1000, self._refresh_debug_cache)
+
+    def _refresh_debug_cache(self) -> bool:
+        if not self.debug_mode or not hasattr(self, "debug_cache_label"):
+            return False
+        entries = self.render_cache.total_entries()
+        cache_mb = self.render_cache.total_bytes() / (1024 * 1024)
+        if self.backend == "opengl" and self.gl_canvas:
+            tex_mb = self.gl_canvas.texture_bytes() / (1024 * 1024)
+            text = f"CACHE:    {entries} entries, {cache_mb:.1f}MB\nTEXTURES: {tex_mb:.1f}MB GPU"
+        else:
+            text = f"CACHE:    {entries} entries, {cache_mb:.1f}MB"
+        self.debug_cache_label.set_text(text)
+        return True
 
     def _on_page_hovered(self, page_index: int | None, x: float, y: float):
         if not self.debug_mode or not self.debug_info_label:
