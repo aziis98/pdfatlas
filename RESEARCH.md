@@ -33,7 +33,37 @@ This document records durable technical findings, architectural decisions, mathe
 - **Finding:** GTK 4's `Gtk.ScrolledWindow` runs kinetic/inertial scroll decay animations in the background frame clock during touchpad fling gestures. Updating `vadjustment.set_value()` during zoom is overwritten by active animation ticks on subsequent frames.
 - **Solution:** Toggle `self.scrolled_window.set_kinetic_scrolling(False)` then `set_kinetic_scrolling(True)` immediately before reading adjustments in `set_zoom_level()`, halting active decay animations instantly.
 
-### 1.5. Pure Math-Based OpenGL Canvas Hit Testing
+### 1.5. Two-Tier Cache: Exact Match vs Best Match (`get` vs `get_best`)
+
+- **Finding:** After a zoom change, `_update_visibility()` must decide whether to queue new render jobs. Using a best-match fallback during this decision causes starvation — no new jobs are ever queued because `get_best` always returns some surface.
+- **Design Rule — Two separate lookup paths:**
+  1. **Exact-match (`PageCache.get`):** Only returns a surface if `(page_index, round(scale, 2), crop_key)` matches exactly. Used exclusively by `_update_visibility()` to gate render job queuing.
+  2. **Best-match (`PageCache.get_best`):** Scans all cache entries for the same page+crop and returns the one with the closest scale. Used exclusively by draw functions (`_draw_func`, `_on_render`) to show the best available surface when no exact match exists.
+- **Do not put a best-match fallback inside `get()`.** Prior versions had a zoom-blind fallback in `get` that returned any uncropped surface regardless of scale — this made `_update_visibility` think every page was already cached and suppressed all new render jobs after zoom changes.
+
+### 1.6. `fitz.Rect` vs `tuple` Key Mismatch in LRU Cache
+
+- **Finding:** `fitz.Rect` objects do **not** compare equal to plain tuples `(x0, y0, x1, y1)` with the same numeric values. When used as `OrderedDict` keys, the lookup silently fails.
+- **The bug:** `RenderWorker._run()` stored cache entries with tuple crop keys `(crop_rect.x0, crop_rect.y0, crop_rect.x1, crop_rect.y1)`, but `_draw_func`, `_on_render`, and `_update_visibility` all passed raw `fitz.Rect` objects to `cache.get()` and `cache.get_best()`. No cache hit was ever possible when crop was active.
+- **Solution:** Normalize the crop key at the `RenderCache` boundary by converting `fitz.Rect` to `(x0, y0, x1, y1)` tuples before passing to `PageCache`:
+  ```python
+  @staticmethod
+  def _normalize_crop_key(crop_rect):
+      if crop_rect is None or isinstance(crop_rect, tuple):
+          return crop_rect
+      return (crop_rect.x0, crop_rect.y0, crop_rect.x1, crop_rect.y1)
+  ```
+
+### 1.7. Suppressing Render Jobs During Pinch-to-Zoom
+
+- **Finding:** During a pinch gesture, zoom changes continuously (multiple times per frame). Queuing render jobs for each intermediate zoom floods the worker queue and causes visual lag as stale jobs complete long after the pinch ends.
+- **Solution:** Add `is_pinching`, `pinch_center_x`, `pinch_center_y` state to `PDFCanvas`. While `is_pinching=True`:
+  - `_update_visibility()` skips all render job queuing (both visible and prefetch).
+  - The Cairo `_draw_func` and GL `_on_render` draw the best-match cached surface scaled to the current pinch zoom (the anchor center stays fixed via `cr.translate/scale` for Cairo, and the shader uniforms for GL).
+  - On pinch end (`_on_pinch_end`): set `is_pinching=False`, call `set_zoom(final_zoom)` which triggers `_update_visibility` with the guard removed, queuing exact-match render jobs at the final zoom. Each completion redraws the page via `_on_render_complete` + `get_best` for progressively sharper display.
+- **Stale-job guard removal:** `_on_render_complete` previously checked `zoom_key == current_zoom` and skipped redraw for stale zoom completions. This is now removed — every completion triggers a redraw, and `get_best` picks the best available match from the cache regardless of which zoom produced it.
+
+### 1.8. Pure Math-Based OpenGL Canvas Hit Testing
 - **Finding:** In OpenGL backend mode, GTK 4 `PageContainer` widget allocations can drift or fail to realize when child widgets are unmounted.
 - **Solution:** Render interactive PDF link stroke outlines, link hover fills, search match highlights, and debug borders directly inside `GLCanvas._on_render()` using OpenGL shader quads. Perform hit-testing (`_hit_test_link`, `_hit_test_page`) directly from `page_layout` and `vadjustment`:
   $$x_0 = \frac{\text{viewport\_w} - \text{dw}}{2.0}, \quad y_0 = \text{y\_offset} - \text{scroll\_y}$$
@@ -49,3 +79,5 @@ This document records durable technical findings, architectural decisions, mathe
 | **`max_physical_zoom` Clamping in `RenderWorker`** | Clamped document page resolution to $192\text{ DPI}$ ($2.66\times$), causing OpenGL to scale up textures at high zoom levels, making document pages blurrier than link portals. | Removed `max_physical_zoom` capping for document pages (`physical_zoom = zoom * scale_factor`). |
 | **Aspect-Ratio Cover Scaling (`max(w_scale, h_scale)`) for Portals** | Scaled portal snippet surfaces to fill container aspect ratio, cropping off left and right margins/text. | Set portal card size to $(\text{page\_dw} - 2 \times \text{page\_gap})$ and paint surfaces 1:1 without edge cropping. |
 | **`GLib.timeout_add(150, ...)` Debounce on Link Hover** | Mouse motion ticks re-evaluated link hover states and continuously cancelled/reset the timer, preventing portal cards from popping up. | Fire `_on_link_hovered()` once on link entry with link `xref` / `from` equality checks. |
+| **Best-match fallback inside `PageCache.get()`** | Caused `_update_visibility()` to always find a cached surface (even at a different zoom), preventing render jobs from being queued after zoom changes. Starvation of new renders. | `get()` returns exact matches only; `get_best()` (separate method) handles closest-zoom fallback for drawing. |
+| **Clearing `RenderCache` on every zoom change** | Destroyed all previously rendered surfaces at nearby zoom levels, preventing `get_best()` from showing anything during pinch or incremental zoom. | Keep the cache populated across zoom changes; let LRU eviction handle memory. |
