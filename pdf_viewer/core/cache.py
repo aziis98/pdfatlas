@@ -28,12 +28,29 @@ class PageCache:
             if key in self.cache:
                 self.cache.move_to_end(key)
                 return self.cache[key][0]
-            # Fallback: if requesting uncropped base page surface, reuse any cached base page surface for this page
-            if crop_key is None:
-                for (p_idx, s_val, c_key), (surf, _buf) in reversed(self.cache.items()):
-                    if p_idx == page_index and c_key is None:
-                        return surf
         return None
+
+    def get_best(
+        self, page_index: int, scale: float, crop_key: tuple | None = None
+    ) -> cairo.ImageSurface | None:
+        """Return the closest-zoom cached surface for this page+crop, or None."""
+        exact = self.get(page_index, scale, crop_key)
+        if exact is not None:
+            return exact
+        best_surface = None
+        best_diff = float("inf")
+        for (p, s, ck), (surface, _buf) in self.cache.items():
+            if p == page_index and ck == crop_key:
+                diff = abs(s - scale)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_surface = surface
+        if best_surface is not None:
+            for key, (surface, _buf) in list(self.cache.items()):
+                if surface is best_surface:
+                    self.cache.move_to_end(key)
+                    break
+        return best_surface
 
     def set(
         self,
@@ -98,23 +115,36 @@ class RenderCache:
     def __init__(self, max_size: int = 20):
         self._page_cache = PageCache(max_size=max_size)
 
+    @staticmethod
+    def _normalize_crop_key(crop_rect):
+        """Convert fitz.Rect → tuple or keep tuple as-is; pass None through."""
+        if crop_rect is None or isinstance(crop_rect, tuple):
+            return crop_rect
+        return (crop_rect.x0, crop_rect.y0, crop_rect.x1, crop_rect.y1)
+
     def get(
-        self, page_index: int, zoom: float, scale_factor: int, crop_rect_tuple: tuple | None
+        self, page_index: int, zoom: float, scale_factor: int, crop_rect
     ) -> cairo.ImageSurface | None:
         scale = zoom * scale_factor
-        return self._page_cache.get(page_index, scale, crop_rect_tuple)
+        return self._page_cache.get(page_index, scale, self._normalize_crop_key(crop_rect))
 
     def set(
         self,
         page_index: int,
         zoom: float,
         scale_factor: int,
-        crop_rect_tuple: tuple | None,
+        crop_rect,
         surface: cairo.ImageSurface,
         data_buffer: object,
     ):
         scale = zoom * scale_factor
-        self._page_cache.set(page_index, scale, crop_rect_tuple, surface, data_buffer)
+        self._page_cache.set(page_index, scale, self._normalize_crop_key(crop_rect), surface, data_buffer)
+
+    def get_best(
+        self, page_index: int, zoom: float, scale_factor: int, crop_rect
+    ) -> cairo.ImageSurface | None:
+        scale = zoom * scale_factor
+        return self._page_cache.get_best(page_index, scale, self._normalize_crop_key(crop_rect))
 
     def get_sub_surface(
         self, page_index: int, scale: float, clip_y0: float, clip_y1: float

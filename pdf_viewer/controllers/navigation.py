@@ -109,7 +109,9 @@ class NavigationController:
 
         # Re-accumulate new center_y: unscaled fixed_gaps + scaled content_y
         new_center_y = fixed_gaps + content_y * ratio
-        new_val_v = new_center_y - (viewport_h / 2.0)
+        # Keep the anchor point at the same screen position it was before zoom
+        old_screen_pos = center_y - val_v
+        new_val_v = new_center_y - old_screen_pos
 
         lower = self.win.vadjustment.get_lower()
         upper = self.win.vadjustment.get_upper()

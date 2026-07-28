@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 
 import gi
@@ -339,7 +340,12 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.backend = "opengl"
             self.canvas.gl_canvas = self.gl_canvas
             # Repaint the GL background layer on scroll
-            self.vadjustment.connect("value-changed", lambda adj: self.gl_canvas.queue_draw() if self.gl_canvas else None)
+            def _on_scroll_redraw(adj):
+                sys.stderr.write("[MainWindow] scroll -> gl_canvas.queue_draw\n")
+                sys.stderr.flush()
+                if self.gl_canvas:
+                    self.gl_canvas.queue_draw()
+            self.vadjustment.connect("value-changed", _on_scroll_redraw)
 
         # Connect vertical scroll adjustment to track current page
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
@@ -359,6 +365,31 @@ class MainWindow(Adw.ApplicationWindow):
         click_gesture = Gtk.GestureClick.new()
         click_gesture.connect("released", self._on_canvas_clicked)
         self.canvas.add_controller(click_gesture)
+
+        pinch_gesture = Gtk.GestureZoom.new()
+        pinch_gesture.connect("begin", self._on_pinch_begin)
+        pinch_gesture.connect("scale-changed", self._on_pinch_scale_changed)
+        pinch_gesture.connect("end", self._on_pinch_end)
+        self.canvas.add_controller(pinch_gesture)
+
+    def _on_pinch_begin(self, gesture, sequence):
+        self._pinch_start_zoom = self.zoom
+        self.canvas.is_pinching = True
+
+    def _on_pinch_scale_changed(self, gesture, scale):
+        new_zoom = self._pinch_start_zoom * gesture.get_scale_delta()
+        success, center_x, center_y = gesture.get_bounding_box_center()
+        if success:
+            self.canvas.pinch_center_x = center_x
+            self.canvas.pinch_center_y = center_y
+            self.set_zoom_level(new_zoom, center_x=center_x, center_y=center_y)
+        else:
+            self.set_zoom_level(new_zoom)
+
+    def _on_pinch_end(self, gesture, sequence):
+        self.canvas.is_pinching = False
+        self.canvas.set_zoom(self.zoom)
+        self._queue_canvas_redraw()
 
     def _on_canvas_clicked(self, gesture, n_press, x, y):
         self.canvas.grab_focus()
@@ -611,6 +642,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _queue_canvas_redraw(self):
         """Redraws the active canvas depending on whether OpenGL or Cairo backend is active."""
+        sys.stderr.write(f"[MainWindow] _queue_canvas_redraw backend={self.backend}\n")
+        sys.stderr.flush()
         if self.backend == "opengl" and self.gl_canvas:
             self.gl_canvas.queue_draw()
         else:

@@ -166,6 +166,12 @@ class RenderWorker:
                     )
                     sys.stderr.flush()
 
+                    sys.stderr.write(
+                        f"[RenderWorker] Render START page={page_index}, zoom={zoom:.4f}, "
+                        f"crop={crop_rect is not None}\n"
+                    )
+                    sys.stderr.flush()
+
                     pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=False)
 
                     arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
@@ -190,6 +196,11 @@ class RenderWorker:
                             else None
                         )
                         target_cache.set(page_index, zoom, scale_factor, crop_key, surface, buf)
+
+                    sys.stderr.write(
+                        f"[RenderWorker] Render END page={page_index}, zoom={zoom:.4f}, cached\n"
+                    )
+                    sys.stderr.flush()
 
                     GLib.idle_add(redraw_callback)
 

@@ -1,3 +1,5 @@
+import sys
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -188,6 +190,8 @@ class GLCanvas(Gtk.GLArea):
         self.textures.clear()
 
     def _on_render(self, area, context):
+        sys.stderr.write("[GLCanvas] _on_render fired\n")
+        sys.stderr.flush()
         canvas = self.layout_provider
         if not canvas or not canvas.page_layout:
             return False
@@ -244,8 +248,10 @@ class GLCanvas(Gtk.GLArea):
                 gl.glUniform2f(self.u_page_size, float(dw), float(dh))
                 gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
 
-                # Fetch cached Cairo surface
+                # Fetch cached Cairo surface (fall back to best match when zoom changes)
                 surface = canvas.cache.get(i, canvas.zoom, scale_factor, crop_rect)
+                if surface is None:
+                    surface = canvas.cache.get_best(i, canvas.zoom, scale_factor, crop_rect)
 
                 if surface is not None:
                     active_surfaces.add(surface)

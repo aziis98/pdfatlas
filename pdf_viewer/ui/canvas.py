@@ -1,3 +1,5 @@
+import sys
+
 import cairo
 import fitz
 import gi
@@ -93,8 +95,28 @@ class PageContainer(Gtk.Box):
                 if canvas.cache
                 else None
             )
+            if surface is None and canvas.cache is not None:
+                surface = canvas.cache.get_best(self.page_index, canvas.zoom, scale_factor, self.crop_rect)
+
             if surface is not None:
                 cr.save()
+                sw = surface.get_width()
+                sh = surface.get_height()
+                sx = width / sw
+                sy = height / sh
+                if canvas.is_pinching:
+                    page_cx = canvas.pinch_center_x - (canvas.get_width() - self.w) / 2
+                    page_cy = canvas.pinch_center_y - self.y_offset
+                    if 0 <= page_cx <= width and 0 <= page_cy <= height:
+                        ox = page_cx / sx
+                        oy = page_cy / sy
+                        cr.translate(page_cx, page_cy)
+                        cr.scale(sx, sy)
+                        cr.translate(-ox, -oy)
+                    else:
+                        cr.scale(sx, sy)
+                else:
+                    cr.scale(sx, sy)
                 cr.set_source_surface(surface, 0, 0)
                 cr.paint()
                 cr.restore()
@@ -110,25 +132,26 @@ class PageContainer(Gtk.Box):
                 cr.show_text(f"Loading Page {self.page_index + 1}...")
                 cr.restore()
 
-                job_key = (self.page_index, zoom_key, scale_factor, crop_key)
-                if job_key not in canvas.in_flight and canvas.render_worker and canvas.cache:
-                    canvas.in_flight.add(job_key)
+                if not canvas.is_pinching:
+                    job_key = (self.page_index, zoom_key, scale_factor, crop_key)
+                    if job_key not in canvas.in_flight and canvas.render_worker and canvas.cache:
+                        canvas.in_flight.add(job_key)
 
-                    def make_cb(idx, zk, sf, ck):
-                        return lambda: canvas._on_render_complete(idx, zk, sf, ck)
+                        def make_cb(idx, zk, sf, ck):
+                            return lambda: canvas._on_render_complete(idx, zk, sf, ck)
 
-                    canvas.render_worker.queue_render_job(
-                        priority=0,
-                        doc_model=canvas.doc_model,
-                        page_index=self.page_index,
-                        zoom=canvas.zoom * canvas.dpi_scale_factor,
-                        scale_factor=scale_factor,
-                        crop_rect=self.crop_rect,
-                        is_minimap=False,
-                        target_cache=canvas.cache,
-                        redraw_callback=make_cb(self.page_index, zoom_key, scale_factor, crop_key),
-                        screen_physical_dpi=canvas.screen_physical_dpi,
-                    )
+                        canvas.render_worker.queue_render_job(
+                            priority=0,
+                            doc_model=canvas.doc_model,
+                            page_index=self.page_index,
+                            zoom=canvas.zoom * canvas.dpi_scale_factor,
+                            scale_factor=scale_factor,
+                            crop_rect=self.crop_rect,
+                            is_minimap=False,
+                            target_cache=canvas.cache,
+                            redraw_callback=make_cb(self.page_index, zoom_key, scale_factor, crop_key),
+                            screen_physical_dpi=canvas.screen_physical_dpi,
+                        )
 
         # 2. Block Highlights (Search matches - Cairo backend only)
         if canvas.backend != "opengl" and canvas.highlighted_block is not None:
@@ -247,6 +270,11 @@ class PDFCanvas(Gtk.Box):
         self.gl_canvas: Any = None
         self.set_focusable(False)
 
+        # Pinch-to-zoom state
+        self.is_pinching = False
+        self.pinch_center_x: float = 0.0
+        self.pinch_center_y: float = 0.0
+
         self._setup_link_controllers()
 
     def _setup_link_controllers(self):
@@ -335,7 +363,9 @@ class PDFCanvas(Gtk.Box):
         return None
         return None
 
-    def queue_draw_overlays(self):
+    def queue_draw_overlays(self, reason=""):
+        sys.stderr.write(f"[PDFCanvas] queue_draw_overlays backend={self.backend} {reason}\n")
+        sys.stderr.flush()
         if self.backend == "opengl" and self.gl_canvas:
             self.gl_canvas.queue_draw()
         else:
@@ -356,7 +386,7 @@ class PDFCanvas(Gtk.Box):
             self.hovered_link = hit
             cursor_name = "pointer" if hit is not None else "default"
             self.set_cursor(Gdk.Cursor.new_from_name(cursor_name))
-            self.queue_draw_overlays()
+            self.queue_draw_overlays("hover")
             if self.on_link_hovered:
                 if hit is not None:
                     self.on_link_hovered(hit[0], hit[1])
@@ -371,7 +401,7 @@ class PDFCanvas(Gtk.Box):
         if self.hovered_link is not None:
             self.hovered_link = None
             self.set_cursor(Gdk.Cursor.new_from_name("default"))
-            self.queue_draw_overlays()
+            self.queue_draw_overlays("leave")
             if self.on_link_hovered:
                 self.on_link_hovered(None, None)
         if self.on_page_hovered:
@@ -428,14 +458,12 @@ class PDFCanvas(Gtk.Box):
         self.in_flight.clear()
         if self.render_worker:
             self.render_worker.clear_canvas_render_jobs()
-        if self.cache:
-            self.cache.clear()
         if self.hovered_link is not None:
             self.hovered_link = None
             if self.on_link_hovered:
                 self.on_link_hovered(None, None)
         self.update_layout()
-        self.queue_draw_overlays()
+        self.queue_draw_overlays("set_zoom")
 
     def on_crop_changed(self):
         self.in_flight.clear()
@@ -541,7 +569,7 @@ class PDFCanvas(Gtk.Box):
                 last_visible = i
 
                 # For OpenGL backend, visible page render requests are queued here
-                if self.backend == "opengl":
+                if self.backend == "opengl" and not self.is_pinching:
                     crop_key = (
                         (
                             container.crop_rect.x0,
@@ -573,8 +601,8 @@ class PDFCanvas(Gtk.Box):
                                 screen_physical_dpi=self.screen_physical_dpi,
                             )
 
-        # 2. Queue prefetch jobs for adjacent pages
-        if first_visible is not None and last_visible is not None and self.cache and self.render_worker:
+        # 2. Queue prefetch jobs for adjacent pages (skipped during pinch)
+        if not self.is_pinching and first_visible is not None and last_visible is not None and self.cache and self.render_worker:
             prefetch_targets = []
             page_count = len(self.containers)
             # Priority 1: Adjacent ±1
@@ -624,14 +652,18 @@ class PDFCanvas(Gtk.Box):
 
     def _on_render_complete(self, page_index, zoom_key, scale_factor, crop_key):
         self.in_flight.discard((page_index, zoom_key, scale_factor, crop_key))
-        current_zoom_key = round(self.zoom, 2)
-        current_scale_factor = self.get_scale_factor()
-        if zoom_key == current_zoom_key and scale_factor == current_scale_factor:
-            if self.backend == "opengl":
-                if self.gl_canvas:
-                    self.gl_canvas.queue_draw()
-            else:
-                if 0 <= page_index < len(self.containers):
-                    container = self.containers[page_index]
-                    if container.drawing_area:
-                        container.drawing_area.queue_draw()
+        sys.stderr.write(
+            f"[PDFCanvas] _on_render_complete page={page_index} "
+            f"zoom_key={zoom_key} current_zoom={round(self.zoom,2)} "
+            f"redraw=True\n"
+        )
+        sys.stderr.flush()
+        # Always redraw — drawing code uses get_best to pick the best available surface
+        if self.backend == "opengl":
+            if self.gl_canvas:
+                self.gl_canvas.queue_draw()
+        else:
+            if 0 <= page_index < len(self.containers):
+                container = self.containers[page_index]
+                if container.drawing_area:
+                    container.drawing_area.queue_draw()
