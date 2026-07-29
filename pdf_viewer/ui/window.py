@@ -615,6 +615,32 @@ class MainWindow(Adw.ApplicationWindow):
                         if "hover_link" in state:
                             hover_idx = int(state["hover_link"])
                             GLib.timeout_add(400, lambda: self._simulate_link_hover(hover_idx))
+                        if "selection" in state:
+                            sel_info = state["selection"]
+                            page_idx = int(sel_info.get("page", 0))
+                            if self.canvas.text_selection:
+                                pi = self.canvas.text_selection.get_page_index(page_idx)
+                                start_idx = None
+                                end_idx = None
+
+                                if "start_idx" in sel_info and "end_idx" in sel_info:
+                                    start_idx = int(sel_info["start_idx"])
+                                    end_idx = int(sel_info["end_idx"])
+                                elif pi and pi.chars:
+                                    s_text = str(sel_info.get("start", ""))
+                                    e_text = str(sel_info.get("end", s_text))
+                                    for idx, c in enumerate(pi.chars):
+                                        if start_idx is None and s_text and s_text in c.char:
+                                            start_idx = idx
+                                        if e_text and e_text in c.char:
+                                            end_idx = idx
+
+                                if start_idx is not None and end_idx is not None:
+                                    self.canvas.text_selection.start_selection(page_idx, start_idx)
+                                    self.canvas.text_selection.update_focus(page_idx, end_idx)
+                                    self.canvas.text_selection.end_selection()
+                                    self.canvas.queue_draw_overlays("selection-update")
+                                    self._update_selection_toolbar(True)
                         return False
 
                     GLib.idle_add(apply_deferred_state)
@@ -1602,6 +1628,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _take_programmatic_screenshot(self):
         print(f"[MainWindow] Taking scheduled screenshot of window to: {self.screenshot_path}", flush=True)
+        if hasattr(self, "current_source") and self.current_source and self.current_source.is_arxiv:
+            if not self.arxiv_mapper or not self.arxiv_mapper.is_ready:
+                print("[Screenshot] Waiting for arXiv diff worker to complete...", flush=True)
+                GLib.timeout_add(500, self._take_programmatic_screenshot)
+                return False
         try:
             self.queue_allocate()
             renderer = self.get_renderer()

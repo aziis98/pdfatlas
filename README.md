@@ -57,13 +57,17 @@ Pressing `M` opens a multi-column grid thumbnail navigator overlay:
 
 <br clear="all" />
 
-### arXiv TeX Sourcemapping & Copy
+<img src="assets/screenshots/attention_text_selection.png" alt="Text Selection Toolbar" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
 
-Open any arXiv paper directly using its ID or URL from the CLI (`pdfatlas 1706.03762`):
+### Text Selection & Contextual Toolbar
 
-- **Automatic TeX Extraction:** Downloads the paper's LaTeX source archive in the background, inlines dependencies (`\input`, `\include`), and builds a word-level diff sourcemap between PDF text and TeX source.
-- **LaTeX Source Copy (`Ctrl+C`):** Selecting text and pressing `Ctrl+C` automatically copies the corresponding raw LaTeX source snippet to your system clipboard.
-- **Live `--debug` Sourcemap Overlay:** Hovering over text in debug mode visualizes character/word bounding boxes and displays a live side-by-side comparison of PDF text and LaTeX source.
+Highlight text in any document to reveal the bottom context toolbar:
+
+- **PDF Plain Text Copy (`Ctrl+Shift+C` / "Copy"):** Extracts and copies clean, formatted plain text directly from the PDF document structure.
+- **LaTeX Source Copy (`Ctrl+C` / "Copy Source TeX"):** When viewing arXiv papers, PDF Atlas automatically maps character ranges back to the original LaTeX source files (`.tex`), allowing you to copy raw TeX source equations, math formatting, and citations directly into your editor.
+- **Keyboard Shortcuts & Info:** Click the right info icon for quick access to text selection shortcuts and copy options.
+
+<br clear="all" />
 
 ---
 
@@ -175,7 +179,9 @@ uv run main.py 1706.03762 --debug
 | `Page Up` / `Page Down` | Scroll by viewport height                  |
 | `Left` / `Right` or `h` / `l` | Scroll Back / Forward by viewport height   |
 | `Up` / `Down` or `k` / `j` | Fine step scroll Up / Down                 |
-| `Escape`                | Clear/exit search or close Minimap modal   |
+| `Ctrl+C`                | Copy Source TeX (if available, else PDF text) |
+| `Ctrl+Shift+C`          | Copy raw PDF text                          |
+| `Escape`                | Clear selection/search or close Minimap modal |
 | `Ctrl+Q` or `q`         | Quit                                       |
 
 ---

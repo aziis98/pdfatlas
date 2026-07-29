@@ -5,6 +5,7 @@ Saves generated screenshots with GNOME Libadwaita window decorations
 and soft ambient drop-shadows to ./assets/screenshots/
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -21,25 +22,52 @@ OUTPUT_DIR = REPO_ROOT / "assets" / "screenshots"
 TASKS = [
     ("attention_hero.png", ATTENTION_PDF, {"scroll_y": 1500}),
     ("attention_portal_search.png", ATTENTION_PDF, {"query": "attention mechanism"}),
-    ("attention_reader_view.png", ATTENTION_PDF, {"crop": True, "page_gaps": False, "scroll_y": 1100}),
+    (
+        "attention_reader_view.png",
+        ATTENTION_PDF,
+        {"crop": True, "page_gaps": False, "scroll_y": 1100},
+    ),
     ("attention_minimap_view.png", CATEGORY_PDF, {"minimap": True}),
+    (
+        "attention_text_selection.png",
+        "1706.03762",
+        {
+            "zoom": 1.5,
+            "scroll_y": 3950,
+            "selection": {
+                "page": 3,
+                "start_idx": 120,
+                "end_idx": 165,
+            },
+        },
+    ),
 ]
 
 
-def generate_all():
+def generate(filters: list[str] | None = None):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"[Screenshot Generator] Target directory: {OUTPUT_DIR}")
 
-    for filename, pdf_path, state in TASKS:
+    tasks_to_run = TASKS
+    if filters:
+        filter_strs = [f.lower() for f in filters]
+        tasks_to_run = [
+            t for t in TASKS if any(fs in t[0].lower() for fs in filter_strs)
+        ]
+        if not tasks_to_run:
+            print(f"[Warning] No screenshots matched filter(s): {filters}", file=sys.stderr)
+            return
+
+    for filename, pdf_target, state in tasks_to_run:
         output_path = OUTPUT_DIR / filename
-        if not pdf_path.exists():
-            print(f"[Error] PDF not found at {pdf_path}", file=sys.stderr)
+        if isinstance(pdf_target, Path) and not pdf_target.exists():
+            print(f"[Error] PDF not found at {pdf_target}", file=sys.stderr)
             continue
 
         cmd = [
             sys.executable,
             str(MAIN_PY),
-            str(pdf_path),
+            str(pdf_target),
             "--screenshot",
             str(output_path),
         ]
@@ -51,7 +79,8 @@ def generate_all():
             serialized = None
 
         state_display = serialized or "(default)"
-        print(f"\n[Generating] {filename} using {pdf_path.name} with state: {state_display}...", flush=True)
+        target_name = pdf_target.name if isinstance(pdf_target, Path) else str(pdf_target)
+        print(f"\n[Generating] {filename} using {target_name} with state: {state_display}...", flush=True)
         res = subprocess.run(cmd, cwd=str(REPO_ROOT))
 
         if res.returncode != 0:
@@ -59,8 +88,24 @@ def generate_all():
         else:
             print(f"[Success] Saved screenshot to {output_path}")
 
-    print("\n[Screenshot Generator] All README screenshots generated successfully!")
+    print("\n[Screenshot Generator] All requested README screenshots generated successfully!")
 
 
 if __name__ == "__main__":
-    generate_all()
+    parser = argparse.ArgumentParser(
+        description="Generate programmatically styled README screenshots for PDF Atlas."
+    )
+    parser.add_argument(
+        "filter",
+        nargs="*",
+        help="Optional screenshot name(s) or substring filters (e.g. 'selection', 'reader'). If omitted, runs all.",
+    )
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        dest="only_filter",
+        help="Filter screenshots to run by name or substring.",
+    )
+    cli_args = parser.parse_args()
+    active_filters = cli_args.filter or cli_args.only_filter
+    generate(active_filters)
