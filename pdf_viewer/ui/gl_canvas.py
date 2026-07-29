@@ -323,6 +323,85 @@ class GLCanvas(Gtk.GLArea):
                             gl.glUniform2f(self.u_page_size, float(hw), float(hh))
                             gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
 
+                    # Draw Text Selection Highlight
+                    if canvas.text_selection is not None:
+                        sel_rects = canvas.text_selection.get_selection_rects(i)
+                        if sel_rects:
+                            crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+                            crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+                            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+                            gl.glUniform1i(self.u_is_placeholder, 2)
+                            # Blue selection: [0.2, 0.5, 1.0, 0.35] premultiplied
+                            gl.glUniform4f(self.u_color, 0.07, 0.175, 0.35, 0.35)
+                            for rx0, ry0, rx1, ry1 in sel_rects:
+                                sx = x_offset + (rx0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
+                                sy = page_y0 + (ry0 - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
+                                sw = (rx1 - rx0) * canvas.zoom * canvas.dpi_scale_factor
+                                sh = (ry1 - ry0) * canvas.zoom * canvas.dpi_scale_factor
+                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
+                                gl.glUniform2f(self.u_page_size, float(sw), float(sh))
+                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                    # Debug: draw all character bboxes when actively selecting
+                    if (
+                        canvas.debug_mode
+                        and canvas.text_selection is not None
+                        and canvas.text_selection.is_selecting
+                        and canvas.text_selection.anchor_page == i
+                    ):
+                        pi = canvas.text_selection.get_page_index(i)
+                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        scale = canvas.zoom * canvas.dpi_scale_factor
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+                        gl.glUniform1i(self.u_is_placeholder, 2)
+
+                        # Draw all char bboxes as thin green outlines
+                        # Green [0.0, 0.8, 0.0, 0.4]
+                        gl.glUniform4f(self.u_color, 0.0, 0.8, 0.0, 0.4)
+                        border_t = 0.8
+                        for c in pi.chars:
+                            cx0 = x_offset + (c.bbox[0] - crop_off_x) * scale
+                            cy0 = page_y0 + (c.bbox[1] - crop_off_y) * scale
+                            cw = (c.bbox[2] - c.bbox[0]) * scale
+                            ch = (c.bbox[3] - c.bbox[1]) * scale
+                            # Top
+                            gl.glUniform2f(self.u_page_pos, float(cx0), float(cy0))
+                            gl.glUniform2f(self.u_page_size, float(cw), float(border_t))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            # Bottom
+                            gl.glUniform2f(self.u_page_pos, float(cx0), float(cy0 + ch - border_t))
+                            gl.glUniform2f(self.u_page_size, float(cw), float(border_t))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            # Left
+                            gl.glUniform2f(self.u_page_pos, float(cx0), float(cy0))
+                            gl.glUniform2f(self.u_page_size, float(border_t), float(ch))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            # Right
+                            gl.glUniform2f(self.u_page_pos, float(cx0 + cw - border_t), float(cy0))
+                            gl.glUniform2f(self.u_page_size, float(border_t), float(ch))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                        # Anchor char in red [1.0, 0.0, 0.0, 0.9]
+                        if canvas.text_selection.anchor_char_idx is not None:
+                            ac = pi.chars[canvas.text_selection.anchor_char_idx]
+                            ax = x_offset + ((ac.bbox[0] + ac.bbox[2]) / 2.0 - crop_off_x) * scale - 4.0
+                            ay = page_y0 + ((ac.bbox[1] + ac.bbox[3]) / 2.0 - crop_off_y) * scale - 4.0
+                            gl.glUniform4f(self.u_color, 1.0, 0.0, 0.0, 0.9)
+                            gl.glUniform2f(self.u_page_pos, float(ax), float(ay))
+                            gl.glUniform2f(self.u_page_size, 8.0, 8.0)
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                        # Focus char in blue [0.0, 0.0, 1.0, 0.9]
+                        if canvas.text_selection.focus_char_idx is not None:
+                            fc = pi.chars[canvas.text_selection.focus_char_idx]
+                            fx = x_offset + ((fc.bbox[0] + fc.bbox[2]) / 2.0 - crop_off_x) * scale - 4.0
+                            fy = page_y0 + ((fc.bbox[1] + fc.bbox[3]) / 2.0 - crop_off_y) * scale - 4.0
+                            gl.glUniform4f(self.u_color, 0.0, 0.0, 1.0, 0.9)
+                            gl.glUniform2f(self.u_page_pos, float(fx), float(fy))
+                            gl.glUniform2f(self.u_page_size, 8.0, 8.0)
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
                     # Draw Interactive PDF Links directly in OpenGL
                     if canvas.doc_model:
                         links = canvas.doc_model.get_page_links(i)

@@ -64,6 +64,9 @@ class ShortcutsController:
         # Close/clear search or exit minimap
         self._add_shortcut("Escape", self.win._on_escape)
 
+        # Copy selected text (only when canvas has focus, not entry fields)
+        self._add_nav_shortcut("<Control>c", self.win._copy_selection_to_clipboard)
+
     def _add_shortcut(self, trigger_str, callback):
         trigger = Gtk.ShortcutTrigger.parse_string(trigger_str)
         action = Gtk.CallbackAction.new(lambda w, a: (callback(), True)[1])

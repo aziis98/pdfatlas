@@ -59,9 +59,9 @@ class NavigationController:
             return
 
         old_zoom = self.win.zoom
-        new_zoom = max(0.25, min(8.0, new_zoom))
+        new_zoom = max(0.25, min(50.0, new_zoom))
 
-        # Max out zoom at window width size if page width exceeds viewport width
+        # Cap zoom: at max, only ~25% of page width visible in viewport
         viewport_w = float(self.win.scrolled_window.get_width())
         if viewport_w > 50 and self.win.doc_model:
             max_page_w = 0.0
@@ -74,9 +74,8 @@ class NavigationController:
                 if rect.width > max_page_w:
                     max_page_w = rect.width
             if max_page_w > 0:
-                max_zoom_fit = (viewport_w - 16.0) / (max_page_w * self.win.canvas.dpi_scale_factor)
-                if max_zoom_fit > 0.1:
-                    new_zoom = min(new_zoom, max_zoom_fit)
+                max_zoom_fit = viewport_w / (0.25 * max_page_w * self.win.canvas.dpi_scale_factor)
+                new_zoom = min(new_zoom, max_zoom_fit)
 
         if abs(old_zoom - new_zoom) < 1e-4:
             return

@@ -298,6 +298,14 @@ class MainWindow(Adw.ApplicationWindow):
         scroll_click.connect("pressed", lambda ctrl, n_press, x, y: self._on_scrolled_window_click(n_press, x, y))
         self.scrolled_window.add_controller(scroll_click)
 
+        # Text selection drag gesture on the scrolled_window (avoids conflict with canvas GestureClick)
+        scroll_drag = Gtk.GestureDrag.new()
+        scroll_drag.set_button(1)
+        scroll_drag.connect("drag-begin", lambda g, x, y: self.canvas.on_drag_begin(g, x, y))
+        scroll_drag.connect("drag-update", lambda g, ox, oy: self.canvas.on_drag_update(g, ox, oy))
+        scroll_drag.connect("drag-end", lambda g, ox, oy: self.canvas.on_drag_end(g, ox, oy))
+        self.scrolled_window.add_controller(scroll_drag)
+
         scroll_motion = Gtk.EventControllerMotion.new()
         scroll_motion.connect("motion", lambda ctrl, x, y: self.canvas._on_motion(ctrl, x, y))
         scroll_motion.connect("leave", lambda ctrl: self.canvas._on_leave(ctrl))
@@ -672,7 +680,28 @@ class MainWindow(Adw.ApplicationWindow):
             self.stack.set_visible_child_name("document-view")
             self.canvas.grab_focus()
             return True
+
+        # Clear text selection on Escape
+        if self.canvas.text_selection is not None and self.canvas.text_selection.has_selection():
+            self.canvas.text_selection.clear_selection()
+            self.canvas.queue_draw_overlays("selection-cleared")
+            return True
+
         return False
+
+    def _copy_selection_to_clipboard(self):
+        """Copy the currently selected text to the system clipboard."""
+        if self.canvas.text_selection is None or not self.canvas.text_selection.has_selection():
+            return
+
+        text = self.canvas.text_selection.get_selected_text()
+        if not text:
+            return
+
+        display = Gdk.Display.get_default()
+        if display is not None:
+            clipboard = display.get_clipboard()
+            clipboard.set(text)
 
     # --- Zoom Operations ---
 

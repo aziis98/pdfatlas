@@ -12,6 +12,7 @@ from gi.repository import Gdk, Gtk
 from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
 from ..core.document import DocumentModel
+from ..core.text_selection import TextSelection
 
 
 class PageContainer(Gtk.Box):
@@ -171,6 +172,67 @@ class PageContainer(Gtk.Box):
                 cr.fill()
                 cr.restore()
 
+        # 2.5. Text Selection Highlight (Cairo backend only)
+        if canvas.backend != "opengl" and canvas.text_selection is not None:
+            sel_rects = canvas.text_selection.get_selection_rects(self.page_index)
+            if sel_rects:
+                crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
+                crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
+                cr.save()
+                cr.set_source_rgba(0.2, 0.5, 1.0, 0.35)
+                for rx0, ry0, rx1, ry1 in sel_rects:
+                    px0 = (rx0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
+                    py0 = (ry0 - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
+                    pw = (rx1 - rx0) * canvas.zoom * canvas.dpi_scale_factor
+                    ph = (ry1 - ry0) * canvas.zoom * canvas.dpi_scale_factor
+                    cr.rectangle(px0, py0, pw, ph)
+                cr.fill()
+                cr.restore()
+
+            # Debug: draw all character bboxes when actively selecting
+            if (
+                canvas.debug_mode
+                and canvas.text_selection.is_selecting
+                and canvas.text_selection.anchor_page == self.page_index
+            ):
+                pi = canvas.text_selection.get_page_index(self.page_index)
+                crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
+                crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
+                cr.save()
+                cr.set_line_width(0.5)
+                for ci, c in enumerate(pi.chars):
+                    cx0 = (c.bbox[0] - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
+                    cy0 = (c.bbox[1] - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
+                    cw = (c.bbox[2] - c.bbox[0]) * canvas.zoom * canvas.dpi_scale_factor
+                    ch = (c.bbox[3] - c.bbox[1]) * canvas.zoom * canvas.dpi_scale_factor
+                    cr.set_source_rgba(0.0, 0.8, 0.0, 0.4)
+                    cr.rectangle(cx0, cy0, cw, ch)
+                    cr.stroke()
+
+                # Draw anchor char in red
+                if canvas.text_selection.anchor_char_idx is not None:
+                    ac = pi.chars[canvas.text_selection.anchor_char_idx]
+                    ax = (ac.bbox[0] + ac.bbox[2]) / 2.0
+                    ay = (ac.bbox[1] + ac.bbox[3]) / 2.0
+                    sx = (ax - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
+                    sy = (ay - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
+                    cr.set_source_rgba(1.0, 0.0, 0.0, 0.9)
+                    cr.arc(sx, sy, 4.0, 0, 6.283)
+                    cr.fill()
+
+                # Draw focus char in blue
+                if canvas.text_selection.focus_char_idx is not None:
+                    fc = pi.chars[canvas.text_selection.focus_char_idx]
+                    fx = (fc.bbox[0] + fc.bbox[2]) / 2.0
+                    fy = (fc.bbox[1] + fc.bbox[3]) / 2.0
+                    sx = (fx - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
+                    sy = (fy - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
+                    cr.set_source_rgba(0.0, 0.0, 1.0, 0.9)
+                    cr.arc(sx, sy, 4.0, 0, 6.283)
+                    cr.fill()
+
+                cr.restore()
+
         # 3. Interactive PDF Link Stroke Outlines (Cairo backend only)
         if canvas.backend != "opengl" and canvas.doc_model:
             links = canvas.doc_model.get_page_links(self.page_index)
@@ -260,6 +322,7 @@ class PDFCanvas(Gtk.Box):
         self.on_link_clicked: Any = None
         self.on_link_hovered: Any = None
         self.on_page_hovered: Any = None
+        self.text_selection: TextSelection | None = None
 
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
@@ -287,6 +350,143 @@ class PDFCanvas(Gtk.Box):
         click_gesture.set_button(1)
         click_gesture.connect("pressed", self._on_click)
         self.add_controller(click_gesture)
+
+    def _screen_to_pdf_point(self, x: float, y: float, page_index: int) -> tuple[float, float] | None:
+        """Convert screen coordinates to PDF point coordinates on a given page."""
+        if not self.page_layout or page_index >= len(self.page_layout):
+            return None
+
+        scale = self.zoom * self.dpi_scale_factor
+        canvas_w = float(self.get_width())
+        scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
+
+        y_offset, dw, dh, crop_rect = self.page_layout[page_index]
+        page_x0 = (canvas_w - dw) / 2.0
+        page_y0 = y_offset - scroll_y
+
+        rel_x = x - page_x0
+        rel_y = y - page_y0
+
+        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+
+        pt_x = (rel_x / scale) + crop_off_x
+        pt_y = (rel_y / scale) + crop_off_y
+        return (pt_x, pt_y)
+
+    def on_drag_begin(self, gesture, start_x, start_y):
+        """Handle drag begin - start text selection if no link is hit."""
+        if self.text_selection is None or not self.doc_model:
+            if self.debug_mode:
+                sys.stderr.write("[TextSel] drag-begin: no text_selection or doc_model\n")
+                sys.stderr.flush()
+            return
+
+        # Don't start text selection if a link was clicked
+        hit = self._hit_test_link(start_x, start_y)
+        if hit is not None:
+            if self.debug_mode:
+                sys.stderr.write(f"[TextSel] drag-begin: link hit at ({start_x:.1f},{start_y:.1f}), denying\n")
+                sys.stderr.flush()
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+            return
+
+        page_idx = self._hit_test_page(start_x, start_y)
+        if page_idx is None:
+            if self.debug_mode:
+                sys.stderr.write(f"[TextSel] drag-begin: no page hit at ({start_x:.1f},{start_y:.1f}), denying\n")
+                sys.stderr.flush()
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+            return
+
+        pt = self._screen_to_pdf_point(start_x, start_y, page_idx)
+        if pt is None:
+            if self.debug_mode:
+                sys.stderr.write("[TextSel] drag-begin: screen_to_pdf returned None, denying\n")
+                sys.stderr.flush()
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+            return
+
+        pt_x, pt_y = pt
+        char_idx = self.text_selection.hit_test(page_idx, pt_x, pt_y)
+        if self.debug_mode:
+            sys.stderr.write(
+                f"[TextSel] drag-begin: page={page_idx} pdf_pt=({pt_x:.1f},{pt_y:.1f}) "
+                f"char_idx={char_idx} total_chars={len(self.text_selection.get_page_index(page_idx).chars)}\n"
+            )
+            sys.stderr.flush()
+        if char_idx is None:
+            if self.debug_mode:
+                sys.stderr.write("[TextSel] drag-begin: no char hit, denying\n")
+                sys.stderr.flush()
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+            return
+
+        self.text_selection.start_selection(page_idx, char_idx)
+        self.queue_draw_overlays("selection-start")
+
+    def on_drag_update(self, gesture, offset_x, offset_y):
+        """Handle drag update - extend text selection."""
+        if self.text_selection is None or not self.text_selection.is_selecting:
+            return
+
+        # Get start position from gesture to compute current absolute position
+        success, start_x, start_y = gesture.get_start_point()
+        if not success:
+            if self.debug_mode:
+                sys.stderr.write("[TextSel] drag-update: get_start_point failed\n")
+                sys.stderr.flush()
+            return
+
+        cur_x = start_x + offset_x
+        cur_y = start_y + offset_y
+
+        page_idx = self._hit_test_page(cur_x, cur_y)
+        if page_idx is None:
+            if self.debug_mode:
+                sys.stderr.write(f"[TextSel] drag-update: no page at ({cur_x:.1f},{cur_y:.1f})\n")
+                sys.stderr.flush()
+            return
+
+        pt = self._screen_to_pdf_point(cur_x, cur_y, page_idx)
+        if pt is None:
+            return
+
+        pt_x, pt_y = pt
+        char_idx = self.text_selection.hit_test(page_idx, pt_x, pt_y)
+        if char_idx is None:
+            if self.debug_mode:
+                sys.stderr.write(f"[TextSel] drag-update: no char at ({pt_x:.1f},{pt_y:.1f})\n")
+                sys.stderr.flush()
+            return
+
+        self.text_selection.update_focus(page_idx, char_idx)
+        if self.debug_mode:
+            sys.stderr.write(
+                f"[TextSel] drag-update: page={page_idx} char={char_idx} "
+                f"anchor={self.text_selection.anchor_char_idx} focus={char_idx}\n"
+            )
+            sys.stderr.flush()
+        self.queue_draw_overlays("selection-update")
+
+    def on_drag_end(self, gesture, offset_x, offset_y):
+        """Handle drag end - finalize selection. Clear if no drag occurred (click)."""
+        if self.text_selection is not None:
+            # If no drag happened (click), clear the selection
+            if abs(offset_x) < 2 and abs(offset_y) < 2:
+                if self.debug_mode:
+                    sys.stderr.write(f"[TextSel] drag-end: no drag (offset={offset_x:.1f},{offset_y:.1f}), clearing\n")
+                    sys.stderr.flush()
+                self.text_selection.clear_selection()
+                self.queue_draw_overlays("selection-cleared")
+            else:
+                self.text_selection.end_selection()
+                if self.debug_mode:
+                    text = self.text_selection.get_selected_text()
+                    sys.stderr.write(
+                        f"[TextSel] drag-end: finalized, selected_text={text[:80]!r}\n"
+                    )
+                    sys.stderr.flush()
 
     def _hit_test_page(self, x: float, y: float) -> int | None:
         if not self.page_layout:
@@ -434,6 +634,7 @@ class PDFCanvas(Gtk.Box):
         self.settings = settings
         self.in_flight.clear()
         self.highlighted_block = None
+        self.text_selection = TextSelection(doc_model) if doc_model else None
 
         # Remove old containers
         child = self.get_first_child()
