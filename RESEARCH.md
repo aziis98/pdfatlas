@@ -74,6 +74,19 @@ This document records durable technical findings, architectural decisions, mathe
 - **Inlining & Tokenization:** `ArxivDiffMapper` in [`pdf_viewer/core/arxiv_mapper.py`](pdf_viewer/core/arxiv_mapper.py) recursively inlines TeX files, strips TeX comments (`%...`), tokenizes non-whitespace words, and extracts PyMuPDF native `words` (`page.get_text("words")`).
 - **Diff Alignment:** Running `difflib.SequenceMatcher` between PDF words and TeX words generates a 1-to-1 mapping $(i_{\text{pdf}} \leftrightarrow i_{\text{tex}})$. Selecting text or pressing `Ctrl+C` maps the selected word range directly to raw LaTeX snippets.
 
+### 1.11. Pre-Baking GTK Card Decorations onto `cairo.ImageSurface` in Background Threads
+- **Finding:** Rendering 30 search result or portal card widgets inside GTK layouts (`Gtk.FlowBox` / `Gtk.Overlay`) causes GTK frame repaints to re-evaluate vector clipping paths (`cr.clip_preserve()`), Cairo rounded rectangle arc math (`cr.arc` $\times 4$), background fills, and 1px border strokes on every scroll frame.
+- **Solution:** Move card decoration rendering into background worker threads (`render_strip_surface` & `RenderWorker`):
+  1. Render the PDF snippet onto an ARGB32 surface (`cairo.FORMAT_ARGB32`).
+  2. Execute `apply_card_decorations(surface, scale_factor)` in the background worker thread using `cairo.OPERATOR_DEST_IN` with an 8px rounded rect path to clip outer transparent corners, followed by `cairo.OPERATOR_OVER` to stroke the 1px border.
+  3. In `LinkPortalPreviewCard._draw_func`, GTK frame repaints perform a **pure 1:1 hardware memory blit** (`cr.set_source_surface(self.surface, 0, 0); cr.paint()`) with ZERO Cairo arc math or clipping calculations during scrolling.
+
+### 1.12. Dedicated Single-Thread SQLite `DatabaseService` & `rawdict` Caching
+- **Finding 1 (SQLite Threading Restrictions):** Python's `sqlite3` module enforces `check_same_thread=True` by default. Executing FTS5 queries directly on the main GTK UI thread blocks user typing, while passing `sqlite3.Connection` instances across worker threads raises `sqlite3.ProgrammingError`.
+- **Solution 1:** Wrap all SQLite operations in a `DatabaseService` backed by a dedicated single-threaded worker (`ThreadPoolExecutor(max_workers=1, thread_name_prefix="db-thread")`). Database creation, FTS5 searching, and `save_doc_state` execute exclusively on `db-thread`, returning search results to the GTK main thread asynchronously via `GLib.idle_add()`.
+- **Finding 2 (Redundant Character Parsing):** `get_query_match_rects()` calls `page.get_text("rawdict")` for every search result card, parsing full page character dictionaries 30+ times.
+- **Solution 2:** Implement a thread-safe LRU cache `_rawdict_cache` indexed by `(pdf_path, page_no)` so `rawdict` is parsed once per page and reused across all result card renders and search highlight passes.
+
 ---
 
 ## 2. Rejected Approaches
