@@ -11,8 +11,6 @@ A modern PDF reader built with Python, GTK4, Libadwaita, Cairo, PyMuPDF, and Ope
   <img src="assets/screenshots/attention_hero.png" alt="PDF Atlas Reader View" width="100%" />
 </p>
 
----
-
 ## Key Features
 
 <img src="assets/screenshots/attention_portal_search.png" alt="FTS Search Portals" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
