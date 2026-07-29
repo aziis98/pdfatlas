@@ -489,6 +489,18 @@ class MainWindow(Adw.ApplicationWindow):
                 return
 
 
+        aid = arxiv_id_from_path(filepath)
+        existing = self.recent_files.get_by_uri(filepath)
+        if not existing and aid:
+            existing = self.recent_files.get_by_arxiv_id(aid)
+
+        if existing and existing.display_name and existing.display_name != "paper.pdf":
+            source = PdfSource(
+                source_type=existing.source_type,
+                uri=filepath,
+                display_name=existing.display_name,
+            )
+
         try:
             if self.doc_model:
                 self.doc_model.close()
@@ -502,13 +514,20 @@ class MainWindow(Adw.ApplicationWindow):
                 self.index_conn.close()
                 self.index_conn = None
 
+            self.doc_model = DocumentModel(filepath)
+            self.crop_analyzer = CropAnalyzer(self.doc_model)
+
+            # Try extracting PDF metadata title for local files if display name is just basename/generic
+            if source.display_name in (os.path.basename(filepath), "paper.pdf") or source.display_name.startswith("arXiv:"):
+                meta_title = (self.doc_model.doc.metadata or {}).get("title") if hasattr(self.doc_model.doc, "metadata") else None
+                if meta_title and isinstance(meta_title, str):
+                    cleaned_meta = meta_title.strip()
+                    if cleaned_meta and cleaned_meta.lower() not in ("paper.pdf", "untitled", "none"):
+                        source.display_name = cleaned_meta
 
             self.current_source = source
             self.recent_files.add(source)
             self._rebuild_open_menu()
-
-            self.doc_model = DocumentModel(filepath)
-            self.crop_analyzer = CropAnalyzer(self.doc_model)
 
             self.render_cache.clear()
             self.minimap_cache.clear()
@@ -558,6 +577,22 @@ class MainWindow(Adw.ApplicationWindow):
             self.page_total_label.set_label(f"of {self.doc_model.page_count}")
             self.page_input.set_text("1")
             self.page_input.set_sensitive(True)
+
+            if source.is_arxiv and aid and source.display_name in ("paper.pdf", f"arXiv:{aid}"):
+                def _bg_fetch(paper_aid: str, paper_uri: str):
+                    from .arxiv_dialog import _fetch_arxiv_title
+                    title = _fetch_arxiv_title(paper_aid)
+                    if title:
+                        def _update():
+                            if self.current_source and self.current_source.uri == paper_uri:
+                                self.current_source.display_name = title
+                                self.current_source.source_type = "arxiv"
+                                self.recent_files.add(self.current_source)
+                                self._rebuild_open_menu()
+                                self.set_title(f"PDF Viewer — {title}")
+                                self.filename_label.set_label(title)
+                        GLib.idle_add(_update)
+                threading.Thread(target=_bg_fetch, args=(aid, filepath), daemon=True).start()
 
             self.arxiv_mapper = None
             if source.is_arxiv:
@@ -751,8 +786,19 @@ class MainWindow(Adw.ApplicationWindow):
         if response_id == Gtk.ResponseType.ACCEPT:
             file = dialog.get_file()
             path = file.get_path()
-            source = PdfSource(source_type="file", uri=path, display_name=os.path.basename(path))
-            self.open_document(source)
+            if path:
+                existing = self.recent_files.get_by_uri(path)
+                aid = arxiv_id_from_path(path)
+                if not existing and aid:
+                    existing = self.recent_files.get_by_arxiv_id(aid)
+
+                if existing:
+                    source = existing
+                elif aid:
+                    source = PdfSource(source_type="arxiv", uri=path, display_name=f"arXiv:{aid}")
+                else:
+                    source = PdfSource(source_type="file", uri=path, display_name=os.path.basename(path))
+                self.open_document(source)
         dialog.destroy()
 
     def _show_error_dialog(self, message):
@@ -777,7 +823,7 @@ class MainWindow(Adw.ApplicationWindow):
         if recent:
             recent_section = Gio.Menu.new()
             for source in recent:
-                recent_section.append(source.display_name, f"win.open-recent::{source.uri}")
+                recent_section.append(source.display_name.replace("_", "__"), f"win.open-recent::{source.uri}")
             menu.append_section(None, recent_section)
 
         arxiv_section = Gio.Menu.new()
@@ -788,7 +834,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_open_recent(self, action, parameter):
         uri = parameter.get_string()
-        source = PdfSource(source_type="file", uri=uri, display_name=os.path.basename(uri))
+        existing = self.recent_files.get_by_uri(uri)
+        if existing:
+            source = existing
+        else:
+            aid = arxiv_id_from_path(uri)
+            if aid:
+                source = PdfSource(source_type="arxiv", uri=uri, display_name=f"arXiv:{aid}")
+            else:
+                source = PdfSource(source_type="file", uri=uri, display_name=os.path.basename(uri))
         self.open_document(source)
 
     def _open_arxiv_dialog(self):

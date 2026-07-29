@@ -57,6 +57,28 @@ class RecentFilesManager:
     def get_recent_by_type(self, source_type: str, n: int = 10) -> list[PdfSource]:
         return [e for e in self._entries if e.source_type == source_type][:n]
 
+    def get_by_uri(self, uri: str) -> PdfSource | None:
+        try:
+            norm_uri = os.path.abspath(uri)
+        except Exception:
+            norm_uri = uri
+        for entry in self._entries:
+            try:
+                if os.path.abspath(entry.uri) == norm_uri or entry.uri == uri:
+                    return entry
+            except Exception:
+                if entry.uri == uri:
+                    return entry
+        return None
+
+    def get_by_arxiv_id(self, aid: str) -> PdfSource | None:
+        from .arxiv_mapper import arxiv_id_from_path
+        for entry in self._entries:
+            entry_aid = arxiv_id_from_path(entry.uri)
+            if entry_aid == aid:
+                return entry
+        return None
+
     def clear(self):
         self._entries.clear()
         self._save()

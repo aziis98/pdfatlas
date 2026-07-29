@@ -38,6 +38,20 @@ def _extract_arxiv_id(raw: str) -> str | None:
 ARXIV_API_URL = "http://export.arxiv.org/api/query?id_list={}"
 
 
+def clean_arxiv_title(raw_title: str) -> str:
+    if not raw_title:
+        return ""
+    text = raw_title.replace("\u00ad", "-")
+    text = text.replace(r"\-", "-")
+    text = text.replace("---", "—").replace("--", "–")
+    text = re.sub(r"\\(?:textit|textbf|mathrm|mbox)\{([^}]+)\}", r"\1", text)
+    text = text.replace("$", "")
+    words = text.split()
+    cleaned = " ".join(words)
+    cleaned = re.sub(r"(\w+)\s*-\s*(\w+)", r"\1-\2", cleaned)
+    return cleaned
+
+
 def _fetch_arxiv_title(arxiv_id: str) -> str | None:
     try:
         url = ARXIV_API_URL.format(arxiv_id)
@@ -47,7 +61,7 @@ def _fetch_arxiv_title(arxiv_id: str) -> str | None:
         ns = {"atom": "http://www.w3.org/2005/Atom"}
         title_el = root.find("atom:entry/atom:title", ns)
         if title_el is not None and title_el.text:
-            return " ".join(title_el.text.split())
+            return clean_arxiv_title(title_el.text)
     except Exception:
         pass
     return None
