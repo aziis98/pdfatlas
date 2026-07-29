@@ -57,7 +57,7 @@ Pressing `M` opens a page thumbnail grid overlay:
 
 <br clear="all" />
 
-<img src="assets/screenshots/attention_text_selection.png" alt="Text Selection Toolbar" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+<img src="assets/screenshots/attention_text_selection.png" alt="Text Selection Toolbar" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
 
 ### Text Selection & Copy
 
