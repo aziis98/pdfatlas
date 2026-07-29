@@ -65,7 +65,6 @@ Highlight text in any document to reveal the bottom context toolbar:
 
 - **PDF Plain Text Copy (`Ctrl+Shift+C` / "Copy"):** Copies selected plain text from the PDF.
 - **LaTeX Source Copy (`Ctrl+C` / "Copy Source"):** For arXiv papers, PDF Atlas attempts to map character selections back to original LaTeX source code.
-- **Shortcuts Info:** Click the info icon for quick access to selection shortcuts.
 
 <br clear="all" />
 
