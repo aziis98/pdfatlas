@@ -158,7 +158,7 @@ uv run main.py 1706.03762 --debug
 | Shortcut                | Action                                     |
 | ----------------------- | ------------------------------------------ |
 | `Ctrl+O`                | Open PDF Document                          |
-| `Ctrl+L`                | Focus Search Bar                           |
+| `Ctrl+F`                | Focus Search Bar                           |
 | `+` / `-` / `=`         | Zoom In / Out                              |
 | `Ctrl+scroll`           | Zoom centered on cursor                    |
 | `Ctrl+0`                | Reset Zoom to 100%                         |
