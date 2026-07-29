@@ -55,7 +55,18 @@ Pressing `M` opens a multi-column grid thumbnail navigator overlay:
 - **Auto-Crop Margins (`C`):** Automatically detects page whitespace boundaries in background threads, eliminating margins to maximize font sizes on smaller screens.
 - **Cryptographic Cache:** Search indexes are cached locally in `~/.cache/pdfatlas/<sha256>.db` keyed by the document's SHA-256 digest for instant subsequent document loads.
 
+<br clear="all" />
+
+### arXiv TeX Sourcemapping & Copy
+
+Open any arXiv paper directly using its ID or URL from the CLI (`pdfatlas 1706.03762`):
+
+- **Automatic TeX Extraction:** Downloads the paper's LaTeX source archive in the background, inlines dependencies (`\input`, `\include`), and builds a word-level diff sourcemap between PDF text and TeX source.
+- **LaTeX Source Copy (`Ctrl+C`):** Selecting text and pressing `Ctrl+C` automatically copies the corresponding raw LaTeX source snippet to your system clipboard.
+- **Live `--debug` Sourcemap Overlay:** Hovering over text in debug mode visualizes character/word bounding boxes and displays a live side-by-side comparison of PDF text and LaTeX source.
+
 ---
+
 
 ## Architecture
 
@@ -120,7 +131,12 @@ uv tool install .
 Once installed, launch the application from anywhere using:
 
 ```bash
-pdfatlas [path/to/document.pdf]
+# Open a local PDF file
+pdfatlas path/to/document.pdf
+
+# Open an arXiv paper directly by ID or URL
+pdfatlas 1706.03762
+pdfatlas https://arxiv.org/abs/2305.12345
 ```
 
 ---
@@ -134,14 +150,12 @@ To install dependencies and run locally:
 uv sync
 
 # Launch with hardware-accelerated OpenGL renderer (default)
-uv run main.py [path/to/document.pdf]
+uv run main.py 1706.03762
 
-# Launch with standard Cairo backend renderer
-uv run python main.py [path/to/document.pdf] --backend cairo
-
-# Programmatic screenshot / state restore
-uv run python main.py [path/to/document.pdf] --state '{"query": "attention"}' --screenshot screenshots.local/out.png
+# Launch with arXiv sourcemap debug overlay enabled
+uv run main.py 1706.03762 --debug
 ```
+
 
 ---
 

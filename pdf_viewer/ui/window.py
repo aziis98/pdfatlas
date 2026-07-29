@@ -1,6 +1,8 @@
 import os
 import sys
 import threading
+from pathlib import Path
+
 
 import gi
 
@@ -15,10 +17,12 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
 
 from ..controllers.navigation import NavigationController
 from ..controllers.search import SearchController
+from ..core.arxiv_mapper import ArxivDiffMapper, arxiv_id_from_path
 from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
-from ..core.index import get_db_for_pdf
+from ..core.index import get_db_for_pdf, load_doc_state, save_doc_state
+
 from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
 from ..core.pdf_source import PdfSource, RecentFilesManager
@@ -72,6 +76,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings = CropSettings()
         self.current_source: PdfSource | None = None
         self.recent_files = RecentFilesManager()
+        self.arxiv_mapper: ArxivDiffMapper | None = None
+
 
         # LRU Caches and background thread pool for canvas rendering
         self.render_cache = RenderCache(20)
@@ -81,7 +87,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Thread pool for search indexing & result portal rendering
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
         self.index_conn = None
+        self._state_save_timer_id: int | None = None
         self.pinned = {}  # id -> {"result": ..., "query_terms": ...}
+
         self._debounce_source_id = None
         self._last_query = ""
 
@@ -315,9 +323,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas = PDFCanvas()
         self.canvas.backend = self.backend
         self.canvas.debug_mode = self.debug_mode
+        self.canvas.hadjustment = self.scrolled_window.get_hadjustment()
+        self.canvas.vadjustment = self.scrolled_window.get_vadjustment()
+
+
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_page_hovered = self._on_page_hovered
         self.scrolled_window.set_child(self.canvas)
+
 
         # Build floating zoom controls box and link preview box
         self._build_floating_zoom_controls()
@@ -446,8 +459,25 @@ class MainWindow(Adw.ApplicationWindow):
     def open_document(self, source: PdfSource):
         filepath = source.uri
         if not os.path.exists(filepath):
-            self._show_error_dialog(f"File not found: {filepath}")
-            return
+            from ..core.arxiv_mapper import download_arxiv_source, extract_arxiv_id_from_raw
+
+            aid = extract_arxiv_id_from_raw(filepath)
+            if aid:
+                try:
+                    pdf_path, _ = download_arxiv_source(aid)
+                    filepath = str(pdf_path)
+                    source = PdfSource(
+                        source_type="arxiv",
+                        uri=filepath,
+                        display_name=f"arXiv:{aid}",
+                    )
+                except Exception as e:
+                    self._show_error_dialog(f"Failed to download arXiv paper '{filepath}':\n{e}")
+                    return
+            else:
+                self._show_error_dialog(f"File not found: {filepath}")
+                return
+
 
         try:
             if self.doc_model:
@@ -456,10 +486,12 @@ class MainWindow(Adw.ApplicationWindow):
             if self.crop_analyzer:
                 self.crop_analyzer.close()
 
-            # Close old search index
+            # Save state and close old search index
             if self.index_conn:
+                self._save_current_doc_state()
                 self.index_conn.close()
                 self.index_conn = None
+
 
             self.current_source = source
             self.recent_files.add(source)
@@ -517,6 +549,17 @@ class MainWindow(Adw.ApplicationWindow):
             self.page_input.set_text("1")
             self.page_input.set_sensitive(True)
 
+            self.arxiv_mapper = None
+            if source.is_arxiv:
+                aid = arxiv_id_from_path(filepath)
+                if aid:
+                    self.progress_bar.set_fraction(0.0)
+                    self.progress_bar.set_visible(True)
+                    arxiv_thread = threading.Thread(
+                        target=self._arxiv_diff_worker, args=(aid, filepath), daemon=True
+                    )
+                    arxiv_thread.start()
+
             # Start crop analysis
             self._start_crop_analysis()
 
@@ -528,6 +571,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             indexing_thread = threading.Thread(target=self._index_worker, args=(filepath,), daemon=True)
             indexing_thread.start()
+
 
             # Restore state if passed programmatically
             if self.initial_state:
@@ -581,10 +625,50 @@ class MainWindow(Adw.ApplicationWindow):
         except Exception as e:
             GLib.idle_add(self._show_error_dialog, f"Search indexing failed:\n{e}")
 
+    def _arxiv_diff_worker(self, arxiv_id: str, filepath: str):
+        try:
+            def progress_cb(f: float) -> None:
+                GLib.idle_add(self._on_arxiv_diff_progress, f)
+
+            mapper = ArxivDiffMapper()
+            mapper.process(
+                arxiv_id,
+                Path(filepath),
+                progress_callback=progress_cb,
+            )
+            GLib.idle_add(self._on_arxiv_diff_complete, mapper)
+        except Exception as e:
+            print(f"[MainWindow] Arxiv diff calculation failed: {e}", flush=True)
+            GLib.idle_add(self._on_arxiv_diff_complete, None)
+
+
+    def _on_arxiv_diff_progress(self, fraction: float):
+        self.progress_bar.set_fraction(fraction)
+        self.progress_bar.set_visible(True)
+
+    def _on_arxiv_diff_complete(self, mapper: ArxivDiffMapper | None):
+        self.arxiv_mapper = mapper
+        self.progress_bar.set_visible(False)
+
+
     def _on_indexing_complete(self, conn):
         self.index_conn = conn
         self.entry.set_sensitive(True)
         self.entry.set_placeholder_text("Search document...")
+
+        # Restore saved zoom & scroll_y state from .db if no CLI state was specified
+        if not self.initial_state:
+            saved_state = load_doc_state(conn)
+            if "zoom" in saved_state:
+                self.set_zoom_level(saved_state["zoom"])
+            if "scroll_y" in saved_state:
+                scroll_y = saved_state["scroll_y"]
+
+                def apply_saved_scroll():
+                    self.vadjustment.set_value(scroll_y)
+                    return False
+
+                GLib.idle_add(apply_saved_scroll)
 
         # If there's a deferred query from state restoration, execute it now
         if hasattr(self, "_deferred_state_query") and self._deferred_state_query:
@@ -592,6 +676,24 @@ class MainWindow(Adw.ApplicationWindow):
             self._deferred_state_query = None
             self.entry.set_text(query)
             self.run_search(query)
+
+    def _schedule_state_save(self):
+        if hasattr(self, "_state_save_timer_id") and self._state_save_timer_id is not None:
+            GLib.source_remove(self._state_save_timer_id)
+
+        def _on_save_timer():
+            self._state_save_timer_id = None
+            self._save_current_doc_state()
+            return False
+
+        self._state_save_timer_id = GLib.timeout_add(1000, _on_save_timer)
+
+    def _save_current_doc_state(self):
+        if hasattr(self, "index_conn") and self.index_conn:
+            zoom = getattr(self, "zoom", 1.0)
+            scroll_y = self.vadjustment.get_value() if hasattr(self, "vadjustment") else 0.0
+            save_doc_state(self.index_conn, zoom, scroll_y)
+
 
     def _open_file_dialog(self):
         dialog = Gtk.FileChooserNative.new(
@@ -690,11 +792,34 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _copy_selection_to_clipboard(self):
-        """Copy the currently selected text to the system clipboard."""
-        if self.canvas.text_selection is None or not self.canvas.text_selection.has_selection():
+        """Copy the currently selected text to the system clipboard (as LaTeX source if arXiv sourcemap is ready)."""
+        sel = self.canvas.text_selection
+        if sel is None or not sel.has_selection():
             return
 
-        text = self.canvas.text_selection.get_selected_text()
+        text = ""
+        if self.arxiv_mapper and self.arxiv_mapper.is_ready:
+            if sel.anchor_page is not None and sel.focus_page is not None:
+                if sel.anchor_page <= sel.focus_page:
+                    p_start, p_end = sel.anchor_page, sel.focus_page
+                else:
+                    p_start, p_end = sel.focus_page, sel.anchor_page
+
+                latex_parts = []
+                for pi in range(p_start, p_end + 1):
+                    rng = sel._selection_range(pi)
+                    if rng:
+                        s_char, e_char = rng
+                        tex_snippet = self.arxiv_mapper.get_latex_for_pdf_range(pi, s_char, e_char)
+                        if tex_snippet:
+                            latex_parts.append(tex_snippet)
+
+                if latex_parts:
+                    text = "\n".join(latex_parts)
+
+        if not text:
+            text = sel.get_selected_text()
+
         if not text:
             return
 
@@ -702,6 +827,7 @@ class MainWindow(Adw.ApplicationWindow):
         if display is not None:
             clipboard = display.get_clipboard()
             clipboard.set(text)
+
 
     # --- Zoom Operations ---
 
@@ -938,11 +1064,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.on_crop_changed()
 
     def close(self):
-        # Shutdown executors and close connections cleanly
+        # Save state and shutdown executors and close connections cleanly
+        self._save_current_doc_state()
         self.executor.shutdown(wait=False, cancel_futures=True)
         if self.index_conn:
             self.index_conn.close()
             self.index_conn = None
+
         if self.crop_analyzer:
             self.crop_analyzer.close()
         if self.doc_model:
@@ -1013,10 +1141,10 @@ class MainWindow(Adw.ApplicationWindow):
                 background-color: #ffffff;
                 border: 1px solid rgba(0, 0, 0, 0.12);
                 border-radius: 8px;
-                overflow: hidden;
                 padding: 0px;
                 box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.12), 0px 1px 3px rgba(0, 0, 0, 0.08);
             }
+
             .portal-overlay-pin {
                 min-width: 28px;
                 min-height: 28px;
@@ -1114,8 +1242,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.debug_info_label.add_css_class("debug-info-label")
             self.debug_info_label.set_visible(False)
             self.link_preview_box.append(self.debug_info_label)
+
+            self.debug_arxiv_label = Gtk.Label(xalign=0.0)
+            self.debug_arxiv_label.set_halign(Gtk.Align.START)
+            self.debug_arxiv_label.set_justify(Gtk.Justification.LEFT)
+            self.debug_arxiv_label.add_css_class("debug-info-label")
+            self.debug_arxiv_label.set_visible(False)
+            self.debug_arxiv_label.set_wrap(True)
+            self.debug_arxiv_label.set_max_width_chars(80)
+            self.link_preview_box.append(self.debug_arxiv_label)
         else:
             self.debug_info_label = None
+            self.debug_arxiv_label = None
 
         self.link_preview_box.set_visible(False)
 
@@ -1165,12 +1303,73 @@ class MainWindow(Adw.ApplicationWindow):
             )
             self.debug_info_label.set_text(debug_txt)
             self.debug_info_label.set_visible(True)
+
+            if (
+                self.debug_arxiv_label
+                and self.arxiv_mapper
+                and self.arxiv_mapper.is_ready
+                and self.canvas.text_selection
+            ):
+                pt = self.canvas._screen_to_pdf_point(x, y, page_index)
+                if pt is not None:
+                    char_idx = self.canvas.text_selection.hit_test(page_index, pt[0], pt[1])
+                    if char_idx is not None:
+                        w_start = self.canvas.text_selection.get_word_start_char_idx(page_index, char_idx)
+                        pdf_frag, tex_frag = self.arxiv_mapper.get_cursor_fragment(
+                            page_index, w_start, window_words=50
+                        )
+                        pi = self.canvas.text_selection.get_page_index(page_index)
+                        curr_c_rect = pi.chars[char_idx].bbox if 0 <= char_idx < len(pi.chars) else None
+                        curr_w_rects = self.canvas.text_selection.get_word_rects_for_char(page_index, char_idx)
+                        fwd_c_rects = self.canvas.text_selection.get_forward_char_rects(
+                            page_index, w_start, word_count=50
+                        )
+
+                        new_data = {
+                            "page_index": page_index,
+                            "curr_word_rects": curr_w_rects,
+                            "curr_char_rect": curr_c_rect,
+                            "forward_char_rects": fwd_c_rects,
+                        }
+
+                        if self.canvas.debug_arxiv_data != new_data:
+                            self.canvas.debug_arxiv_data = new_data
+                            self.canvas.queue_draw_overlays("debug-arxiv-data")
+
+                        if pdf_frag or tex_frag:
+                            arxiv_txt = (
+                                "ARXIV CURSOR FRAGMENT (~50 words forward):\n\n"
+                                f"PDF:  {pdf_frag}\n\n"
+                                f"TEX:  {tex_frag}"
+                            )
+                            self.debug_arxiv_label.set_text(arxiv_txt)
+                            self.debug_arxiv_label.set_visible(True)
+                        else:
+                            self.debug_arxiv_label.set_visible(False)
+                    else:
+                        self.debug_arxiv_label.set_visible(False)
+                        if self.canvas.debug_arxiv_data is not None:
+                            self.canvas.debug_arxiv_data = None
+                            self.canvas.queue_draw_overlays("debug-arxiv-clear")
+                else:
+                    self.debug_arxiv_label.set_visible(False)
+                    if self.canvas.debug_arxiv_data is not None:
+                        self.canvas.debug_arxiv_data = None
+                        self.canvas.queue_draw_overlays("debug-arxiv-clear")
             self.link_preview_box.set_visible(True)
         else:
             self.debug_info_label.set_text("")
             self.debug_info_label.set_visible(False)
+            if self.debug_arxiv_label:
+                self.debug_arxiv_label.set_text("")
+                self.debug_arxiv_label.set_visible(False)
+            if self.canvas.debug_arxiv_data is not None:
+                self.canvas.debug_arxiv_data = None
+                self.canvas.queue_draw_overlays("debug-arxiv-clear")
             if not self.link_preview_card_box.get_visible():
                 self.link_preview_box.set_visible(False)
+
+
 
     @property
     def portal_cache(self):
@@ -1203,6 +1402,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.nav_controller.set_zoom_level(
             new_zoom, anchor_x=anchor_x, anchor_y=anchor_y, center_x=center_x, center_y=center_y
         )
+        self._schedule_state_save()
 
     def zoom_in(self):
         self.nav_controller.zoom_in()
@@ -1256,8 +1456,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._on_crop_settings_updated()
 
     def _on_scroll_page_changed(self, adj):
+        self._schedule_state_save()
         if not self.doc_model or not self.canvas.page_layout:
             return
+
 
         y_val = adj.get_value()
         viewport_h = adj.get_page_size()

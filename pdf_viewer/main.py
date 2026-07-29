@@ -46,12 +46,24 @@ class PDFViewerApplication(Adw.Application):
 
         # Load document if passed via command line
         if self.filepath_to_open:
-            source = PdfSource(
-                source_type="file",
-                uri=self.filepath_to_open,
-                display_name=os.path.basename(self.filepath_to_open),
-            )
+            raw_arg = self.filepath_to_open.strip()
+            from .core.arxiv_mapper import extract_arxiv_id_from_raw
+
+            aid = extract_arxiv_id_from_raw(raw_arg)
+            if aid and not os.path.exists(raw_arg):
+                source = PdfSource(
+                    source_type="arxiv",
+                    uri=raw_arg,
+                    display_name=f"arXiv:{aid}",
+                )
+            else:
+                source = PdfSource(
+                    source_type="file",
+                    uri=raw_arg,
+                    display_name=os.path.basename(raw_arg),
+                )
             win.open_document(source)
+
 
     def do_startup(self):
         Adw.Application.do_startup(self)

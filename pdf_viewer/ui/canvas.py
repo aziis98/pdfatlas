@@ -187,7 +187,80 @@ class PageContainer(Gtk.Box):
                     ph = (ry1 - ry0) * canvas.zoom * canvas.dpi_scale_factor
                     cr.rectangle(px0, py0, pw, ph)
                 cr.fill()
+            # 2.6. Debug arXiv Cursor Fragment Overlays
+            if (
+                canvas.debug_mode
+                and getattr(canvas, "debug_arxiv_data", None) is not None
+                and canvas.debug_arxiv_data.get("page_index") == self.page_index
+            ):
+                d_data = canvas.debug_arxiv_data
+                crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
+                crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
+                scale = canvas.zoom * canvas.dpi_scale_factor
+                cr.save()
+
+                # 1. Current Word Fill @ 0.75 Opacity
+                curr_w_rects = d_data.get("curr_word_rects", [])
+                if curr_w_rects:
+                    cr.set_source_rgba(0.7, 0.35, 1.0, 0.75)
+                    for rx0, ry0, rx1, ry1 in curr_w_rects:
+                        px0 = (rx0 - crop_off_x) * scale
+                        py0 = (ry0 - crop_off_y) * scale
+                        pw = (rx1 - rx0) * scale
+                        ph = (ry1 - ry0) * scale
+                        cr.rectangle(px0, py0, pw, ph)
+                    cr.fill()
+
+                # 2. Forward Chars Stroke @ 0.25 Opacity
+                fwd_c_rects = d_data.get("forward_char_rects", [])
+                if fwd_c_rects:
+                    cr.set_source_rgba(0.7, 0.35, 1.0, 0.25)
+                    cr.set_line_width(1.0)
+                    for rx0, ry0, rx1, ry1 in fwd_c_rects:
+                        px0 = (rx0 - crop_off_x) * scale
+                        py0 = (ry0 - crop_off_y) * scale
+                        pw = (rx1 - rx0) * scale
+                        ph = (ry1 - ry0) * scale
+                        cr.rectangle(px0, py0, pw, ph)
+                    cr.stroke()
+
+                # 3. Current Char Stroke @ 1.0 Opacity
+                c_rect = d_data.get("curr_char_rect")
+                if c_rect:
+                    rx0, ry0, rx1, ry1 = c_rect
+                    cr.set_source_rgba(0.7, 0.35, 1.0, 1.0)
+                    cr.set_line_width(1.5)
+                    px0 = (rx0 - crop_off_x) * scale
+                    py0 = (ry0 - crop_off_y) * scale
+                    pw = (rx1 - rx0) * scale
+                    ph = (ry1 - ry0) * scale
+                    cr.rectangle(px0, py0, pw, ph)
                 cr.restore()
+
+            # 2.7. Hover Text Caret Overlay (Accent Blue Vertical Line)
+            if (
+                getattr(canvas, "hover_caret", None) is not None
+                and canvas.hover_caret[0] == self.page_index
+            ):
+                page_idx, (cx, y0, y1) = canvas.hover_caret
+                crop_off_x = self.crop_rect.x0 if self.crop_rect is not None else 0.0
+                crop_off_y = self.crop_rect.y0 if self.crop_rect is not None else 0.0
+                scale = canvas.zoom * canvas.dpi_scale_factor
+                sx = (cx - crop_off_x) * scale
+                sy0 = (y0 - crop_off_y) * scale
+                sy1 = (y1 - crop_off_y) * scale
+                cr.save()
+                cr.set_source_rgba(0.533, 0.533, 0.533, 0.9)
+                cr.set_line_width(2.0)
+                cr.move_to(sx, sy0)
+                cr.line_to(sx, sy1)
+                cr.stroke()
+                cr.restore()
+
+
+
+
+
 
             # Debug: draw all character bboxes when actively selecting
             if (
@@ -314,8 +387,9 @@ class PDFCanvas(Gtk.Box):
         self.containers = []
         self.in_flight = set()
         self.page_layout = []
-        self.vadjustment = None
-        self.hadjustment = None
+        self.vadjustment: Gtk.Adjustment | None = None
+        self.hadjustment: Gtk.Adjustment | None = None
+
 
         # Interactive link state
         self.hovered_link: tuple[int, dict] | None = None
@@ -323,6 +397,13 @@ class PDFCanvas(Gtk.Box):
         self.on_link_hovered: Any = None
         self.on_page_hovered: Any = None
         self.text_selection: TextSelection | None = None
+        self.debug_arxiv_data: dict[str, Any] | None = None
+        self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
+        self._pending_drag_start: tuple[int, int] | None = None
+
+
+
+
 
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
@@ -352,20 +433,24 @@ class PDFCanvas(Gtk.Box):
         self.add_controller(click_gesture)
 
     def _screen_to_pdf_point(self, x: float, y: float, page_index: int) -> tuple[float, float] | None:
-        """Convert screen coordinates to PDF point coordinates on a given page."""
+        """Convert screen coordinates (viewport relative) to PDF point coordinates on a given page."""
         if not self.page_layout or page_index >= len(self.page_layout):
             return None
 
         scale = self.zoom * self.dpi_scale_factor
-        canvas_w = float(self.get_width())
+        viewport_w = (
+            self.hadjustment.get_page_size()
+            if self.hadjustment and self.hadjustment.get_page_size() > 0
+            else float(self.get_width())
+        )
+        scroll_x = self.hadjustment.get_value() if self.hadjustment else 0.0
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
 
         y_offset, dw, dh, crop_rect = self.page_layout[page_index]
-        page_x0 = (canvas_w - dw) / 2.0
-        page_y0 = y_offset - scroll_y
+        page_x0 = (viewport_w - dw) / 2.0
 
-        rel_x = x - page_x0
-        rel_y = y - page_y0
+        rel_x = (x + scroll_x) - page_x0
+        rel_y = (y + scroll_y) - y_offset
 
         crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
         crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
@@ -375,67 +460,53 @@ class PDFCanvas(Gtk.Box):
         return (pt_x, pt_y)
 
     def on_drag_begin(self, gesture, start_x, start_y):
-        """Handle drag begin - start text selection if no link is hit."""
+        """Handle drag begin - prepare text selection if no link is hit."""
         if self.text_selection is None or not self.doc_model:
-            if self.debug_mode:
-                sys.stderr.write("[TextSel] drag-begin: no text_selection or doc_model\n")
-                sys.stderr.flush()
             return
 
-        # Don't start text selection if a link was clicked
         hit = self._hit_test_link(start_x, start_y)
         if hit is not None:
-            if self.debug_mode:
-                sys.stderr.write(f"[TextSel] drag-begin: link hit at ({start_x:.1f},{start_y:.1f}), denying\n")
-                sys.stderr.flush()
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
 
         page_idx = self._hit_test_page(start_x, start_y)
         if page_idx is None:
-            if self.debug_mode:
-                sys.stderr.write(f"[TextSel] drag-begin: no page hit at ({start_x:.1f},{start_y:.1f}), denying\n")
-                sys.stderr.flush()
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
 
         pt = self._screen_to_pdf_point(start_x, start_y, page_idx)
         if pt is None:
-            if self.debug_mode:
-                sys.stderr.write("[TextSel] drag-begin: screen_to_pdf returned None, denying\n")
-                sys.stderr.flush()
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
 
-        pt_x, pt_y = pt
-        char_idx = self.text_selection.hit_test(page_idx, pt_x, pt_y)
-        if self.debug_mode:
-            sys.stderr.write(
-                f"[TextSel] drag-begin: page={page_idx} pdf_pt=({pt_x:.1f},{pt_y:.1f}) "
-                f"char_idx={char_idx} total_chars={len(self.text_selection.get_page_index(page_idx).chars)}\n"
-            )
-            sys.stderr.flush()
+        char_idx = self.text_selection.hit_test(page_idx, pt[0], pt[1])
         if char_idx is None:
-            if self.debug_mode:
-                sys.stderr.write("[TextSel] drag-begin: no char hit, denying\n")
-                sys.stderr.flush()
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
 
-        self.text_selection.start_selection(page_idx, char_idx)
-        self.queue_draw_overlays("selection-start")
+        # Record pending drag start; do not start selection yet (wait until mouse actually moves)
+        self._pending_drag_start = (page_idx, char_idx)
 
     def on_drag_update(self, gesture, offset_x, offset_y):
-        """Handle drag update - extend text selection."""
-        if self.text_selection is None or not self.text_selection.is_selecting:
+        """Handle drag update - activate and extend text selection once drag starts."""
+        if self.text_selection is None:
             return
 
-        # Get start position from gesture to compute current absolute position
+        # Check if drag movement threshold (3px) is met
+        dist_sq = offset_x * offset_x + offset_y * offset_y
+        if dist_sq < 9.0 and not self.text_selection.is_selecting:
+            return
+
+        if self._pending_drag_start is not None and not self.text_selection.is_selecting:
+            p_idx, c_idx = self._pending_drag_start
+            self.text_selection.start_selection(p_idx, c_idx)
+            self._pending_drag_start = None
+
+        if not self.text_selection.is_selecting:
+            return
+
         success, start_x, start_y = gesture.get_start_point()
         if not success:
-            if self.debug_mode:
-                sys.stderr.write("[TextSel] drag-update: get_start_point failed\n")
-                sys.stderr.flush()
             return
 
         cur_x = start_x + offset_x
@@ -443,62 +514,39 @@ class PDFCanvas(Gtk.Box):
 
         page_idx = self._hit_test_page(cur_x, cur_y)
         if page_idx is None:
-            if self.debug_mode:
-                sys.stderr.write(f"[TextSel] drag-update: no page at ({cur_x:.1f},{cur_y:.1f})\n")
-                sys.stderr.flush()
             return
 
         pt = self._screen_to_pdf_point(cur_x, cur_y, page_idx)
         if pt is None:
             return
 
-        pt_x, pt_y = pt
-        char_idx = self.text_selection.hit_test(page_idx, pt_x, pt_y)
+        char_idx = self.text_selection.hit_test(page_idx, pt[0], pt[1])
         if char_idx is None:
-            if self.debug_mode:
-                sys.stderr.write(f"[TextSel] drag-update: no char at ({pt_x:.1f},{pt_y:.1f})\n")
-                sys.stderr.flush()
             return
 
         self.text_selection.update_focus(page_idx, char_idx)
-        if self.debug_mode:
-            sys.stderr.write(
-                f"[TextSel] drag-update: page={page_idx} char={char_idx} "
-                f"anchor={self.text_selection.anchor_char_idx} focus={char_idx}\n"
-            )
-            sys.stderr.flush()
         self.queue_draw_overlays("selection-update")
 
     def on_drag_end(self, gesture, offset_x, offset_y):
-        """Handle drag end - finalize selection. Clear if no drag occurred (click)."""
+        """Handle drag end - finalize selection or clear if drag didn't start."""
+        self._pending_drag_start = None
         if self.text_selection is not None:
-            # If no drag happened (click), clear the selection
-            if abs(offset_x) < 2 and abs(offset_y) < 2:
-                if self.debug_mode:
-                    sys.stderr.write(f"[TextSel] drag-end: no drag (offset={offset_x:.1f},{offset_y:.1f}), clearing\n")
-                    sys.stderr.flush()
+            if abs(offset_x) < 3 and abs(offset_y) < 3:
                 self.text_selection.clear_selection()
                 self.queue_draw_overlays("selection-cleared")
             else:
                 self.text_selection.end_selection()
-                if self.debug_mode:
-                    text = self.text_selection.get_selected_text()
-                    sys.stderr.write(
-                        f"[TextSel] drag-end: finalized, selected_text={text[:80]!r}\n"
-                    )
-                    sys.stderr.flush()
+
 
     def _hit_test_page(self, x: float, y: float) -> int | None:
         if not self.page_layout:
             return None
         half_gap = self.page_gap / 2.0
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
+        canvas_y = y + scroll_y
         for i, layout in enumerate(self.page_layout):
             y_offset, dw, dh, crop_rect = layout
-            page_y0 = y_offset - scroll_y
-            page_y1 = page_y0 + dh
-
-            if page_y0 - half_gap <= y <= page_y1 + half_gap:
+            if y_offset - half_gap <= canvas_y <= y_offset + dh + half_gap:
                 return i
         return None
 
@@ -507,19 +555,28 @@ class PDFCanvas(Gtk.Box):
             return None
 
         scale = self.zoom * self.dpi_scale_factor
-        canvas_w = float(self.get_width())
+        viewport_w = (
+            self.hadjustment.get_page_size()
+            if self.hadjustment and self.hadjustment.get_page_size() > 0
+            else float(self.get_width())
+        )
+        scroll_x = self.hadjustment.get_value() if self.hadjustment else 0.0
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
+
+        canvas_x = x + scroll_x
+        canvas_y = y + scroll_y
 
         for i, layout in enumerate(self.page_layout):
             y_offset, dw, dh, crop_rect = layout
-            page_x0 = (canvas_w - dw) / 2.0
-            page_y0 = y_offset - scroll_y
+            page_x0 = (viewport_w - dw) / 2.0
             page_x1 = page_x0 + dw
-            page_y1 = page_y0 + dh
 
-            if page_x0 <= x <= page_x1 and page_y0 <= y <= page_y1:
-                rel_x = x - page_x0
-                rel_y = y - page_y0
+            page_y0 = y_offset
+            page_y1 = y_offset + dh
+
+            if page_x0 <= canvas_x <= page_x1 and page_y0 <= canvas_y <= page_y1:
+                rel_x = canvas_x - page_x0
+                rel_y = canvas_y - y_offset
 
                 crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
                 crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
@@ -535,6 +592,7 @@ class PDFCanvas(Gtk.Box):
                 break
         return None
 
+
     def get_link_screen_rect(
         self, page_index: int, link: dict, overlay_widget: Any = None
     ) -> tuple[float, float, float, float] | None:
@@ -543,12 +601,16 @@ class PDFCanvas(Gtk.Box):
             return None
 
         scale = self.zoom * self.dpi_scale_factor
-        canvas_w = float(self.get_width())
+        viewport_w = (
+            self.hadjustment.get_page_size()
+            if self.hadjustment and self.hadjustment.get_page_size() > 0
+            else float(self.get_width())
+        )
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
 
         if 0 <= page_index < len(self.page_layout):
             y_offset, dw, dh, crop_rect = self.page_layout[page_index]
-            page_x0 = (canvas_w - dw) / 2.0
+            page_x0 = (viewport_w - dw) / 2.0
             page_y0 = y_offset - scroll_y
 
             crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
@@ -561,6 +623,7 @@ class PDFCanvas(Gtk.Box):
 
             return (link_screen_x0, link_screen_y0, link_screen_w, link_screen_h)
         return None
+
         return None
 
     def queue_draw_overlays(self, reason=""):
@@ -593,11 +656,48 @@ class PDFCanvas(Gtk.Box):
                 else:
                     self.on_link_hovered(None, None)
 
+        # Update text cursor caret overlay (left/right border of character box under pointer)
+        new_caret: tuple[int, tuple[float, float, float]] | None = None
+        hovered_page_idx = self._hit_test_page(x, y)
+        if hovered_page_idx is not None and self.text_selection:
+            pt = self._screen_to_pdf_point(x, y, hovered_page_idx)
+            if pt is not None:
+                char_idx = self.text_selection.hit_test(hovered_page_idx, pt[0], pt[1])
+                if char_idx is not None:
+                    pi = self.text_selection.get_page_index(hovered_page_idx)
+                    if 0 <= char_idx < len(pi.chars):
+                        c = pi.chars[char_idx]
+                        if c.char and any(ch.isascii() for ch in c.char):
+                            x0, y0, x1, y1 = c.bbox
+                            dx = 0.0 if (x0 <= pt[0] <= x1) else min(abs(pt[0] - x0), abs(pt[0] - x1))
+                            dy = 0.0 if (y0 <= pt[1] <= y1) else min(abs(pt[1] - y0), abs(pt[1] - y1))
+                            dist = (dx * dx + dy * dy) ** 0.5
+                            if dist <= 25.0:
+
+                                w_str = c.char
+                                L = max(1, len(w_str))
+                                char_w = (x1 - x0) / float(L)
+                                offset_i = max(0, min(L - 1, int((pt[0] - x0) / char_w))) if char_w > 0 else 0
+                                c_left = x0 + offset_i * char_w
+                                c_right = x0 + (offset_i + 1) * char_w
+                                cx = c_left if (pt[0] < (c_left + c_right) / 2.0) else c_right
+                                new_caret = (hovered_page_idx, (cx, y0, y1))
+
+
+
+
+        if self.hover_caret != new_caret:
+            self.hover_caret = new_caret
+            self.queue_draw_overlays("hover-caret")
+
         if self.on_page_hovered:
-            hovered_page_idx = self._hit_test_page(x, y)
             self.on_page_hovered(hovered_page_idx, x, y)
 
     def _on_leave(self, controller):
+        if self.hover_caret is not None:
+            self.hover_caret = None
+            self.queue_draw_overlays("leave-caret")
+
         if self.hovered_link is not None:
             self.hovered_link = None
             self.set_cursor(Gdk.Cursor.new_from_name("default"))
@@ -606,6 +706,7 @@ class PDFCanvas(Gtk.Box):
                 self.on_link_hovered(None, None)
         if self.on_page_hovered:
             self.on_page_hovered(None, 0.0, 0.0)
+
 
     def _on_click(self, gesture, n_press, x, y):
         if n_press == 1:

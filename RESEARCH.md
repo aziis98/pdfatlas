@@ -63,10 +63,16 @@ This document records durable technical findings, architectural decisions, mathe
   - On pinch end (`_on_pinch_end`): set `is_pinching=False`, call `set_zoom(final_zoom)` which triggers `_update_visibility` with the guard removed, queuing exact-match render jobs at the final zoom. Each completion redraws the page via `_on_render_complete` + `get_best` for progressively sharper display.
 - **Stale-job guard removal:** `_on_render_complete` previously checked `zoom_key == current_zoom` and skipped redraw for stale zoom completions. This is now removed — every completion triggers a redraw, and `get_best` picks the best available match from the cache regardless of which zoom produced it.
 
-### 1.8. Pure Math-Based OpenGL Canvas Hit Testing
-- **Finding:** In OpenGL backend mode, GTK 4 `PageContainer` widget allocations can drift or fail to realize when child widgets are unmounted.
-- **Solution:** Render interactive PDF link stroke outlines, link hover fills, search match highlights, and debug borders directly inside `GLCanvas._on_render()` using OpenGL shader quads. Perform hit-testing (`_hit_test_link`, `_hit_test_page`) directly from `page_layout` and `vadjustment`:
-  $$x_0 = \frac{\text{viewport\_w} - \text{dw}}{2.0}, \quad y_0 = \text{y\_offset} - \text{scroll\_y}$$
+### 1.9. Viewport vs Content Width Offset Invariant at High Zoom (>200%)
+- **Finding:** When zooming past $200\%$, the page layout width `dw` (e.g. $1600\text{px}$) exceeds the window width `viewport_w` (e.g. $800\text{px}$). `canvas.get_width()` returns $1600\text{px}$ (the expanded GTK container allocation width), forcing $(1600 - 1600) / 2.0 = 0.0$. However, OpenGL and Cairo center pages relative to `viewport_w = 800px`, positioning the page's left edge at a **negative offset** $\text{page\_x0} = \frac{800 - 1600}{2.0} = -400\text{px}$.
+- **Solution:** 
+  1. `_screen_to_pdf_point`, `_hit_test_link`, and `get_link_screen_rect` in [`pdf_viewer/ui/canvas.py`](pdf_viewer/ui/canvas.py) use $\text{viewport\_w} = \text{self.hadjustment.get\_page\_size()}$ (the visible window width) without `max(0.0, ...)` clamping.
+  2. `GLCanvas.on_draw()` in [`pdf_viewer/ui/gl_canvas.py`](pdf_viewer/ui/gl_canvas.py) passes `x_min = canvas.hadjustment.get_value()` into `u_offset` (`glUniform2f(u_offset, x_min, y_min)`), ensuring horizontal scrolling shifts all OpenGL page quads and text overlays in 1:1 sync with GTK scrolling.
+
+### 1.10. arXiv TeX Diff & Word-Level Sourcemapping
+- **Finding:** arXiv tarballs contain raw LaTeX source code divided across multiple `.tex` files with custom macro imports (`\input`, `\include`, `\subfile`).
+- **Inlining & Tokenization:** `ArxivDiffMapper` in [`pdf_viewer/core/arxiv_mapper.py`](pdf_viewer/core/arxiv_mapper.py) recursively inlines TeX files, strips TeX comments (`%...`), tokenizes non-whitespace words, and extracts PyMuPDF native `words` (`page.get_text("words")`).
+- **Diff Alignment:** Running `difflib.SequenceMatcher` between PDF words and TeX words generates a 1-to-1 mapping $(i_{\text{pdf}} \leftrightarrow i_{\text{tex}})$. Selecting text or pressing `Ctrl+C` maps the selected word range directly to raw LaTeX snippets.
 
 ---
 
@@ -81,3 +87,6 @@ This document records durable technical findings, architectural decisions, mathe
 | **`GLib.timeout_add(150, ...)` Debounce on Link Hover** | Mouse motion ticks re-evaluated link hover states and continuously cancelled/reset the timer, preventing portal cards from popping up. | Fire `_on_link_hovered()` once on link entry with link `xref` / `from` equality checks. |
 | **Best-match fallback inside `PageCache.get()`** | Caused `_update_visibility()` to always find a cached surface (even at a different zoom), preventing render jobs from being queued after zoom changes. Starvation of new renders. | `get()` returns exact matches only; `get_best()` (separate method) handles closest-zoom fallback for drawing. |
 | **Clearing `RenderCache` on every zoom change** | Destroyed all previously rendered surfaces at nearby zoom levels, preventing `get_best()` from showing anything during pinch or incremental zoom. | Keep the cache populated across zoom changes; let LRU eviction handle memory. |
+| **Sorting `rawdict` chars for Text Selection** | PDF fonts lack explicit space characters and rawdict sorting interleaved characters across adjacent columns in two-column papers. | Use PyMuPDF's native `page.get_text("words")` engine which preserves reading order and spaces natively. |
+| **Clamping `page_x0` with `max(0.0, ...)`** | When zoomed in >200%, page width exceeds window width. Clamping `page_x0` to 0.0 shifted hit-testing horizontally by ~168 PDF points. | Use unclamped `page_x0 = (viewport_w - dw) / 2.0` with `viewport_w = hadjustment.get_page_size()`. |
+

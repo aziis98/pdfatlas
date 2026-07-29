@@ -206,6 +206,7 @@ class GLCanvas(Gtk.GLArea):
         if not canvas.vadjustment:
             return False
 
+        x_min = canvas.hadjustment.get_value() if canvas.hadjustment else 0.0
         y_min = canvas.vadjustment.get_value()
         page_size = canvas.vadjustment.get_page_size()
         y_max = y_min + page_size
@@ -226,7 +227,8 @@ class GLCanvas(Gtk.GLArea):
 
         gl.glUseProgram(self.shader_program)
         gl.glUniform2f(self.u_resolution, float(viewport_w), float(viewport_h))
-        gl.glUniform2f(self.u_offset, 0.0, float(round(y_min)))
+        gl.glUniform2f(self.u_offset, float(round(x_min)), float(round(y_min)))
+
 
         # Enable Alpha Blending for clean page anti-aliasing
         gl.glEnable(gl.GL_BLEND)
@@ -341,6 +343,104 @@ class GLCanvas(Gtk.GLArea):
                                 gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
                                 gl.glUniform2f(self.u_page_size, float(sw), float(sh))
                                 gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                    # Draw Debug arXiv Cursor Fragment Overlays
+                    if (
+                        canvas.debug_mode
+                        and getattr(canvas, "debug_arxiv_data", None) is not None
+                        and canvas.debug_arxiv_data.get("page_index") == i
+                    ):
+                        d_data = canvas.debug_arxiv_data
+                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        scale = canvas.zoom * canvas.dpi_scale_factor
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+                        gl.glUniform1i(self.u_is_placeholder, 2)
+
+                        # 1. Current Word Fill @ 0.75 Opacity: RGBA (0.7*0.75, 0.35*0.75, 1.0*0.75, 0.75) -> (0.525, 0.2625, 0.75, 0.75)
+                        curr_w_rects = d_data.get("curr_word_rects", [])
+                        if curr_w_rects:
+                            gl.glUniform4f(self.u_color, 0.525, 0.2625, 0.75, 0.75)
+                            for rx0, ry0, rx1, ry1 in curr_w_rects:
+                                sx = x_offset + (rx0 - crop_off_x) * scale
+                                sy = page_y0 + (ry0 - crop_off_y) * scale
+                                sw = (rx1 - rx0) * scale
+                                sh = (ry1 - ry0) * scale
+                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
+                                gl.glUniform2f(self.u_page_size, float(sw), float(sh))
+                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                        # 2. Forward Chars Stroke @ 0.25 Opacity: RGBA (0.7*0.25, 0.35*0.25, 1.0*0.25, 0.25) -> (0.175, 0.0875, 0.25, 0.25)
+                        fwd_c_rects = d_data.get("forward_char_rects", [])
+                        if fwd_c_rects:
+                            gl.glUniform4f(self.u_color, 0.175, 0.0875, 0.25, 0.25)
+                            border_t = 1.0
+                            for rx0, ry0, rx1, ry1 in fwd_c_rects:
+                                sx = x_offset + (rx0 - crop_off_x) * scale
+                                sy = page_y0 + (ry0 - crop_off_y) * scale
+                                sw = (rx1 - rx0) * scale
+                                sh = (ry1 - ry0) * scale
+                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
+                                gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
+                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy + sh - border_t))
+                                gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
+                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
+                                gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
+                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                                gl.glUniform2f(self.u_page_pos, float(sx + sw - border_t), float(sy))
+                                gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
+                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                        # 3. Current Char Stroke @ 1.0 Opacity: RGBA (0.7*1.0, 0.35*1.0, 1.0*1.0, 1.0) -> (0.7, 0.35, 1.0, 1.0)
+                        c_rect = d_data.get("curr_char_rect")
+                        if c_rect:
+                            gl.glUniform4f(self.u_color, 0.7, 0.35, 1.0, 1.0)
+                            border_t = 1.5
+                            rx0, ry0, rx1, ry1 = c_rect
+                            sx = x_offset + (rx0 - crop_off_x) * scale
+                            sy = page_y0 + (ry0 - crop_off_y) * scale
+                            sw = (rx1 - rx0) * scale
+                            sh = (ry1 - ry0) * scale
+                            gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
+                            gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            gl.glUniform2f(self.u_page_pos, float(sx), float(sy + sh - border_t))
+                            gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
+                            gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            gl.glUniform2f(self.u_page_pos, float(sx + sw - border_t), float(sy))
+                            gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
+                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+                    # Draw Hover Text Caret Overlay (Accent Blue Vertical Bar)
+                    if (
+                        getattr(canvas, "hover_caret", None) is not None
+                        and canvas.hover_caret[0] == i
+                    ):
+                        page_idx, (cx, y0, y1) = canvas.hover_caret
+                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        scale = canvas.zoom * canvas.dpi_scale_factor
+                        sx = x_offset + (cx - crop_off_x) * scale
+                        sy = page_y0 + (y0 - crop_off_y) * scale
+                        sh = (y1 - y0) * scale
+                        caret_w = 2.0
+                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+                        gl.glUniform1i(self.u_is_placeholder, 2)
+                        # Premultiplied #888 gray caret (0.533 * 0.9 = 0.48)
+                        gl.glUniform4f(self.u_color, 0.48, 0.48, 0.48, 0.9)
+
+                        gl.glUniform2f(self.u_page_pos, float(sx - caret_w / 2.0), float(sy))
+                        gl.glUniform2f(self.u_page_size, float(caret_w), float(sh))
+                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+
+
+
 
                     # Debug: draw all character bboxes when actively selecting
                     if (

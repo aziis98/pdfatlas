@@ -168,3 +168,49 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 25) -> list[dict]:
     return [
         {"id": r[0], "page": r[1], "x0": r[2], "y0": r[3], "x1": r[4], "y1": r[5], "text": r[6]} for r in rows
     ]
+
+
+def ensure_state_table(conn: sqlite3.Connection):
+    """Ensure the doc_state key-value table exists in the database."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS doc_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+
+
+def save_doc_state(conn: sqlite3.Connection, zoom: float, scroll_y: float):
+    """Save document view state (zoom, scroll_y) to the database."""
+    try:
+        ensure_state_table(conn)
+        conn.execute(
+            "INSERT INTO doc_state (key, value) VALUES ('zoom', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(zoom),),
+        )
+        conn.execute(
+            "INSERT INTO doc_state (key, value) VALUES ('scroll_y', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(scroll_y),),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[Index] Error saving document state: {e}", flush=True)
+
+
+def load_doc_state(conn: sqlite3.Connection) -> dict[str, float]:
+    """Load document view state from the database."""
+    try:
+        ensure_state_table(conn)
+        rows = conn.execute("SELECT key, value FROM doc_state").fetchall()
+        result: dict[str, float] = {}
+        for k, v in rows:
+            try:
+                result[str(k)] = float(v)
+            except ValueError:
+                pass
+        return result
+    except Exception as e:
+        print(f"[Index] Error loading document state: {e}", flush=True)
+        return {}
+

@@ -15,6 +15,14 @@ class PdfSource:
     uri: str
     display_name: str
 
+    @property
+    def is_arxiv(self) -> bool:
+        if self.source_type == "arxiv":
+            return True
+        from .arxiv_mapper import arxiv_id_from_path
+        return arxiv_id_from_path(self.uri) is not None
+
+
 
 class RecentFilesManager:
     def __init__(self, path: Path = RECENT_FILE):
