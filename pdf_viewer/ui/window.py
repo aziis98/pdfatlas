@@ -272,10 +272,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.menu_button.set_menu_model(menu)
         right_box.append(self.menu_button)
 
-        # Loading Progress Bar (Crop Analysis)
-        self.progress_bar = Gtk.ProgressBar()
-        self.progress_bar.set_visible(False)
-        main_layout.append(self.progress_bar)
+        # Content Overlay wrapping view stack & OSD progress bar
+        self.content_overlay = Gtk.Overlay()
+        self.content_overlay.set_hexpand(True)
+        self.content_overlay.set_vexpand(True)
+        main_layout.append(self.content_overlay)
 
         # Gtk.Stack for View Switching
         self.stack = Gtk.Stack()
@@ -283,7 +284,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.set_hexpand(True)
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.stack.set_transition_duration(150)
-        main_layout.append(self.stack)
+        self.content_overlay.set_child(self.stack)
+
+        # OSD Progress Bar overlay attached to top of window content
+        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar.add_css_class("osd")
+        self.progress_bar.set_valign(Gtk.Align.START)
+        self.progress_bar.set_halign(Gtk.Align.FILL)
+        self.progress_bar.set_visible(False)
+        self.content_overlay.add_overlay(self.progress_bar)
 
         # Initialize CSS styling for canvas background and page margins
         self.css_provider = Gtk.CssProvider()
