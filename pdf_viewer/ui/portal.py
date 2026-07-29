@@ -116,24 +116,24 @@ def render_strip_surface(
     clip_x0 = 0.0
     clip_x1 = page.rect.width
 
-    # 2. Fixed height vertical window clamped strictly within page bounds
-    WINDOW_HEIGHT_PT = 180.0
+    # 2. Fixed height vertical window scaled proportionally to avoid distortion
+    zoom_x = (target_w * scale_factor) / page.rect.width if page.rect.width > 0 else 1.0
+    zoom_y = zoom_x  # Enforce uniform 1:1 aspect ratio scaling
+
+    window_height_pt = (target_h * scale_factor) / zoom_x if zoom_x > 0 else 180.0
     mid_y = (y0 + y1) / 2.0
 
-    clip_y0 = mid_y - (WINDOW_HEIGHT_PT / 2.0)
-    clip_y1 = mid_y + (WINDOW_HEIGHT_PT / 2.0)
+    clip_y0 = mid_y - (window_height_pt / 2.0)
+    clip_y1 = mid_y + (window_height_pt / 2.0)
 
     if clip_y0 < 0.0:
         clip_y0 = 0.0
-        clip_y1 = min(page.rect.height, WINDOW_HEIGHT_PT)
+        clip_y1 = min(page.rect.height, window_height_pt)
     elif clip_y1 > page.rect.height:
         clip_y1 = page.rect.height
-        clip_y0 = max(0.0, page.rect.height - WINDOW_HEIGHT_PT)
+        clip_y0 = max(0.0, page.rect.height - window_height_pt)
 
     clip = fitz.Rect(clip_x0, clip_y0, clip_x1, clip_y1)
-
-    zoom_x = (target_w * scale_factor) / page.rect.width
-    zoom_y = (target_h * scale_factor) / WINDOW_HEIGHT_PT
     mat = fitz.Matrix(zoom_x, zoom_y)
 
     pix = page.get_pixmap(matrix=mat, clip=clip, alpha=True)

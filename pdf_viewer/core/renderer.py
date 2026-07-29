@@ -207,21 +207,18 @@ class RenderWorker:
                 elif job_type == "portal":
                     doc_model, page_index, target_y, target_w, target_h, scale_factor, target_cache, completion_callback = args
 
-                    page = doc_model.get_page(page_index)
-                    page_rect = page.rect
-
-                    crop_h = 160.0
-                    crop_y0 = max(0.0, target_y - (crop_h / 2.0))
-                    crop_y1 = min(page_rect.height, crop_y0 + crop_h)
-                    actual_crop_h = max(1.0, crop_y1 - crop_y0)
-
-                    # Check LinkPortalCache directly for cached portal surface
                     cached_portal = target_cache.get(page_index, target_y, target_w, target_h)
                     if cached_portal:
                         surface = cached_portal
                     else:
+                        page = doc_model.get_page(page_index)
+                        page_rect = page.rect
                         matrix_x = target_w / page_rect.width if page_rect.width > 0 else 1.0
-                        matrix_y = target_h / actual_crop_h if actual_crop_h > 0 else 1.0
+                        matrix_y = matrix_x  # Enforce uniform 1:1 aspect ratio scaling
+
+                        crop_h = (target_h / matrix_x) if matrix_x > 0 else 160.0
+                        crop_y0 = max(0.0, target_y - (crop_h / 2.0))
+                        crop_y1 = min(page_rect.height, crop_y0 + crop_h)
 
                         crop_rect = fitz.Rect(0.0, crop_y0, page_rect.width, crop_y1)
                         mat = fitz.Matrix(matrix_x, matrix_y)

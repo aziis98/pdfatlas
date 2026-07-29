@@ -95,9 +95,8 @@ class LinkPreviewManager:
         scale = self.win.zoom * self.win.canvas.dpi_scale_factor
         page_dw = target_rect.width * scale
         raw_portal_w = int(page_dw - 2.0 * self.win.canvas.page_gap)
-        raw_portal_h = int(160.0 * scale)
         portal_w = max(200, min(int(viewport_w - 32.0), raw_portal_w))
-        portal_h = max(100, min(int(viewport_h - 40.0), raw_portal_h))
+        portal_h = max(120, int(viewport_h * 0.25))
         self.portal_card.set_portal_size(portal_w, portal_h)
 
         render_w = int(portal_w * scale_factor)
