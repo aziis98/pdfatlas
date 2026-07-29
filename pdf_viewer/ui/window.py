@@ -1,5 +1,4 @@
 import os
-import sys
 import threading
 from pathlib import Path
 
@@ -358,8 +357,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.gl_canvas = self.gl_canvas
             # Repaint the GL background layer on scroll
             def _on_scroll_redraw(adj):
-                sys.stderr.write("[MainWindow] scroll -> gl_canvas.queue_draw\n")
-                sys.stderr.flush()
                 if self.gl_canvas:
                     self.gl_canvas.queue_draw()
             self.vadjustment.connect("value-changed", _on_scroll_redraw)
@@ -938,8 +935,6 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _queue_canvas_redraw(self):
         """Redraws the active canvas depending on whether OpenGL or Cairo backend is active."""
-        sys.stderr.write(f"[MainWindow] _queue_canvas_redraw backend={self.backend}\n")
-        sys.stderr.flush()
         if self.backend == "opengl" and self.gl_canvas:
             self.gl_canvas.queue_draw()
         else:

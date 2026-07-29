@@ -1,6 +1,7 @@
 import queue
 import sys
 import threading
+import time
 
 import gi
 
@@ -154,24 +155,7 @@ class RenderWorker:
                     physical_zoom = zoom * scale_factor
 
                     mat = fitz.Matrix(physical_zoom, physical_zoom)
-                    rect_to_render = crop_rect if crop_rect is not None else page.rect
-                    out_w = int(rect_to_render.width * physical_zoom)
-                    out_h = int(rect_to_render.height * physical_zoom)
-                    resolution_dpi = physical_zoom * 72.0
-
-                    sys.stderr.write(
-                        f"[RenderWorker] MuPDF render request: page={page_index}, "
-                        f"output_size={out_w}x{out_h}, resolution={resolution_dpi:.1f} DPI, "
-                        f"zoom={zoom:.4f}, scale_factor={scale_factor}, is_minimap={is_minimap}\n"
-                    )
-                    sys.stderr.flush()
-
-                    sys.stderr.write(
-                        f"[RenderWorker] Render START page={page_index}, zoom={zoom:.4f}, "
-                        f"crop={crop_rect is not None}\n"
-                    )
-                    sys.stderr.flush()
-
+                    start_time = time.perf_counter()
                     pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=False)
 
                     arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
@@ -197,8 +181,9 @@ class RenderWorker:
                         )
                         target_cache.set(page_index, zoom, scale_factor, crop_key, surface, buf)
 
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000.0
                     sys.stderr.write(
-                        f"[RenderWorker] Render END page={page_index}, zoom={zoom:.4f}, cached\n"
+                        f"[RenderWorker] Render END page={page_index}, zoom={zoom:.2f}, time={elapsed_ms:.1f}ms\n"
                     )
                     sys.stderr.flush()
 

@@ -1,4 +1,3 @@
-import sys
 
 import cairo
 import fitz
@@ -639,8 +638,6 @@ class PDFCanvas(Gtk.Box):
         return None
 
     def queue_draw_overlays(self, reason=""):
-        sys.stderr.write(f"[PDFCanvas] queue_draw_overlays backend={self.backend} {reason}\n")
-        sys.stderr.flush()
         if self.backend == "opengl" and self.gl_canvas:
             self.gl_canvas.queue_draw()
         else:
@@ -966,12 +963,6 @@ class PDFCanvas(Gtk.Box):
 
     def _on_render_complete(self, page_index, zoom_key, scale_factor, crop_key):
         self.in_flight.discard((page_index, zoom_key, scale_factor, crop_key))
-        sys.stderr.write(
-            f"[PDFCanvas] _on_render_complete page={page_index} "
-            f"zoom_key={zoom_key} current_zoom={round(self.zoom,2)} "
-            f"redraw=True\n"
-        )
-        sys.stderr.flush()
         # Always redraw — drawing code uses get_best to pick the best available surface
         if self.backend == "opengl":
             if self.gl_canvas:

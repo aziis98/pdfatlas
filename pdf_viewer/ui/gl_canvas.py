@@ -1,4 +1,3 @@
-import sys
 
 import gi
 
@@ -197,8 +196,6 @@ class GLCanvas(Gtk.GLArea):
         return total
 
     def _on_render(self, area, context):
-        sys.stderr.write("[GLCanvas] _on_render fired\n")
-        sys.stderr.flush()
         canvas = self.layout_provider
         if not canvas or not canvas.page_layout:
             return False
