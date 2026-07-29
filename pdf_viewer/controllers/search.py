@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..ui.window import MainWindow
 
-from ..core.index import search as fts_search
 from ..ui.portal import ResultRow
 
 DEBOUNCE_MS = 150
@@ -29,6 +28,7 @@ class SearchController:
         self.win = main_window
         self._debounce_source_id: int | None = None
         self._last_query = ""
+        self._current_search_id = 0
 
     def on_search_changed_debounced(self, _entry):
         if self._debounce_source_id is not None:
@@ -120,12 +120,14 @@ class SearchController:
                 self.win.canvas.grab_focus()
             return
 
+        self._current_search_id += 1
+        search_id = self._current_search_id
+        self._last_query = query
+
         # Cancel any previous/pending search result renderings by shutting down and recreating the thread pool.
         self.win.executor.shutdown(wait=False, cancel_futures=True)
         self.win.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
 
-        self._last_query = query
-        self.clear_results_box()
         self.win.stack.set_visible_child_name("search-view")
 
         if hasattr(self.win, "search_scrolled") and self.win.search_scrolled:
@@ -133,10 +135,16 @@ class SearchController:
             if vadj:
                 vadj.set_value(vadj.get_lower())
 
+        self.win.db_service.search(query, limit=30, search_id=search_id, on_results=self._on_search_results)
+
+    def _on_search_results(self, live_results: list[dict], search_id: int):
+        if search_id != self._current_search_id:
+            return
+
+        query = self._last_query
         query_terms = {t.strip(string.punctuation).lower() for t in query.strip().split() if t}
 
-        live_results = fts_search(self.win.index_conn, query, limit=30) if self.win.index_conn else []
-
+        self.clear_results_box()
         is_grid = getattr(self.win.settings, "search_layout", "grid") == "grid"
 
         pinned_grid = None
@@ -235,3 +243,4 @@ class SearchController:
                 self.win.results_box.append(row)
                 if i < len(live_results) - 1:
                     self.win.results_box.append(Gtk.Separator())
+

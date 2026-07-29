@@ -214,3 +214,95 @@ def load_doc_state(conn: sqlite3.Connection) -> dict[str, float]:
         print(f"[Index] Error loading document state: {e}", flush=True)
         return {}
 
+
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
+import gi
+
+gi.require_version("Gtk", "4.0")
+from gi.repository import GLib
+
+
+class DatabaseService:
+    """
+    Dedicated single-thread SQLite database worker.
+    Ensures all SQLite operations (FTS5 search, indexing, state persistence)
+    occur exclusively on a single dedicated background thread.
+    """
+
+    def __init__(self):
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="db-thread")
+        self._conn: sqlite3.Connection | None = None
+        self._db_path: str | None = None
+
+    def open_db(self, pdf_path: str, on_complete: Callable[[sqlite3.Connection | None], None]):
+        """Open or build the SQLite DB on the dedicated DB thread."""
+        self._executor.submit(self._bg_open_db, pdf_path, on_complete)
+
+    def _bg_open_db(self, pdf_path: str, on_complete: Callable[[sqlite3.Connection | None], None]):
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+        try:
+            conn = get_db_for_pdf(pdf_path)
+            self._conn = conn
+            self._db_path = pdf_path
+            GLib.idle_add(on_complete, conn)
+        except Exception as e:
+            print(f"[DatabaseService] Failed to open/index DB: {e}", flush=True)
+            GLib.idle_add(on_complete, None)
+
+    def search(
+        self,
+        query: str,
+        limit: int,
+        search_id: int,
+        on_results: Callable[[list[dict], int], None],
+    ):
+        """Submit an FTS5 search query to run on the dedicated DB thread."""
+        self._executor.submit(self._bg_search, query, limit, search_id, on_results)
+
+    def _bg_search(
+        self,
+        query: str,
+        limit: int,
+        search_id: int,
+        on_results: Callable[[list[dict], int], None],
+    ):
+        if not self._conn:
+            GLib.idle_add(on_results, [], search_id)
+            return
+
+        try:
+            results = search(self._conn, query, limit=limit)
+        except Exception as e:
+            print(f"[DatabaseService] Search query error: {e}", flush=True)
+            results = []
+
+        GLib.idle_add(on_results, results, search_id)
+
+    def save_state(self, zoom: float, scroll_y: float):
+        """Save document view state (zoom, scroll_y) on the DB thread."""
+        self._executor.submit(self._bg_save_state, zoom, scroll_y)
+
+    def _bg_save_state(self, zoom: float, scroll_y: float):
+        if self._conn:
+            save_doc_state(self._conn, zoom, scroll_y)
+
+    def close(self):
+        """Close database connection on the DB thread and shutdown executor."""
+        def _bg_close():
+            if self._conn:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+        self._executor.submit(_bg_close)
+        self._executor.shutdown(wait=False)
+
+

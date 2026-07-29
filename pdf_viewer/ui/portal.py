@@ -18,7 +18,30 @@ WHITESPACE_TRIM_THRESHOLD = 248  # pixel value above which channel counts as "wh
 WHITESPACE_TRIM_PAD_PT = 8  # margin kept around trimmed content
 
 
-def get_query_match_rects(page, query_terms, clip_y0, clip_y1):
+_rawdict_cache: dict[tuple[str, int], dict] = {}
+_rawdict_cache_lock = threading.Lock()
+
+
+def get_page_rawdict(pdf_path: str, page_no: int, page) -> dict:
+    key = (pdf_path, page_no)
+    with _rawdict_cache_lock:
+        if key in _rawdict_cache:
+            return _rawdict_cache[key]
+
+    try:
+        raw_dict = page.get_text("rawdict")
+    except (RuntimeError, ValueError) as e:
+        print(f"[portal] Failed to get rawdict: {e}", flush=True)
+        raw_dict = {}
+
+    with _rawdict_cache_lock:
+        if len(_rawdict_cache) > 100:
+            _rawdict_cache.clear()
+        _rawdict_cache[key] = raw_dict
+    return raw_dict
+
+
+def get_query_match_rects(pdf_path: str, page_no: int, page, query_terms, clip_y0, clip_y1):
     """
     Finds character-level bounding boxes for all non-overlapping occurrences
     of query_terms inside the text spans of the page.
@@ -27,11 +50,7 @@ def get_query_match_rects(page, query_terms, clip_y0, clip_y1):
     if not query_terms:
         return match_rects
 
-    try:
-        raw_dict = page.get_text("rawdict")
-    except Exception as e:
-        print(f"[portal] Failed to get rawdict: {e}", flush=True)
-        return match_rects
+    raw_dict = get_page_rawdict(pdf_path, page_no, page)
 
     for block in raw_dict.get("blocks", []):
         if block.get("type") != 0:  # Text block
@@ -91,6 +110,36 @@ def _thread_doc(pdf_path):
 
 
 from .portal_preview import LinkPortalPreviewCard
+
+
+def apply_card_decorations(surface: cairo.ImageSurface, scale_factor: float, r_dip: float = 8.0):
+    """
+    Bakes 8px rounded corners clip and 1px border stroke directly into the ARGB32 ImageSurface
+    in background threads. GTK frame repaints become pure 1:1 hardware memory blits.
+    """
+    w_dip = float(surface.get_width()) / scale_factor
+    h_dip = float(surface.get_height()) / scale_factor
+
+    ctx = cairo.Context(surface)
+    ctx.save()
+
+    r = r_dip
+    ctx.new_sub_path()
+    ctx.arc(w_dip - r, r, r, -1.5707963, 0)
+    ctx.arc(w_dip - r, h_dip - r, r, 0, 1.5707963)
+    ctx.arc(r, h_dip - r, r, 1.5707963, 3.14159265)
+    ctx.arc(r, r, r, 3.14159265, 4.71238898)
+    ctx.close_path()
+
+    ctx.set_operator(cairo.OPERATOR_DEST_IN)
+    ctx.fill_preserve()
+
+    ctx.set_operator(cairo.OPERATOR_OVER)
+    ctx.set_source_rgba(0.0, 0.0, 0.0, 0.12)
+    ctx.set_line_width(1.0)
+    ctx.stroke()
+
+    ctx.restore()
 
 
 def render_strip_surface(
@@ -154,7 +203,7 @@ def render_strip_surface(
 
     if query_terms:
         # Get precise character-level matched ranges
-        match_rects = get_query_match_rects(page, query_terms, clip_y0, clip_y1)
+        match_rects = get_query_match_rects(pdf_path, page_no, page, query_terms, clip_y0, clip_y1)
         for ux0, uy0, ux1, uy1 in match_rects:
             px0 = (ux0 - clip.x0) * (zoom_x / scale_factor)
             py0 = (uy0 - clip.y0) * (zoom_y / scale_factor)
@@ -162,6 +211,9 @@ def render_strip_surface(
             ph = (uy1 - uy0) * (zoom_y / scale_factor)
             ctx.rectangle(px0, py0, pw, ph)
         ctx.fill()
+
+    # 4. Bake rounded corners transparency clip and border stroke into surface
+    apply_card_decorations(surface, scale_factor)
 
     return surface
 

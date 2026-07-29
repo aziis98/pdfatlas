@@ -20,7 +20,7 @@ from ..core.arxiv_mapper import ArxivDiffMapper, arxiv_id_from_path
 from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
-from ..core.index import get_db_for_pdf, load_doc_state, save_doc_state
+from ..core.index import DatabaseService, get_db_for_pdf, load_doc_state
 
 from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
@@ -86,6 +86,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Thread pool for search indexing & result portal rendering
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
+        self.db_service = DatabaseService()
         self.index_conn = None
         self._state_save_timer_id: int | None = None
         self.pinned = {}  # id -> {"result": ..., "query_terms": ...}
@@ -471,11 +472,9 @@ class MainWindow(Adw.ApplicationWindow):
             if self.crop_analyzer:
                 self.crop_analyzer.close()
 
-            # Save state and close old search index
-            if self.index_conn:
+            # Save state for previous document
+            if hasattr(self, "db_service") and self.db_service:
                 self._save_current_doc_state()
-                self.index_conn.close()
-                self.index_conn = None
 
             self.doc_model = DocumentModel(filepath)
             self.crop_analyzer = CropAnalyzer(self.doc_model)
@@ -577,8 +576,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.entry.set_sensitive(False)
             self.stack.set_visible_child_name("document-view")
 
-            indexing_thread = threading.Thread(target=self._index_worker, args=(filepath,), daemon=True)
-            indexing_thread.start()
+            self.db_service.open_db(filepath, self._on_indexing_complete)
 
 
             # Restore state if passed programmatically
@@ -725,10 +723,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._state_save_timer_id = GLib.timeout_add(1000, _on_save_timer)
 
     def _save_current_doc_state(self):
-        if hasattr(self, "index_conn") and self.index_conn:
+        if hasattr(self, "db_service") and self.db_service:
             zoom = getattr(self, "zoom", 1.0)
             scroll_y = self.vadjustment.get_value() if hasattr(self, "vadjustment") else 0.0
-            save_doc_state(self.index_conn, zoom, scroll_y)
+            self.db_service.save_state(zoom, scroll_y)
 
 
     def _open_file_dialog(self):

@@ -56,42 +56,28 @@ class LinkPortalPreviewCard(Gtk.Box):
         if width <= 0 or height <= 0:
             return
 
-        cr.save()
-
-        # 1. Precise 8px rounded rectangle clip path
-        r = 8.0
-        cr.new_sub_path()
-        cr.arc(width - r, r, r, -1.5707963, 0)
-        cr.arc(width - r, height - r, r, 0, 1.5707963)
-        cr.arc(r, height - r, r, 1.5707963, 3.14159265)
-        cr.arc(r, r, r, 3.14159265, 4.71238898)
-        cr.close_path()
-
-        cr.clip_preserve()
-
-        # 2. White background fill
-        cr.set_source_rgb(1.0, 1.0, 1.0)
-        cr.fill_preserve()
-
-        # 3. Direct Surface Rendering
         if self.surface:
+            cr.save()
             surf_w = self.surface.get_width()
             sx, _sy = self.surface.get_device_scale()
-            cr.save()
             if sx == 1.0 and surf_w > width:
-                # Unscaled search strip surface: scale full page width to fit card width
                 scale = width / float(surf_w)
                 cr.scale(scale, scale)
             cr.set_source_surface(self.surface, 0, 0)
             cr.paint()
             cr.restore()
         else:
+            cr.save()
+            r = 8.0
+            cr.new_sub_path()
+            cr.arc(width - r, r, r, -1.5707963, 0)
+            cr.arc(width - r, height - r, r, 0, 1.5707963)
+            cr.arc(r, height - r, r, 1.5707963, 3.14159265)
+            cr.arc(r, r, r, 3.14159265, 4.71238898)
+            cr.close_path()
             cr.set_source_rgba(0.94, 0.95, 0.97, 1.0)
             cr.fill_preserve()
-
-        # 4. Subtle 1px border stroke around rounded edge
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.12)
-        cr.set_line_width(1.0)
-        cr.stroke()
-
-        cr.restore()
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.12)
+            cr.set_line_width(1.0)
+            cr.stroke()
+            cr.restore()

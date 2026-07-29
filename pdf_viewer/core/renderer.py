@@ -227,12 +227,13 @@ class RenderWorker:
                         arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(
                             (pix.height, pix.width, pix.n)
                         )
-                        bgr = arr[:, :, [2, 1, 0]]
-                        bgra = np.dstack((bgr, np.full((pix.height, pix.width, 1), 255, dtype=np.uint8))).copy()
+                        bgra = arr[:, :, [2, 1, 0, 3]].copy() if pix.n == 4 else np.dstack((arr[:, :, [2, 1, 0]], np.full((pix.height, pix.width, 1), 255, dtype=np.uint8))).copy()
                         surface = cairo.ImageSurface.create_for_data(
-                            bgra, cairo.FORMAT_RGB24, pix.width, pix.height, pix.width * 4
+                            bgra, cairo.FORMAT_ARGB32, pix.width, pix.height, pix.width * 4
                         )
                         surface.set_device_scale(scale_factor, scale_factor)
+                        from ..ui.portal import apply_card_decorations
+                        apply_card_decorations(surface, scale_factor)
                         buf = bgra
                         target_cache.set(page_index, target_y, target_w, target_h, surface, buf)
 
