@@ -338,12 +338,13 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_page_hovered = self._on_page_hovered
+        self.canvas.on_selection_changed = self._update_selection_toolbar
         self.scrolled_window.set_child(self.canvas)
 
-
-        # Build floating zoom controls box and link preview box
+        # Build floating zoom controls box, link preview box, and bottom selection toolbar
         self._build_floating_zoom_controls()
         self._build_floating_link_preview()
+        self._build_selection_toolbar()
 
         # Link Preview Manager setup
         self.link_preview_manager = LinkPreviewManager(self)
@@ -658,6 +659,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_arxiv_diff_complete(self, mapper: ArxivDiffMapper | None):
         self.arxiv_mapper = mapper
         self.progress_bar.set_visible(False)
+        if hasattr(self, "selection_toolbar") and self.selection_toolbar.get_visible():
+            self._update_selection_toolbar(True)
 
 
     def _on_indexing_complete(self, conn):
@@ -794,14 +797,38 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Clear text selection on Escape
         if self.canvas.text_selection is not None and self.canvas.text_selection.has_selection():
-            self.canvas.text_selection.clear_selection()
-            self.canvas.queue_draw_overlays("selection-cleared")
+            self.canvas.clear_selection()
             return True
 
         return False
 
-    def _copy_selection_to_clipboard(self):
-        """Copy the currently selected text to the system clipboard (as LaTeX source if arXiv sourcemap is ready)."""
+    def _update_selection_toolbar(self, has_selection: bool):
+        if hasattr(self, "selection_toolbar"):
+            if has_selection and self.canvas.text_selection and self.canvas.text_selection.has_selection():
+                is_tex_available = bool(self.arxiv_mapper and self.arxiv_mapper.is_ready)
+                self.btn_copy_tex.set_visible(is_tex_available)
+                self.btn_copy_tex.set_sensitive(is_tex_available)
+                if is_tex_available:
+                    self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
+                self.selection_toolbar.set_visible(True)
+            else:
+                self.selection_toolbar.set_visible(False)
+
+    def _copy_pdf_text_to_clipboard(self):
+        """Copy selected PDF plain text to the system clipboard [Ctrl+Shift+C]."""
+        sel = self.canvas.text_selection
+        if sel is None or not sel.has_selection():
+            return
+        text = sel.get_selected_text()
+        if not text:
+            return
+        display = Gdk.Display.get_default()
+        if display is not None:
+            clipboard = display.get_clipboard()
+            clipboard.set(text)
+
+    def _copy_tex_to_clipboard(self):
+        """Copy selected text as LaTeX source TeX if available, otherwise plain PDF text [Ctrl+C]."""
         sel = self.canvas.text_selection
         if sel is None or not sel.has_selection():
             return
@@ -809,10 +836,8 @@ class MainWindow(Adw.ApplicationWindow):
         text = ""
         if self.arxiv_mapper and self.arxiv_mapper.is_ready:
             if sel.anchor_page is not None and sel.focus_page is not None:
-                if sel.anchor_page <= sel.focus_page:
-                    p_start, p_end = sel.anchor_page, sel.focus_page
-                else:
-                    p_start, p_end = sel.focus_page, sel.anchor_page
+                p_start = min(sel.anchor_page, sel.focus_page)
+                p_end = max(sel.anchor_page, sel.focus_page)
 
                 latex_parts = []
                 for pi in range(p_start, p_end + 1):
@@ -836,6 +861,10 @@ class MainWindow(Adw.ApplicationWindow):
         if display is not None:
             clipboard = display.get_clipboard()
             clipboard.set(text)
+
+    def _copy_selection_to_clipboard(self):
+        """Default selection copy handler."""
+        self._copy_tex_to_clipboard()
 
 
     # --- Zoom Operations ---
@@ -1167,6 +1196,12 @@ class MainWindow(Adw.ApplicationWindow):
                 font-size: 11px;
                 font-weight: 500;
             }
+            .selection-toolbar {
+                background-color: @headerbar_bg_color;
+                border-top: 1px solid rgba(0, 0, 0, 0.15);
+                padding: 6px 12px;
+                box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
+            }
         """
 
         if self.backend == "opengl":
@@ -1265,6 +1300,84 @@ class MainWindow(Adw.ApplicationWindow):
             self.debug_arxiv_label = None
 
         self.link_preview_box.set_visible(False)
+
+    def _build_selection_toolbar(self):
+        self.selection_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.selection_toolbar.add_css_class("selection-toolbar")
+        self.selection_toolbar.set_valign(Gtk.Align.END)
+        self.selection_toolbar.set_halign(Gtk.Align.FILL)
+        self.selection_toolbar.set_visible(False)
+
+        # Left box: Copy buttons
+        left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        # Copy PDF text button ("Copy")
+        self.btn_copy_text = Gtk.Button(label="Copy")
+        self.btn_copy_text.set_tooltip_text("Copy selected PDF text [Ctrl+Shift+C]")
+        self.btn_copy_text.connect("clicked", lambda b: self._copy_pdf_text_to_clipboard())
+        left_box.append(self.btn_copy_text)
+
+        # Copy Source TeX button
+        self.btn_copy_tex = Gtk.Button(label="Copy Source TeX")
+        self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
+        self.btn_copy_tex.connect("clicked", lambda b: self._copy_tex_to_clipboard())
+        left_box.append(self.btn_copy_tex)
+
+        self.selection_toolbar.append(left_box)
+
+        # Expanding spacer between left buttons and right info icon
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        self.selection_toolbar.append(spacer)
+
+        # Right info button with Gtk.Popover for shortcuts info
+        self.info_menu_btn = Gtk.MenuButton()
+        self.info_menu_btn.set_icon_name("dialog-information-symbolic")
+        self.info_menu_btn.set_direction(Gtk.ArrowType.UP)
+        self.info_menu_btn.set_tooltip_text("Shortcuts Info")
+        self.info_menu_btn.add_css_class("flat")
+
+        popover = Gtk.Popover()
+        popover.set_position(Gtk.PositionType.TOP)
+        popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        popover_box.set_margin_top(10)
+        popover_box.set_margin_bottom(10)
+        popover_box.set_margin_start(12)
+        popover_box.set_margin_end(12)
+
+        title_label = Gtk.Label(label="Text Selection Shortcuts")
+        title_label.add_css_class("heading")
+        title_label.set_xalign(0)
+        popover_box.append(title_label)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(16)
+        grid.set_row_spacing(6)
+
+        # Row 1: Ctrl+C
+        k1 = Gtk.Label(label="Ctrl+C")
+        k1.add_css_class("dim-label")
+        k1.set_xalign(0)
+        v1 = Gtk.Label(label="Copy source (if available)")
+        v1.set_xalign(0)
+        grid.attach(k1, 0, 0, 1, 1)
+        grid.attach(v1, 1, 0, 1, 1)
+
+        # Row 2: Ctrl+Shift+C
+        k2 = Gtk.Label(label="Ctrl+Shift+C")
+        k2.add_css_class("dim-label")
+        k2.set_xalign(0)
+        v2 = Gtk.Label(label="Copy PDF text")
+        v2.set_xalign(0)
+        grid.attach(k2, 0, 1, 1, 1)
+        grid.attach(v2, 1, 1, 1, 1)
+
+        popover_box.append(grid)
+        popover.set_child(popover_box)
+        self.info_menu_btn.set_popover(popover)
+
+        self.selection_toolbar.append(self.info_menu_btn)
+        self.content_overlay.add_overlay(self.selection_toolbar)
 
     def _build_debug_cache_box(self):
         self.debug_cache_label = Gtk.Label(xalign=0.0)

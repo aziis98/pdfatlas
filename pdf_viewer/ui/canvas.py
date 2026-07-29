@@ -3,7 +3,7 @@ import sys
 import cairo
 import fitz
 import gi
-from typing import Any
+from typing import Any, Callable
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -396,6 +396,7 @@ class PDFCanvas(Gtk.Box):
         self.on_link_clicked: Any = None
         self.on_link_hovered: Any = None
         self.on_page_hovered: Any = None
+        self.on_selection_changed: Callable[[bool], None] | None = None
         self.text_selection: TextSelection | None = None
         self.debug_arxiv_data: dict[str, Any] | None = None
         self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
@@ -526,16 +527,27 @@ class PDFCanvas(Gtk.Box):
 
         self.text_selection.update_focus(page_idx, char_idx)
         self.queue_draw_overlays("selection-update")
+        if self.on_selection_changed:
+            self.on_selection_changed(self.text_selection.has_selection())
+
+    def clear_selection(self):
+        """Clear text selection and notify UI components."""
+        if self.text_selection is not None:
+            self.text_selection.clear_selection()
+            self.queue_draw_overlays("selection-cleared")
+            if self.on_selection_changed:
+                self.on_selection_changed(False)
 
     def on_drag_end(self, gesture, offset_x, offset_y):
         """Handle drag end - finalize selection or clear if drag didn't start."""
         self._pending_drag_start = None
         if self.text_selection is not None:
             if abs(offset_x) < 3 and abs(offset_y) < 3:
-                self.text_selection.clear_selection()
-                self.queue_draw_overlays("selection-cleared")
+                self.clear_selection()
             else:
                 self.text_selection.end_selection()
+                if self.on_selection_changed:
+                    self.on_selection_changed(self.text_selection.has_selection())
 
 
     def _hit_test_page(self, x: float, y: float) -> int | None:
@@ -733,8 +745,8 @@ class PDFCanvas(Gtk.Box):
         self.render_worker = render_worker
         self.crop_analyzer = crop_analyzer
         self.settings = settings
-        self.in_flight.clear()
-        self.highlighted_block = None
+        if self.text_selection:
+            self.clear_selection()
         self.text_selection = TextSelection(doc_model) if doc_model else None
 
         # Remove old containers
