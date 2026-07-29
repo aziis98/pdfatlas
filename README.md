@@ -5,7 +5,7 @@
 
 <img src="assets/logo.png" width="96" style="vertical-align: middle; margin-right: 10px;" alt="logo" align="right" />
 
-A modern PDF reader built with Python, GTK4, Libadwaita, Cairo, PyMuPDF, and OpenGL hardware acceleration. Key features include continuous page scrolling, dynamic auto-crop margins, a multi-column grid minimap navigator, and an integrated SQLite FTS5 search engine that presents results as cropped "portals" of matching text sections.
+A PDF reader built with Python, GTK4, Libadwaita, PyMuPDF, and OpenGL. Features continuous page scrolling, page margin auto-cropping, a page thumbnail grid, and SQLite FTS5 text search with inline snippet previews.
 
 <p align="center">
   <img src="assets/screenshots/attention_hero.png" alt="PDF Atlas Reader View" width="100%" />
@@ -15,61 +15,59 @@ A modern PDF reader built with Python, GTK4, Libadwaita, Cairo, PyMuPDF, and Ope
 
 <img src="assets/screenshots/attention_portal_search.png" alt="FTS Search Portals" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
 
-### FTS5 Search Portals
+### Full-Text Search ("Portals")
 
-Entering text in the headerbar instantly switches the application from Document View to Search View:
+Entering text in the headerbar switches the application from Document View to Search View:
 
-- Excerpt results are presented as tightly cropped image strips ("portals") displaying exact visual context.
-- Cairo overlays highlight search term matches across both search portals and the continuous canvas.
-- Excerpt pinning allows users to bookmark key context snippets.
-- Clicking any search portal card smoothly transitions back to Reader Mode and scrolls directly to the match location.
+- Excerpt results are presented as cropped image strips ("portals") displaying exact visual context.
+- Search term matches are highlighted across search portals and the continuous canvas.
+- Excerpt pinning allows bookmarking key context snippets.
+- Clicking a search portal card returns to Reader Mode and scrolls directly to the match.
 
 <br clear="all" />
 
 <img src="assets/screenshots/attention_reader_view.png" alt="Continuous Reader & Gapless Mode" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
 
-### Continuous Reader & Gap-less Mode
+### Continuous Reading & Gap-less View
 
-Features smooth vertical page layout using PyMuPDF with dual Cairo vector and hardware-accelerated OpenGL (`PyOpenGL`) rendering backends:
+Vertical page layout using PyMuPDF with Cairo vector and hardware-accelerated OpenGL (`PyOpenGL`) rendering backends:
 
-- Asynchronous background thread workers handle rendering to keep the interface responsive at 60 FPS.
-- Seamless gap-less mode connects pages continuously without artificial visual gaps.
-- Full viewport mouse-centered smooth zooming.
+- Uses background worker threads for page rendering to keep scrolling responsive.
+- Gap-less mode connects pages vertically without page margins.
+- Mouse-centered canvas zooming.
 
 <br clear="all" />
 
 <img src="assets/screenshots/attention_minimap_view.png" alt="Grid Minimap Navigator" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
 
-### Grid Minimap Navigator
+### Page Thumbnail Grid / Minimap
 
-Pressing `M` opens a multi-column grid thumbnail navigator overlay:
+Pressing `M` opens a page thumbnail grid overlay:
 
 - Displays all document page thumbnails in a wrapping multi-column grid.
-- Tracks the active viewport position in real time with translucent overlays.
-- Visualizes auto-crop boundaries across pages and allows instant grid navigation.
+- Highlights the current viewport position and page crop boundaries.
+- Allows quick navigation across document pages.
 
 <br clear="all" />
 
-### Smart Auto-Crop Margins & Fast Index Caching
+### Auto-Crop Margins & Index Caching
 
-- **Auto-Crop Margins (`C`):** Automatically detects page whitespace boundaries in background threads, eliminating margins to maximize font sizes on smaller screens.
-- **Cryptographic Cache:** Search indexes are cached locally in `~/.cache/pdfatlas/<sha256>.db` keyed by the document's SHA-256 digest for instant subsequent document loads.
+- **Auto-Crop Margins (`C`):** Trims page whitespace margins in the background to maximize readable text area on smaller screens.
+- **Search Index Cache:** Text search indexes are cached in `~/.cache/pdfatlas/` keyed by file SHA-256 for faster opening on subsequent runs.
 
 <br clear="all" />
 
 <img src="assets/screenshots/attention_text_selection.png" alt="Text Selection Toolbar" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
 
-### Text Selection & Contextual Toolbar
+### Text Selection & Copy
 
 Highlight text in any document to reveal the bottom context toolbar:
 
-- **PDF Plain Text Copy (`Ctrl+Shift+C` / "Copy"):** Extracts and copies clean, formatted plain text directly from the PDF document structure.
-- **LaTeX Source Copy (`Ctrl+C` / "Copy Source TeX"):** When viewing arXiv papers, PDF Atlas automatically maps character ranges back to the original LaTeX source files (`.tex`), allowing you to copy raw TeX source equations, math formatting, and citations directly into your editor.
-- **Keyboard Shortcuts & Info:** Click the right info icon for quick access to text selection shortcuts and copy options.
+- **PDF Plain Text Copy (`Ctrl+Shift+C` / "Copy"):** Copies selected plain text from the PDF.
+- **LaTeX Source Copy (`Ctrl+C` / "Copy Source"):** For arXiv papers, PDF Atlas attempts to map character selections back to original LaTeX source code.
+- **Shortcuts Info:** Click the info icon for quick access to selection shortcuts.
 
 <br clear="all" />
-
----
 
 
 ## Architecture
@@ -105,16 +103,12 @@ pdfatlas/
 └── uv.lock                  # Lockfile
 ```
 
----
-
 ## Requirements
 
 - Python 3.11+
 - GTK 4 & Libadwaita (`libgirepository1.0-dev`, `gir1.2-adw-1`)
 - Cairo development libraries (`libcairo2-dev`)
 - PIL/Pillow, PyMuPDF, and PyOpenGL
-
----
 
 ## Getting Started
 
@@ -143,8 +137,6 @@ pdfatlas 1706.03762
 pdfatlas https://arxiv.org/abs/2305.12345
 ```
 
----
-
 ### Local Development
 
 To install dependencies and run locally:
@@ -160,8 +152,6 @@ uv run main.py 1706.03762
 uv run main.py 1706.03762 --debug
 ```
 
-
----
 
 ## Keyboard Shortcuts
 
@@ -183,8 +173,6 @@ uv run main.py 1706.03762 --debug
 | `Ctrl+Shift+C`          | Copy raw PDF text                          |
 | `Escape`                | Clear selection/search or close Minimap modal |
 | `Ctrl+Q` or `q`         | Quit                                       |
-
----
 
 ## Contributing
 
