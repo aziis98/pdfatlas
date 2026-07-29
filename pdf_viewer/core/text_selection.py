@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+
 from .document import DocumentModel
 
 
@@ -52,7 +53,7 @@ class TextSelection:
         page = self.doc_model.get_page(page_index)
         try:
             raw_words = page.get_text("words")
-        except Exception:
+        except (RuntimeError, ValueError):
             self._page_indices[page_index] = PageCharIndex(page_index=page_index)
             return
 

@@ -80,7 +80,7 @@ def extract_pdf_text_with_metadata(pdf_path: str | Path) -> tuple[str, list[tupl
         page = doc[page_idx]
         try:
             raw_words = page.get_text("words")
-        except Exception:
+        except (RuntimeError, ValueError):
             raw_words = []
 
         for word_idx, w in enumerate(raw_words):

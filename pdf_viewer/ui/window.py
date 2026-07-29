@@ -13,7 +13,7 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("Pango", "1.0")
 from concurrent.futures import ThreadPoolExecutor
 
-from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from ..controllers.navigation import NavigationController
 from ..controllers.search import SearchController
@@ -31,6 +31,7 @@ from .canvas import PDFCanvas
 from .gl_canvas import GLCanvas
 from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
+from .services import IconThemeManager, ScreenshotService
 from .settings import SettingsWindow
 from .shortcuts import ShortcutsController
 
@@ -150,42 +151,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _setup_system_icons(self):
-        display = Gdk.Display.get_default()
-        if not display:
-            return
-        theme = Gtk.IconTheme.get_for_display(display)
-
-        # Register local project assets directory and user hicolor icons for application logos
-        assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets"))
-        if os.path.exists(assets_dir):
-            theme.add_search_path(assets_dir)
-
-        user_icons = os.path.expanduser("~/.local/share/icons")
-        if os.path.exists(user_icons):
-            theme.add_search_path(user_icons)
-
-        Gtk.Window.set_default_icon_name("com.aziis98.pdfatlas")
-        self.set_icon_name("com.aziis98.pdfatlas")
-
-        icon_roots = [
-            "/usr/share/icons",
-            "/usr/local/share/icons",
-            os.path.expanduser("~/.local/share/icons"),
-            os.path.expanduser("~/.icons"),
-        ]
-
-        added_paths = set()
-        target_icons = {"map-symbolic.svg", "image-crop-symbolic.svg", "crop-symbolic.svg"}
-
-        for root in icon_roots:
-            if not os.path.exists(root):
-                continue
-            for dirpath, dirnames, filenames in os.walk(root):
-                for filename in filenames:
-                    if filename in target_icons:
-                        if dirpath not in added_paths:
-                            theme.add_search_path(dirpath)
-                            added_paths.add(dirpath)
+        IconThemeManager.setup_system_icons(self)
 
     def _build_ui(self):
         self._setup_system_icons()
@@ -1682,192 +1648,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _take_programmatic_screenshot(self):
         print(f"[MainWindow] Taking scheduled screenshot of window to: {self.screenshot_path}", flush=True)
-        if hasattr(self, "current_source") and self.current_source and self.current_source.is_arxiv:
+        if self.current_source and self.current_source.is_arxiv:
             if not self.arxiv_mapper or not self.arxiv_mapper.is_ready:
                 print("[Screenshot] Waiting for arXiv diff worker to complete...", flush=True)
                 GLib.timeout_add(500, self._take_programmatic_screenshot)
                 return False
         try:
-            self.queue_allocate()
-            renderer = self.get_renderer()
-            if not renderer:
-                print("[Screenshot] Window has no active renderer yet", flush=True)
-                return False
-
-            is_minimap = (
-                hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible()
-            )
-
-            if is_minimap and self.minimap_dialog and self.screenshot_path:
-                # 1. Snapshot main window content box as base
-                base_widget = self.get_content()
-                if not base_widget:
-                    return False
-                bw = base_widget.get_width()
-                bh = base_widget.get_height()
-                b_rect = Graphene.Rect.alloc()
-                b_rect.init(0.0, 0.0, float(bw), float(bh))
-                b_snap = Gtk.Snapshot.new()
-                bg_color = Gdk.RGBA()
-                bg_color.parse("#ffffff")
-                b_snap.append_color(bg_color, b_rect)
-                Gtk.WidgetPaintable.new(base_widget).snapshot(b_snap, float(bw), float(bh))
-                b_texture = renderer.render_texture(b_snap.to_node(), b_rect)
-
-                # 2. Snapshot minimap modal window
-                modal_widget = self.minimap_dialog
-                mw = modal_widget.get_width()
-                mh = modal_widget.get_height()
-                m_rect = Graphene.Rect.alloc()
-                m_rect.init(0.0, 0.0, float(mw), float(mh))
-                m_snap = Gtk.Snapshot.new()
-                m_snap.append_color(bg_color, m_rect)
-                Gtk.WidgetPaintable.new(modal_widget).snapshot(m_snap, float(mw), float(mh))
-                m_texture = renderer.render_texture(m_snap.to_node(), m_rect)
-
-                base_path = self.screenshot_path + ".base.png"
-                modal_path = self.screenshot_path + ".modal.png"
-                if b_texture and m_texture:
-                    b_texture.save_to_png(base_path)
-                    m_texture.save_to_png(modal_path)
-                    self._composite_minimap_screenshot(base_path, modal_path, self.screenshot_path)
-            else:
-                content_widget = self.get_content()
-                if not content_widget or not self.screenshot_path:
-                    print("[Screenshot] Window has no content widget to snapshot", flush=True)
-                    return False
-
-                w = content_widget.get_width()
-                h = content_widget.get_height()
-                rect = Graphene.Rect.alloc()
-                rect.init(0.0, 0.0, float(w), float(h))
-                snapshot = Gtk.Snapshot.new()
-                bg_color = Gdk.RGBA()
-                bg_color.parse("#ffffff")
-                snapshot.append_color(bg_color, rect)
-                Gtk.WidgetPaintable.new(content_widget).snapshot(snapshot, float(w), float(h))
-
-                texture = renderer.render_texture(snapshot.to_node(), rect)
-                if texture and self.screenshot_path:
-                    texture.save_to_png(self.screenshot_path)
-                    print("[Screenshot] Programmatic screenshot saved successfully.", flush=True)
-                    self._apply_gnome_shadow(self.screenshot_path)
-                else:
-                    print("[Screenshot] Failed to render snapshot node to texture.", flush=True)
-        except Exception as e:
-            print(f"[Screenshot] Error taking screenshot: {e}", flush=True)
+            if self.screenshot_path:
+                ScreenshotService.capture_window(self, self.screenshot_path, getattr(self, "minimap_dialog", None))
         finally:
             self.close()
-            if hasattr(self, "app") and self.app:
+            if self.app:
                 self.app.quit()
         return False
-
-    def _composite_minimap_screenshot(self, base_path, modal_path, out_path):
-        try:
-            import os
-
-            from PIL import Image, ImageDraw, ImageFilter
-
-            base = Image.open(base_path).convert("RGBA")
-            modal = Image.open(modal_path).convert("RGBA")
-
-            bw, bh = base.size
-            mw, mh = modal.size
-
-            dim = Image.new("RGBA", (bw, bh), (0, 0, 0, 45))
-            base_dimmed = Image.alpha_composite(base, dim)
-
-            modal_radius = 12
-            modal_mask = Image.new("L", (mw, mh), 0)
-            draw_m = ImageDraw.Draw(modal_mask)
-            draw_m.rounded_rectangle((0, 0, mw - 1, mh - 1), radius=modal_radius, fill=255)
-
-            rounded_modal = Image.new("RGBA", (mw, mh), (0, 0, 0, 0))
-            rounded_modal.paste(modal, (0, 0), mask=modal_mask)
-
-            draw_b = ImageDraw.Draw(rounded_modal)
-            draw_b.rounded_rectangle(
-                (0, 0, mw - 1, mh - 1), radius=modal_radius, outline=(180, 180, 180, 120), width=1
-            )
-
-            shadow_blur = 16
-            shadow_opacity = 0.25
-            offset_y = 6
-
-            shadow_mask = Image.new("L", (bw, bh), 0)
-            s_draw = ImageDraw.Draw(shadow_mask)
-
-            x0 = (bw - mw) // 2
-            y0 = (bh - mh) // 2
-
-            shadow_box = (x0, y0 + offset_y, x0 + mw - 1, y0 + offset_y + mh - 1)
-            s_draw.rounded_rectangle(shadow_box, radius=modal_radius, fill=int(255 * shadow_opacity))
-            shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(shadow_blur))
-
-            dark_fill = Image.new("RGBA", (bw, bh), (10, 10, 16, 255))
-            base_dimmed.paste(dark_fill, (0, 0), mask=shadow_mask)
-            base_dimmed.paste(rounded_modal, (x0, y0), mask=rounded_modal)
-
-            base_dimmed.save(out_path, format="PNG")
-
-            if os.path.exists(base_path):
-                os.remove(base_path)
-            if os.path.exists(modal_path):
-                os.remove(modal_path)
-
-            self._apply_gnome_shadow(out_path)
-            print(
-                f"[Screenshot] Composited minimap window over main reader and saved to {out_path}", flush=True
-            )
-        except Exception as e:
-            print(f"[Screenshot] Failed to composite minimap screenshot: {e}", flush=True)
-
-    def _apply_gnome_shadow(self, file_path):
-        try:
-            from PIL import Image, ImageDraw, ImageFilter
-
-            img = Image.open(file_path).convert("RGBA")
-            w, h = img.size
-
-            corner_radius = 12
-            shadow_margin = 60
-            shadow_blur = 18
-            shadow_offset_y = 6
-            shadow_opacity = 0.20
-            border_color = (180, 180, 180, 100)
-
-            mask = Image.new("L", (w, h), 0)
-            draw = ImageDraw.Draw(mask)
-            draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=corner_radius, fill=255)
-
-            rounded_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            rounded_img.paste(img, (0, 0), mask=mask)
-
-            draw_border = ImageDraw.Draw(rounded_img)
-            draw_border.rounded_rectangle(
-                (0, 0, w - 1, h - 1), radius=corner_radius, outline=border_color, width=1
-            )
-
-            canvas_w = w + shadow_margin * 2
-            canvas_h = h + shadow_margin * 2 + shadow_offset_y
-
-            shadow_mask = Image.new("L", (canvas_w, canvas_h), 0)
-            shadow_draw = ImageDraw.Draw(shadow_mask)
-            shadow_box = (
-                shadow_margin,
-                shadow_margin + shadow_offset_y,
-                shadow_margin + w - 1,
-                shadow_margin + shadow_offset_y + h - 1,
-            )
-            shadow_draw.rounded_rectangle(shadow_box, radius=corner_radius, fill=int(255 * shadow_opacity))
-            shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(shadow_blur))
-
-            canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-            dark_fill = Image.new("RGBA", (canvas_w, canvas_h), (12, 16, 24, 255))
-            canvas.paste(dark_fill, (0, 0), mask=shadow_mask)
-            canvas.paste(rounded_img, (shadow_margin, shadow_margin), mask=rounded_img)
-
-            canvas.save(file_path, format="PNG")
-            print(f"[Screenshot] Applied GNOME drop-shadow to {file_path}", flush=True)
-        except Exception as e:
-            print(f"[Screenshot] Failed to apply GNOME shadow: {e}", flush=True)

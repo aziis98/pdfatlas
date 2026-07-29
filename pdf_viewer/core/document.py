@@ -27,7 +27,7 @@ class DocumentModel:
             if self._page_links[index] is None:
                 try:
                     self._page_links[index] = self.doc[index].get_links()
-                except Exception:
+                except (RuntimeError, ValueError):
                     self._page_links[index] = []
             return self._page_links[index] or []
         return []

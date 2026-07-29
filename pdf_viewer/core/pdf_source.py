@@ -37,7 +37,7 @@ class RecentFilesManager:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 for item in data:
                     self._entries.append(PdfSource(**item))
-            except Exception:
+            except (json.JSONDecodeError, KeyError, TypeError, OSError):
                 self._entries = []
 
     def _save(self):
@@ -60,13 +60,13 @@ class RecentFilesManager:
     def get_by_uri(self, uri: str) -> PdfSource | None:
         try:
             norm_uri = os.path.abspath(uri)
-        except Exception:
+        except OSError:
             norm_uri = uri
         for entry in self._entries:
             try:
                 if os.path.abspath(entry.uri) == norm_uri or entry.uri == uri:
                     return entry
-            except Exception:
+            except OSError:
                 if entry.uri == uri:
                     return entry
         return None
