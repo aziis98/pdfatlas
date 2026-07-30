@@ -28,6 +28,7 @@ packages = ["pdf_viewer"]
 [dependency-groups]
 dev = [
     "pyright>=1.1.411",
+    "pytest>=8.0.0",
     "ruff>=0.15.22",
 ]
 

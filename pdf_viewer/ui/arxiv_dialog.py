@@ -13,6 +13,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
+from ..core.arxiv_mapper import (
+    arxiv_id_from_path as _arxiv_id_from_path,
+    extract_arxiv_id_from_raw as _extract_arxiv_id,
+)
 from ..core.pdf_source import PdfSource
 
 
@@ -22,19 +26,6 @@ ARXIV_CACHE_ROOT = Path(
 
 ARXIV_PDF_URL = "https://arxiv.org/pdf/{}.pdf"
 ARXIV_EPRINT_URL = "https://arxiv.org/e-print/{}"
-
-ARXIV_ID_RE = re.compile(
-    r"(?:https?://arxiv\.org/(?:abs|pdf)/([\w.-]+)(?:v\d+)?(?:\.pdf)?|([\w.-]+))"
-)
-
-
-def _extract_arxiv_id(raw: str) -> str | None:
-    m = ARXIV_ID_RE.fullmatch(raw.strip())
-    if m:
-        return m.group(1) or m.group(2)
-    return None
-
-
 ARXIV_API_URL = "http://export.arxiv.org/api/query?id_list={}"
 
 
@@ -64,14 +55,6 @@ def _fetch_arxiv_title(arxiv_id: str) -> str | None:
             return clean_arxiv_title(title_el.text)
     except Exception:
         pass
-    return None
-
-
-def _arxiv_id_from_path(pdf_path: str) -> str | None:
-    parts = Path(pdf_path).parts
-    for part in parts:
-        if re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", part):
-            return part
     return None
 
 

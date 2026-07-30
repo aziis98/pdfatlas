@@ -70,7 +70,8 @@ This document records durable technical findings, architectural decisions, mathe
   2. `GLCanvas.on_draw()` in [`pdf_viewer/ui/gl_canvas.py`](pdf_viewer/ui/gl_canvas.py) passes `x_min = canvas.hadjustment.get_value()` into `u_offset` (`glUniform2f(u_offset, x_min, y_min)`), ensuring horizontal scrolling shifts all OpenGL page quads and text overlays in 1:1 sync with GTK scrolling.
 
 ### 1.10. arXiv TeX Diff & Word-Level Sourcemapping
-- **Finding:** arXiv tarballs contain raw LaTeX source code divided across multiple `.tex` files with custom macro imports (`\input`, `\include`, `\subfile`).
+- **Finding:** arXiv tarballs contain raw LaTeX source code divided across multiple `.tex` files with custom macro imports (`\input`, `\include`, `\subfile`). arXiv identifiers follow two main formats: modern IDs (`YYMM.NNNN(N)`) and pre-2007 legacy IDs (`category/YYMMNNN` or `category.subcategory/YYMMNNN`, e.g., `hep-ph/9504271`, `math.DG/0101001`).
+- **URL & Path Resolution:** Legacy arXiv IDs include forward slashes (`/`). Parsing regexes (`ARXIV_ID_RE`) and cache directory path resolution (`arxiv_id_from_path`) must explicitly match both `(category)(.subcategory)?/YYMMNNN` and `YYMM.NNNN`. Legacy endpoints (`/pdf/hep-ph/9504271.pdf`, `/e-print/hep-ph/9504271`, and arXiv API query `?id_list=hep-ph/9504271`) mirror modern endpoint behaviors seamlessly.
 - **Inlining & Tokenization:** `ArxivDiffMapper` in [`pdf_viewer/core/arxiv_mapper.py`](pdf_viewer/core/arxiv_mapper.py) recursively inlines TeX files, strips TeX comments (`%...`), tokenizes non-whitespace words, and extracts PyMuPDF native `words` (`page.get_text("words")`).
 - **Diff Alignment:** Running `difflib.SequenceMatcher` between PDF words and TeX words generates a 1-to-1 mapping $(i_{\text{pdf}} \leftrightarrow i_{\text{tex}})$. Selecting text or pressing `Ctrl+C` maps the selected word range directly to raw LaTeX snippets.
 

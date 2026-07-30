@@ -17,8 +17,10 @@ ARXIV_CACHE_ROOT = Path(
 ARXIV_PDF_URL = "https://arxiv.org/pdf/{}.pdf"
 ARXIV_EPRINT_URL = "https://arxiv.org/e-print/{}"
 
+ARXIV_ID_PATTERN = r"(?:[a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?"
+
 ARXIV_ID_RE = re.compile(
-    r"(?:https?://arxiv\.org/(?:abs|pdf)/([\w.-]+?)(?:v\d+)?(?:\.pdf)?|(?:arxiv:)?([\w.-]+))",
+    r"(?:https?://arxiv\.org/(?:abs|pdf)/(" + ARXIV_ID_PATTERN + r")(?:\.pdf)?|(?:arxiv:)?(" + ARXIV_ID_PATTERN + r"))",
     re.IGNORECASE,
 )
 
@@ -29,18 +31,47 @@ def extract_arxiv_id_from_raw(raw: str) -> Optional[str]:
         cleaned = cleaned[6:].strip()
     m = ARXIV_ID_RE.fullmatch(cleaned)
     if m:
-        aid = m.group(1) or m.group(2)
-        if aid and (re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", aid) or "/" in raw or "arxiv" in raw.lower()):
-            return aid
+        return m.group(1) or m.group(2)
     return None
 
 
-
 def arxiv_id_from_path(path_str: str) -> Optional[str]:
+    aid = extract_arxiv_id_from_raw(path_str)
+    if aid:
+        return aid
+
     p = Path(path_str)
-    for part in p.parts:
-        if re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", part):
-            return part
+    parts = p.parts
+
+    if "source-arxiv" in parts:
+        idx = parts.index("source-arxiv")
+        sub_parts = list(parts[idx + 1:])
+        if sub_parts and sub_parts[-1].endswith(".pdf"):
+            sub_parts.pop()
+        if sub_parts:
+            candidate = "/".join(sub_parts)
+            extracted = extract_arxiv_id_from_raw(candidate)
+            if extracted:
+                return extracted
+
+    for part in parts:
+        m = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?)", part)
+        if m:
+            return m.group(1)
+
+    for i in range(len(parts) - 1):
+        candidate = f"{parts[i]}/{parts[i+1]}"
+        if candidate.endswith(".pdf"):
+            candidate = candidate[:-4]
+        extracted = extract_arxiv_id_from_raw(candidate)
+        if extracted:
+            return extracted
+
+    full_stem = p.stem
+    extracted = extract_arxiv_id_from_raw(full_stem)
+    if extracted:
+        return extracted
+
     return None
 
 

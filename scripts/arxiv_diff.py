@@ -28,9 +28,7 @@ ARXIV_CACHE_ROOT = Path(
 ARXIV_PDF_URL = "https://arxiv.org/pdf/{}.pdf"
 ARXIV_EPRINT_URL = "https://arxiv.org/e-print/{}"
 
-ARXIV_ID_RE = re.compile(
-    r"(?:https?://arxiv\.org/(?:abs|pdf)/([\w.-]+)(?:v\d+)?(?:\.pdf)?|([\w.-]+))"
-)
+from pdf_viewer.core.arxiv_mapper import extract_arxiv_id_from_raw as extract_arxiv_id
 
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -38,13 +36,6 @@ RED_BG = "\033[48;5;168m"
 GREEN_BG = "\033[48;5;114m"
 CYAN_BG = "\033[48;5;110m"
 RESET = "\033[0m"
-
-
-def extract_arxiv_id(raw: str) -> str | None:
-    m = ARXIV_ID_RE.fullmatch(raw.strip())
-    if m:
-        return m.group(1) or m.group(2)
-    return None
 
 
 def download_arxiv(arxiv_id: str) -> tuple[Path, Path]:
