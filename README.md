@@ -105,15 +105,63 @@ pdfatlas/
 ## Requirements
 
 - Python 3.11+
-- GTK 4 & Libadwaita (`libgirepository1.0-dev`, `gir1.2-adw-1`)
-- Cairo development libraries (`libcairo2-dev`)
-- PIL/Pillow, PyMuPDF, and PyOpenGL
+- GTK 4 & Libadwaita
+- Cairo & PyGObject development headers
+
+### macOS Setup
+
+On a fresh macOS system, install Xcode Command Line Tools and Homebrew system dependencies before installing `pdfatlas`:
+
+1. **Install Xcode Command Line Tools** (from Terminal):
+   ```bash
+   xcode-select --install
+   ```
+   A software update dialog will appear. Click **Install**, agree to the terms, and wait for the installation to finish. Verify the installation:
+   ```bash
+   xcode-select -p
+   # Expected output: /Library/Developer/CommandLineTools
+   ```
+
+2. **Install Homebrew & System Dependencies** (including `cmake` & `pkg-config`):
+   If Homebrew is not installed, install it via:
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+   Then install the required build tools and GTK4 libraries via `brew`:
+   ```bash
+   brew install cmake pkg-config gtk4 libadwaita pygobject3 cairo
+   ```
+
+### Linux Setup
+
+On Ubuntu / Debian:
+```bash
+sudo apt install libgirepository1.0-dev gir1.2-adw-1 libcairo2-dev cmake pkg-config
+```
+
+---
 
 ## Getting Started
 
-### Installation as a System-Wide Tool
+### Installation on macOS via Homebrew
 
-Install `pdfatlas` directly from GitHub using `uv`:
+On macOS, you can install `pdfatlas` and all its required C libraries (`cmake`, `gtk4`, `libadwaita`, `cairo`, `pygobject3`) in a single command using Homebrew:
+
+1. Ensure Xcode Command Line Tools are installed:
+   ```bash
+   xcode-select --install
+   ```
+
+2. Install directly via the Homebrew Formula:
+   ```bash
+   brew install https://raw.githubusercontent.com/aziis98/pdfatlas/main/scripts/Formula/pdfatlas.rb
+   ```
+
+---
+
+### Installation via `uv` (Linux & macOS)
+
+Once system prerequisites are installed, you can install `pdfatlas` using `uv`:
 
 ```bash
 uv tool install git+https://github.com/aziis98/pdfatlas.git
@@ -124,6 +172,7 @@ Or install from a local clone of the repository:
 ```bash
 uv tool install .
 ```
+
 
 Once installed, launch the application from anywhere using:
 
@@ -143,6 +192,7 @@ To update `pdfatlas` to the latest commit from GitHub:
 ```bash
 uv tool install git+https://github.com/aziis98/pdfatlas.git --reinstall
 ```
+
 
 ### Local Development
 
