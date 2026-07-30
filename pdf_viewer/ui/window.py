@@ -1175,6 +1175,23 @@ class MainWindow(Adw.ApplicationWindow):
         show_badge = (not installed) or self.debug_mode
         self.menu_badge_dot.set_visible(show_badge)
 
+        menu = Gio.Menu.new()
+        menu.append("Gap-less Mode", "win.gapless-mode")
+        menu.append("Auto-crop Mode", "win.crop-mode")
+
+        section = Gio.Menu.new()
+        section.append("Open Settings", "win.open-settings")
+        section.append("About PDF Atlas", "win.about")
+        menu.append_section(None, section)
+
+        if show_badge:
+            install_section = Gio.Menu.new()
+            install_section.append("Install Desktop Application", "win.install-app")
+            menu.append_section(None, install_section)
+
+        self.menu_button.set_menu_model(menu)
+
+
     def _on_install_app_action_activated(self):
         success = ensure_app_installed(force=True)
         if success:

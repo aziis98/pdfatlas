@@ -18,20 +18,37 @@ def get_base_dir() -> str:
 
 def is_app_installed() -> bool:
     """
-    Check if application desktop entry / shortcut is installed on the host OS.
+    Check if application desktop entry, shortcut, system binary, or app bundle is installed.
     """
+    # Check if running directly from an installed system binary (e.g. /usr/bin/pdfatlas)
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0:
+        base_name = os.path.basename(argv0)
+        if base_name in ("pdfatlas", "pdfatlas-git"):
+            return True
+        if argv0.startswith(("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/", "/usr/lib/")):
+            return True
+
     user_home = os.path.expanduser("~")
 
     if sys.platform == "darwin":
-        app_path = os.path.join(user_home, "Applications", "PDF Atlas.app")
-        return os.path.exists(app_path)
+        user_app = os.path.join(user_home, "Applications", "PDF Atlas.app")
+        sys_app = "/Applications/PDF Atlas.app"
+        return os.path.exists(user_app) or os.path.exists(sys_app)
     elif sys.platform == "win32":
         appdata = os.environ.get("APPDATA", os.path.join(user_home, "AppData", "Roaming"))
         lnk_path = os.path.join(appdata, "Microsoft", "Windows", "Start Menu", "Programs", "PDF Atlas.lnk")
         return os.path.exists(lnk_path)
     else:
-        desktop_file = os.path.join(user_home, ".local", "share", "applications", "com.aziis98.pdfatlas.desktop")
-        return os.path.exists(desktop_file)
+        desktop_candidates = [
+            os.path.join(user_home, ".local", "share", "applications", "com.aziis98.pdfatlas.desktop"),
+            "/usr/share/applications/com.aziis98.pdfatlas.desktop",
+            "/usr/local/share/applications/com.aziis98.pdfatlas.desktop",
+            "/var/lib/flatpak/exports/share/applications/com.aziis98.pdfatlas.desktop",
+            "/var/lib/snapd/desktop/applications/com.aziis98.pdfatlas.desktop",
+        ]
+        return any(os.path.exists(p) for p in desktop_candidates)
+
 
 
 def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool:
