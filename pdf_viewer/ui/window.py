@@ -21,6 +21,7 @@ from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
 from ..core.index import DatabaseService, get_db_for_pdf, load_doc_state
+from ..core.installation import ensure_app_installed, is_app_installed
 
 from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
@@ -120,6 +121,10 @@ class MainWindow(Adw.ApplicationWindow):
         about_action.connect("activate", lambda act, param: self._on_about_action_activated(None))
         self.add_action(about_action)
 
+        install_action = Gio.SimpleAction.new("install-app", None)
+        install_action.connect("activate", lambda act, param: self._on_install_app_action_activated())
+        self.add_action(install_action)
+
         open_file_action = Gio.SimpleAction.new("open-file", None)
         open_file_action.connect("activate", lambda act, param: self._open_file_dialog())
         self.add_action(open_file_action)
@@ -156,9 +161,12 @@ class MainWindow(Adw.ApplicationWindow):
     def _build_ui(self):
         self._setup_system_icons()
 
+        self.toast_overlay = Adw.ToastOverlay()
+        self.set_content(self.toast_overlay)
+
         # Main vertical container
         main_layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.set_content(main_layout)
+        self.toast_overlay.set_child(main_layout)
 
         # HeaderBar Setup
         header = Adw.HeaderBar()
@@ -231,12 +239,31 @@ class MainWindow(Adw.ApplicationWindow):
         section.append("About PDF Atlas", "win.about")
         menu.append_section(None, section)
 
-        # Three-dot Action Menu
+        install_section = Gio.Menu.new()
+        install_section.append("Install Desktop Application", "win.install-app")
+        menu.append_section(None, install_section)
+
+        # Three-dot Action Menu with Badge Overlay
+        self.menu_button_overlay = Gtk.Overlay()
         self.menu_button = Gtk.MenuButton()
         self.menu_button.set_icon_name("view-more-symbolic")
         self.menu_button.set_tooltip_text("Options")
         self.menu_button.set_menu_model(menu)
-        right_box.append(self.menu_button)
+        self.menu_button_overlay.set_child(self.menu_button)
+
+        self.menu_badge_dot = Gtk.Box()
+        self.menu_badge_dot.add_css_class("menu-badge-dot")
+        self.menu_badge_dot.set_halign(Gtk.Align.END)
+        self.menu_badge_dot.set_valign(Gtk.Align.START)
+        self.menu_badge_dot.set_margin_top(4)
+        self.menu_badge_dot.set_margin_end(4)
+        self.menu_badge_dot.set_can_target(False)
+        self.menu_button_overlay.add_overlay(self.menu_badge_dot)
+
+        right_box.append(self.menu_button_overlay)
+        self._update_installation_badge_status()
+
+
 
         # Content Overlay wrapping view stack & OSD progress bar
         self.content_overlay = Gtk.Overlay()
@@ -1140,7 +1167,27 @@ class MainWindow(Adw.ApplicationWindow):
         self.progress_bar.set_visible(False)
         self.canvas.on_crop_changed()
 
+    def add_toast(self, toast: Adw.Toast):
+        self.toast_overlay.add_toast(toast)
+
+    def _update_installation_badge_status(self):
+        installed = is_app_installed()
+        show_badge = (not installed) or self.debug_mode
+        self.menu_badge_dot.set_visible(show_badge)
+
+    def _on_install_app_action_activated(self):
+        success = ensure_app_installed(force=True)
+        if success:
+            toast = Adw.Toast.new("Desktop application launcher installed!")
+            self.add_toast(toast)
+            self._update_installation_badge_status()
+        else:
+            toast = Adw.Toast.new("Installation failed.")
+            self.add_toast(toast)
+
+
     def close(self):
+
         # Save state and shutdown executors and close connections cleanly
         self._save_current_doc_state()
         self.executor.shutdown(wait=False, cancel_futures=True)
@@ -1158,6 +1205,13 @@ class MainWindow(Adw.ApplicationWindow):
         gap_size = 12 if getattr(self.settings, "page_gaps", True) else 0
 
         shared_css = """
+            .menu-badge-dot {
+                min-width: 8px;
+                min-height: 8px;
+                background-color: @accent_bg_color;
+                border-radius: 9999px;
+            }
+
             .zoom-floating-box {
                 background-color: rgba(255, 255, 255, 0.9);
                 border: 1px solid rgba(0, 0, 0, 0.15);

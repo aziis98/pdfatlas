@@ -81,79 +81,6 @@ class PDFViewerApplication(Adw.Application):
         Adw.Application.do_startup(self)
 
 
-def ensure_app_icons_installed():
-    """
-    Ensures application icon symlinks and .desktop files are installed in the user's
-    local share environment before GTK initializes. This allows GNOME Shell / Wayland
-    compositors to map window decorations and Alt-Tab switcher icons to assets/logo.png.
-    """
-    try:
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        logo_path = os.path.join(base_dir, "assets", "logo.png")
-        if not os.path.exists(logo_path):
-            return
-
-        icon_names = ["com.aziis98.pdfatlas.png"]
-        sizes = ["512x512", "scalable"]
-
-        user_home = os.path.expanduser("~")
-        for size in sizes:
-            apps_dir = os.path.join(user_home, ".local", "share", "icons", "hicolor", size, "apps")
-            os.makedirs(apps_dir, exist_ok=True)
-            for icon_name in icon_names:
-                target_symlink = os.path.join(apps_dir, icon_name)
-                if os.path.islink(target_symlink) or os.path.exists(target_symlink):
-                    try:
-                        if os.path.islink(target_symlink) and os.readlink(target_symlink) == logo_path:
-                            continue
-                        os.remove(target_symlink)
-                    except Exception:
-                        pass
-                try:
-                    os.symlink(logo_path, target_symlink)
-                except Exception:
-                    pass
-
-        # Register .desktop file for GNOME Shell window manager association
-        desktop_dir = os.path.join(user_home, ".local", "share", "applications")
-        os.makedirs(desktop_dir, exist_ok=True)
-        desktop_file = os.path.join(desktop_dir, "com.aziis98.pdfatlas.desktop")
-        desktop_contents = f"""[Desktop Entry]
-Name=PDF Atlas
-Comment=PDF Viewer with Portals & FTS5 Search
-Exec=env PYTHONPATH={base_dir} {sys.executable} -m pdf_viewer.main %f
-Path={base_dir}
-Icon=com.aziis98.pdfatlas
-Terminal=false
-Type=Application
-Categories=Office;Viewer;
-MimeType=application/pdf;
-StartupWMClass=com.aziis98.pdfatlas
-"""
-        should_write = True
-        if os.path.exists(desktop_file):
-            try:
-                with open(desktop_file, "r", encoding="utf-8") as f:
-                    if f.read() == desktop_contents:
-                        should_write = False
-            except Exception:
-                pass
-
-        if should_write:
-            with open(desktop_file, "w", encoding="utf-8") as f:
-                f.write(desktop_contents)
-            
-        import shutil
-        import subprocess
-        if shutil.which("update-desktop-database"):
-            subprocess.run(["update-desktop-database", desktop_dir], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if shutil.which("gtk-update-icon-cache"):
-            hicolor_dir = os.path.join(user_home, ".local", "share", "icons", "hicolor")
-            subprocess.run(["gtk-update-icon-cache", "-f", "-t", hicolor_dir], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
-
-
 def main():
     import argparse
     import os
@@ -164,8 +91,6 @@ def main():
     GLib.set_prgname("com.aziis98.pdfatlas")
     GLib.set_application_name("PDF Atlas")
 
-    # Automatically install application icon symlinks before loading GTK
-    ensure_app_icons_installed()
 
     parser = argparse.ArgumentParser(description="PDF Reader with Portals & FTS5 Search")
     parser.add_argument("pdf_path", nargs="?", help="Path to PDF file to open")
