@@ -7,17 +7,20 @@ class Pdfatlas < Formula
   version "0.1.0"
   license "AGPL-3.0-only"
 
-  depends_on "cmake" => :build
-  depends_on "pkg-config" => :build
   depends_on "cairo"
+  depends_on "cmake" => :build
   depends_on "gtk4"
   depends_on "libadwaita"
+  depends_on "pkg-config" => :build
   depends_on "pygobject3"
-  depends_on "python@3.12"
+  depends_on "python@3.14"
 
   def install
-    venv = virtualenv_create(libexec, "python3.12")
-    venv.pip_install_and_link buildpath
+    system "python3.14", "-m", "venv", libexec
+    system libexec/"bin/python", "-m", "pip", "install", "--upgrade", "pip"
+    system libexec/"bin/python", "-m", "pip", "install", *std_pip_args(build_isolation: true), "."
+
+    bin.install_symlink libexec/"bin/pdfatlas"
   end
 
   test do
