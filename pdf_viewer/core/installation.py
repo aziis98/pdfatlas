@@ -1,7 +1,10 @@
+import logging
 import os
 import shutil
 import subprocess
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def get_logo_path() -> str | None:
@@ -20,13 +23,18 @@ def is_app_installed() -> bool:
     """
     Check if application desktop entry, shortcut, system binary, or app bundle is installed.
     """
+    logger.debug("Checking application installation status...")
+
     # Check if running directly from an installed system binary (e.g. /usr/bin/pdfatlas)
     argv0 = sys.argv[0] if sys.argv else ""
     if argv0:
         base_name = os.path.basename(argv0)
+        logger.debug("Checking sys.argv[0]: '%s' (basename: '%s')", argv0, base_name)
         if base_name in ("pdfatlas", "pdfatlas-git"):
+            logger.info("Detected app running from system binary name '%s'", base_name)
             return True
         if argv0.startswith(("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/", "/usr/lib/")):
+            logger.info("Detected app running from system path '%s'", argv0)
             return True
 
     user_home = os.path.expanduser("~")
@@ -34,11 +42,20 @@ def is_app_installed() -> bool:
     if sys.platform == "darwin":
         user_app = os.path.join(user_home, "Applications", "PDF Atlas.app")
         sys_app = "/Applications/PDF Atlas.app"
-        return os.path.exists(user_app) or os.path.exists(sys_app)
+        user_exists = os.path.exists(user_app)
+        sys_exists = os.path.exists(sys_app)
+        logger.debug("macOS app bundle check: user_app='%s' (exists=%s), sys_app='%s' (exists=%s)", user_app, user_exists, sys_app, sys_exists)
+        if user_exists or sys_exists:
+            logger.info("Detected macOS app bundle")
+            return True
     elif sys.platform == "win32":
         appdata = os.environ.get("APPDATA", os.path.join(user_home, "AppData", "Roaming"))
         lnk_path = os.path.join(appdata, "Microsoft", "Windows", "Start Menu", "Programs", "PDF Atlas.lnk")
-        return os.path.exists(lnk_path)
+        lnk_exists = os.path.exists(lnk_path)
+        logger.debug("Windows shortcut check: '%s' (exists=%s)", lnk_path, lnk_exists)
+        if lnk_exists:
+            logger.info("Detected Windows Start Menu shortcut")
+            return True
     else:
         desktop_candidates = [
             os.path.join(user_home, ".local", "share", "applications", "com.aziis98.pdfatlas.desktop"),
@@ -47,7 +64,16 @@ def is_app_installed() -> bool:
             "/var/lib/flatpak/exports/share/applications/com.aziis98.pdfatlas.desktop",
             "/var/lib/snapd/desktop/applications/com.aziis98.pdfatlas.desktop",
         ]
-        return any(os.path.exists(p) for p in desktop_candidates)
+        for p in desktop_candidates:
+            exists = os.path.exists(p)
+            logger.debug("Desktop file check: '%s' (exists=%s)", p, exists)
+            if exists:
+                logger.info("Detected desktop file at '%s'", p)
+                return True
+
+    logger.info("Application is not detected as installed")
+    return False
+
 
 
 
