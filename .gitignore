@@ -11,11 +11,3 @@ wheels/
 
 # Local temporary folders
 *.local*
-
-# AUR build artifacts
-scripts/AUR/src/
-scripts/AUR/pkg/
-scripts/AUR/pdfatlas/
-scripts/AUR/*.whl
-scripts/AUR/*.tar.zst
-
