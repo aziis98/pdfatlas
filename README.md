@@ -136,6 +136,14 @@ pdfatlas 1706.03762
 pdfatlas https://arxiv.org/abs/2305.12345
 ```
 
+### Updating / Upgrading
+
+To update `pdfatlas` to the latest commit from GitHub:
+
+```bash
+uv tool install git+https://github.com/aziis98/pdfatlas.git --reinstall
+```
+
 ### Local Development
 
 To install dependencies and run locally:
