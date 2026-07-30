@@ -1,0 +1,3 @@
+[submodule "installers/archlinux/pdfatlas-git"]
+	path = installers/archlinux/pdfatlas-git
+	url = ssh://aur@aur.archlinux.org/pdfatlas-git.git

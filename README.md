@@ -139,6 +139,16 @@ On Ubuntu / Debian:
 sudo apt install libgirepository1.0-dev gir1.2-adw-1 libcairo2-dev cmake pkg-config
 ```
 
+On Arch Linux (AUR):
+```bash
+# Using paru
+paru -S pdfatlas-git
+
+# Or using yay
+yay -S pdfatlas-git
+```
+
+
 
 
 ---
