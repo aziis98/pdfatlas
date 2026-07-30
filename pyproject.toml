@@ -2,6 +2,7 @@
 name = "pdfatlas"
 version = "0.1.0"
 description = "PDF Reader with Search Portals and Auto-Crop"
+license = "AGPL-3.0-only"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

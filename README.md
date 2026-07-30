@@ -187,4 +187,5 @@ Issues and _smallish_ PRs are welcome. For larger features, prefer creating an i
 
 ## License
 
-MIT License.
+GNU Affero General Public License v3.0 (AGPL-3.0).
+
