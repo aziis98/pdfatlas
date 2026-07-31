@@ -88,6 +88,16 @@ This document records durable technical findings, architectural decisions, mathe
 - **Finding 2 (Redundant Character Parsing):** `get_query_match_rects()` calls `page.get_text("rawdict")` for every search result card, parsing full page character dictionaries 30+ times.
 - **Solution 2:** Implement a thread-safe LRU cache `_rawdict_cache` indexed by `(pdf_path, page_no)` so `rawdict` is parsed once per page and reused across all result card renders and search highlight passes.
 
+### 1.13. Freedesktop GTK Desktop Entry Icon Names: Dots vs Hyphens
+- **Status / Ongoing Finding:**
+  - **Empirical Observation:** Setting `Icon=com-aziis98-pdfatlas` (with hyphens) resolves the missing icon issue in GNOME Shell, whereas `Icon=com.aziis98.pdfatlas` (with dots) consistently fails to render the app icon even when matching filenames exist on disk. The exact root cause for why dots fail in GNOME Shell remains unclear.
+- **Technical Specification & Source Code References:**
+  - **Specification:** According to the [Freedesktop Icon Naming Specification](https://specifications.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html), periods (`.`) are explicitly listed as valid characters alongside hyphens (`-`), underscores (`_`), lowercase letters, and numbers.
+  - **Extension Stripping in GLib ([`gio/gdesktopappinfo.c#L2048-L2055`](https://gitlab.gnome.org/GNOME/glib/-/blob/main/gio/gdesktopappinfo.c#L2048-L2055)):** GLib parses `.desktop` files and strips extensions (`.png`, `.svg`, `.xpm`) via `strrchr` before creating a `GThemedIcon`.
+  - **Hyphen Fallbacks in GLib ([`gio/gthemedicon.c#L294-L313`](https://gitlab.gnome.org/GNOME/glib/-/blob/main/gio/gthemedicon.c#L294-L313)):** GLib's `GThemedIcon` uses hyphens (`'-'`) to build fallback resolution hierarchies (`com-aziis98-pdfatlas` $\rightarrow$ `com-aziis98` $\rightarrow$ `com`), while dots (`'.'`) do not generate fallback sub-names.
+  - **Icon Theme Suffix Resolution in GTK ([`gtk/gtkicontheme.c#L2775-L2787`](https://gitlab.gnome.org/GNOME/gtk/-/blob/main/gtk/gtkicontheme.c#L2775-L2787)):** GTK's `GtkIconTheme` matches filenames against specific extension suffixes (`.symbolic.png`, `.png`, `.svg`, `.xpm`).
+- **Application:** Adopted `Icon=com-aziis98-pdfatlas` (hyphenated) across `.desktop` entries, installer scripts (`PKGBUILD`), and Linux installation services (`pdf_viewer/core/installation.py`) as a pragmatic fix.
+
 ---
 
 ## 2. Rejected Approaches

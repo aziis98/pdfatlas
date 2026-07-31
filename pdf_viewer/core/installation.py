@@ -80,8 +80,8 @@ def is_app_installed() -> bool:
 def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool:
     """Install .desktop entry and icon theme symlinks for Linux desktop environments."""
     if logo_path:
-        icon_names = ["com.aziis98.pdfatlas.png"]
-        sizes = ["512x512", "scalable"]
+        icon_names = ["com-aziis98-pdfatlas.png", "com.aziis98.pdfatlas.png"]
+        sizes = ["512x512", "256x256", "128x128", "48x48"]
         for size in sizes:
             apps_dir = os.path.join(user_home, ".local", "share", "icons", "hicolor", size, "apps")
             os.makedirs(apps_dir, exist_ok=True)
@@ -99,6 +99,30 @@ def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool
                 except Exception:
                     pass
 
+        # Remove any legacy PNG from scalable/apps (scalable is reserved for SVG only in Freedesktop spec)
+        for legacy_name in ["com-aziis98-pdfatlas.png", "com.aziis98.pdfatlas.png"]:
+            legacy_scalable = os.path.join(user_home, ".local", "share", "icons", "hicolor", "scalable", "apps", legacy_name)
+            if os.path.exists(legacy_scalable) or os.path.islink(legacy_scalable):
+                try:
+                    os.remove(legacy_scalable)
+                except Exception:
+                    pass
+
+        # Also place pixmaps fallback symlink
+        pixmaps_dir = os.path.join(user_home, ".local", "share", "pixmaps")
+
+        os.makedirs(pixmaps_dir, exist_ok=True)
+        for pixmap_name in ["com-aziis98-pdfatlas.png", "com.aziis98.pdfatlas.png"]:
+            pixmap_target = os.path.join(pixmaps_dir, pixmap_name)
+            if not (os.path.islink(pixmap_target) and os.readlink(pixmap_target) == logo_path):
+                try:
+                    if os.path.exists(pixmap_target) or os.path.islink(pixmap_target):
+                        os.remove(pixmap_target)
+                    os.symlink(logo_path, pixmap_target)
+                except Exception:
+                    pass
+
+
     desktop_dir = os.path.join(user_home, ".local", "share", "applications")
     os.makedirs(desktop_dir, exist_ok=True)
     desktop_file = os.path.join(desktop_dir, "com.aziis98.pdfatlas.desktop")
@@ -107,7 +131,7 @@ Name=PDF Atlas
 Comment=PDF Viewer with Portals & FTS5 Search
 Exec=env PYTHONPATH={base_dir} {sys.executable} -m pdf_viewer.main %f
 Path={base_dir}
-Icon=com.aziis98.pdfatlas
+Icon=com-aziis98-pdfatlas
 Terminal=false
 Type=Application
 Categories=Office;Viewer;
@@ -237,11 +261,35 @@ exec "{sys.executable}" -m pdf_viewer.main "$@"
     return True
 
 
+def is_system_installed() -> bool:
+    """Check if application is installed system-wide via package manager or system binary."""
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0:
+        base_name = os.path.basename(argv0)
+        if base_name in ("pdfatlas", "pdfatlas-git"):
+            return True
+        if argv0.startswith(("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/", "/usr/lib/")):
+            return True
+
+    system_desktop_candidates = [
+        "/usr/share/applications/com.aziis98.pdfatlas.desktop",
+        "/usr/local/share/applications/com.aziis98.pdfatlas.desktop",
+        "/var/lib/flatpak/exports/share/applications/com.aziis98.pdfatlas.desktop",
+        "/var/lib/snapd/desktop/applications/com.aziis98.pdfatlas.desktop",
+        "/Applications/PDF Atlas.app",
+    ]
+    return any(os.path.exists(p) for p in system_desktop_candidates)
+
+
 def ensure_app_installed(force: bool = False) -> bool:
     """
     Ensures application desktop entries, shortcuts, or app bundles are installed.
     Returns True if installation succeeded or was already up to date.
     """
+    if is_system_installed():
+        logger.info("System-wide installation detected. Skipping local user folder copying.")
+        return True
+
     if not force and is_app_installed():
         return True
 
@@ -258,3 +306,4 @@ def ensure_app_installed(force: bool = False) -> bool:
             return _install_linux(base_dir, user_home, logo_path)
     except Exception:
         return False
+

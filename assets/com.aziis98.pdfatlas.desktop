@@ -2,7 +2,7 @@
 Name=PDF Atlas
 Comment=PDF Viewer with Portals & FTS5 Search
 Exec=pdfatlas %f
-Icon=com.aziis98.pdfatlas
+Icon=com-aziis98-pdfatlas
 Terminal=false
 Type=Application
 Categories=Office;Viewer;

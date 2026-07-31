@@ -1091,7 +1091,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_about_action_activated(self, action=None, param=None):
         about = Adw.AboutDialog(
             application_name="PDF Atlas",
-            application_icon="logo",
+            application_icon=IconThemeManager.get_app_icon_name(),
             developer_name="PDF Atlas Team",
             version="1.0.0",
             comments="High-performance PDF document viewer with spatial navigator and FTS5 search.",

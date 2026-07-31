@@ -2,13 +2,19 @@ import os
 import sys
 
 import gi
+from gi.repository import GLib
+
+# Set process name & application ID before GTK initializes for Wayland window matching
+GLib.set_prgname("com.aziis98.pdfatlas")
+GLib.set_application_name("PDF Atlas")
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib
+from gi.repository import Adw, Gio
 
 from .core.pdf_source import PdfSource
 from .ui.window import MainWindow
+
 
 
 class PDFViewerApplication(Adw.Application):
@@ -87,12 +93,8 @@ def main():
     import shutil
     import subprocess
 
-    # Set process name & application ID before GTK initializes for Wayland window matching
-    GLib.set_prgname("com.aziis98.pdfatlas")
-    GLib.set_application_name("PDF Atlas")
-
-
     parser = argparse.ArgumentParser(description="PDF Reader with Portals & FTS5 Search")
+
     parser.add_argument("pdf_path", nargs="?", help="Path to PDF file to open")
     parser.add_argument("--backend", choices=["cairo", "opengl"], default="opengl", help="Rendering backend")
     parser.add_argument("--state", default=None, help="Initial application state as a JSON string")
