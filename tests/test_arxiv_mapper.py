@@ -1,5 +1,5 @@
 import pytest
-from pdf_viewer.core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
+from pdfatlas.core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
 
 
 @pytest.mark.parametrize(

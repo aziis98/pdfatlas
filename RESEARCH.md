@@ -10,7 +10,7 @@ This document records durable technical findings, architectural decisions, mathe
 - **Finding:** PyMuPDF `link.get("to")` target points (`Point(x, y)`) use PDF native **bottom-up coordinates** where $0.0$ is at the bottom of the page and `page_rect.height` is at the top.
 - **Top-Down Conversion:**
   $$\text{target\_y\_in\_page} = \max(0.0, \text{page\_rect.height} - \text{to\_point.y})$$
-- **Application:** Used in `_on_link_clicked()` and `_show_link_portal_preview()` in [`pdf_viewer/ui/window.py`](pdf_viewer/ui/window.py) to position internal jump targets and center portal preview cards accurately.
+- **Application:** Used in `_on_link_clicked()` and `_show_link_portal_preview()` in [`pdfatlas/ui/window.py`](pdfatlas/ui/window.py) to position internal jump targets and center portal preview cards accurately.
 
 ### 1.2. 1:1 Pixel-Perfect MuPDF Rasterization & Alpha Blending
 - **Finding 1 (Alpha Edge Fringing):** Rendering PDF pages or portal snippets with `alpha=True` returns straight (un-premultiplied) alpha channels. When painted in Cairo (`cairo.FORMAT_ARGB32`) or blended in OpenGL (`glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)`), straight alpha causes dark, fuzzy character edge fringing.
@@ -66,13 +66,13 @@ This document records durable technical findings, architectural decisions, mathe
 ### 1.9. Viewport vs Content Width Offset Invariant at High Zoom (>200%)
 - **Finding:** When zooming past $200\%$, the page layout width `dw` (e.g. $1600\text{px}$) exceeds the window width `viewport_w` (e.g. $800\text{px}$). `canvas.get_width()` returns $1600\text{px}$ (the expanded GTK container allocation width), forcing $(1600 - 1600) / 2.0 = 0.0$. However, OpenGL and Cairo center pages relative to `viewport_w = 800px`, positioning the page's left edge at a **negative offset** $\text{page\_x0} = \frac{800 - 1600}{2.0} = -400\text{px}$.
 - **Solution:** 
-  1. `_screen_to_pdf_point`, `_hit_test_link`, and `get_link_screen_rect` in [`pdf_viewer/ui/canvas.py`](pdf_viewer/ui/canvas.py) use $\text{viewport\_w} = \text{self.hadjustment.get\_page\_size()}$ (the visible window width) without `max(0.0, ...)` clamping.
-  2. `GLCanvas.on_draw()` in [`pdf_viewer/ui/gl_canvas.py`](pdf_viewer/ui/gl_canvas.py) passes `x_min = canvas.hadjustment.get_value()` into `u_offset` (`glUniform2f(u_offset, x_min, y_min)`), ensuring horizontal scrolling shifts all OpenGL page quads and text overlays in 1:1 sync with GTK scrolling.
+  1. `_screen_to_pdf_point`, `_hit_test_link`, and `get_link_screen_rect` in [`pdfatlas/ui/canvas.py`](pdfatlas/ui/canvas.py) use $\text{viewport\_w} = \text{self.hadjustment.get\_page\_size()}$ (the visible window width) without `max(0.0, ...)` clamping.
+  2. `GLCanvas.on_draw()` in [`pdfatlas/ui/gl_canvas.py`](pdfatlas/ui/gl_canvas.py) passes `x_min = canvas.hadjustment.get_value()` into `u_offset` (`glUniform2f(u_offset, x_min, y_min)`), ensuring horizontal scrolling shifts all OpenGL page quads and text overlays in 1:1 sync with GTK scrolling.
 
 ### 1.10. arXiv TeX Diff & Word-Level Sourcemapping
 - **Finding:** arXiv tarballs contain raw LaTeX source code divided across multiple `.tex` files with custom macro imports (`\input`, `\include`, `\subfile`). arXiv identifiers follow two main formats: modern IDs (`YYMM.NNNN(N)`) and pre-2007 legacy IDs (`category/YYMMNNN` or `category.subcategory/YYMMNNN`, e.g., `hep-ph/9504271`, `math.DG/0101001`).
 - **URL & Path Resolution:** Legacy arXiv IDs include forward slashes (`/`). Parsing regexes (`ARXIV_ID_RE`) and cache directory path resolution (`arxiv_id_from_path`) must explicitly match both `(category)(.subcategory)?/YYMMNNN` and `YYMM.NNNN`. Legacy endpoints (`/pdf/hep-ph/9504271.pdf`, `/e-print/hep-ph/9504271`, and arXiv API query `?id_list=hep-ph/9504271`) mirror modern endpoint behaviors seamlessly.
-- **Inlining & Tokenization:** `ArxivDiffMapper` in [`pdf_viewer/core/arxiv_mapper.py`](pdf_viewer/core/arxiv_mapper.py) recursively inlines TeX files, strips TeX comments (`%...`), tokenizes non-whitespace words, and extracts PyMuPDF native `words` (`page.get_text("words")`).
+- **Inlining & Tokenization:** `ArxivDiffMapper` in [`pdfatlas/core/arxiv_mapper.py`](pdfatlas/core/arxiv_mapper.py) recursively inlines TeX files, strips TeX comments (`%...`), tokenizes non-whitespace words, and extracts PyMuPDF native `words` (`page.get_text("words")`).
 - **Diff Alignment:** Running `difflib.SequenceMatcher` between PDF words and TeX words generates a 1-to-1 mapping $(i_{\text{pdf}} \leftrightarrow i_{\text{tex}})$. Selecting text or pressing `Ctrl+C` maps the selected word range directly to raw LaTeX snippets.
 
 ### 1.11. Pre-Baking GTK Card Decorations onto `cairo.ImageSurface` in Background Threads
@@ -96,7 +96,7 @@ This document records durable technical findings, architectural decisions, mathe
   - **Extension Stripping in GLib ([`gio/gdesktopappinfo.c#L2048-L2055`](https://gitlab.gnome.org/GNOME/glib/-/blob/main/gio/gdesktopappinfo.c#L2048-L2055)):** GLib parses `.desktop` files and strips extensions (`.png`, `.svg`, `.xpm`) via `strrchr` before creating a `GThemedIcon`.
   - **Hyphen Fallbacks in GLib ([`gio/gthemedicon.c#L294-L313`](https://gitlab.gnome.org/GNOME/glib/-/blob/main/gio/gthemedicon.c#L294-L313)):** GLib's `GThemedIcon` uses hyphens (`'-'`) to build fallback resolution hierarchies (`com-aziis98-pdfatlas` $\rightarrow$ `com-aziis98` $\rightarrow$ `com`), while dots (`'.'`) do not generate fallback sub-names.
   - **Icon Theme Suffix Resolution in GTK ([`gtk/gtkicontheme.c#L2775-L2787`](https://gitlab.gnome.org/GNOME/gtk/-/blob/main/gtk/gtkicontheme.c#L2775-L2787)):** GTK's `GtkIconTheme` matches filenames against specific extension suffixes (`.symbolic.png`, `.png`, `.svg`, `.xpm`).
-- **Application:** Adopted `Icon=com-aziis98-pdfatlas` (hyphenated) across `.desktop` entries, installer scripts (`PKGBUILD`), and Linux installation services (`pdf_viewer/core/installation.py`) as a pragmatic fix.
+- **Application:** Adopted `Icon=com-aziis98-pdfatlas` (hyphenated) across `.desktop` entries, installer scripts (`PKGBUILD`), and Linux installation services (`pdfatlas/core/installation.py`) as a pragmatic fix.
 
 ---
 

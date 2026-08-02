@@ -129,7 +129,7 @@ def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool
     desktop_contents = f"""[Desktop Entry]
 Name=PDF Atlas
 Comment=PDF Viewer with Portals & FTS5 Search
-Exec=env PYTHONPATH={base_dir} {sys.executable} -m pdf_viewer.main %f
+Exec=env PYTHONPATH={base_dir} {sys.executable} -m pdfatlas.main %f
 Path={base_dir}
 Icon=com-aziis98-pdfatlas
 Terminal=false
@@ -171,7 +171,7 @@ def _install_windows(base_dir: str, user_home: str, logo_path: str | None) -> bo
 $WshShell = New-Object -comObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("{lnk_path.replace('\\', '\\\\')}")
 $Shortcut.TargetPath = "{sys.executable.replace('\\', '\\\\')}"
-$Shortcut.Arguments = "-m pdf_viewer.main"
+$Shortcut.Arguments = "-m pdfatlas.main"
 $Shortcut.WorkingDirectory = "{base_dir.replace('\\', '\\\\')}"
 $Shortcut.Description = "PDF Viewer with Portals & FTS5 Search"
 """
@@ -249,7 +249,7 @@ def _install_macos(base_dir: str, user_home: str, logo_path: str | None) -> bool
     exec_path = os.path.join(macos_dir, "pdfatlas")
     exec_contents = f"""#!/bin/bash
 export PYTHONPATH="{base_dir}"
-exec "{sys.executable}" -m pdf_viewer.main "$@"
+exec "{sys.executable}" -m pdfatlas.main "$@"
 """
     with open(exec_path, "w", encoding="utf-8") as f:
         f.write(exec_contents)

@@ -42,7 +42,7 @@ Ensure both commands report **0 errors**.
 
 ```
 pdfatlas/
-├── pdf_viewer/              # Main application package
+├── pdfatlas/                # Main application package
 │   ├── main.py              # Adw.Application entry point & CLI parser
 │   ├── core/                # Core non-UI logic
 │   │   ├── cache.py         # RenderCache & MiniMapCache

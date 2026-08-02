@@ -2,7 +2,7 @@ import os
 import sys
 import tempfile
 
-from pdf_viewer.core.installation import (
+from pdfatlas.core.installation import (
     _install_linux,
     _install_macos,
     _install_windows,

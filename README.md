@@ -73,7 +73,7 @@ Highlight text in any document to reveal the bottom context toolbar:
 
 ```
 pdfatlas/
-├── pdf_viewer/              # Main application package
+├── pdfatlas/                # Main application package
 │   ├── __init__.py          # Package initialization
 │   ├── main.py              # Application entry point (Adw.Application & CLI parser)
 │   ├── core/                # Core non-UI logic and indexing engines

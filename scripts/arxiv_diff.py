@@ -28,7 +28,7 @@ ARXIV_CACHE_ROOT = Path(
 ARXIV_PDF_URL = "https://arxiv.org/pdf/{}.pdf"
 ARXIV_EPRINT_URL = "https://arxiv.org/e-print/{}"
 
-from pdf_viewer.core.arxiv_mapper import extract_arxiv_id_from_raw as extract_arxiv_id
+from pdfatlas.core.arxiv_mapper import extract_arxiv_id_from_raw as extract_arxiv_id
 
 BOLD = "\033[1m"
 DIM = "\033[2m"
