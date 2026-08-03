@@ -1,6 +1,6 @@
 
 import gi
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -10,9 +10,7 @@ from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
 from ..core.document import DocumentModel
 from ..core.text_selection import TextSelection
-
-if TYPE_CHECKING:
-    from .gl_canvas import GLCanvas
+from .gl_canvas import GLCanvas
 
 
 class PageContainer(Gtk.Box):
@@ -45,15 +43,20 @@ class PageContainer(Gtk.Box):
 
 
 
-class PDFCanvas(Gtk.Box):
+class PDFCanvas(Gtk.Overlay):
     """
-    Virtual list viewport wrapper that holds individual page layout blocks.
-    Acts as a vertical Gtk.Box to avoid massive texture allocation failures on GTK4.
+    Self-contained document display widget.
+
+    Owns the OpenGL background layer (GLCanvas) and the Gtk.ScrolledWindow
+    that hosts the continuous-scroll page layout. The overlay paints GL page
+    textures behind the transparent GTK layout boxes so both layers stay
+    pixel-aligned.
     """
 
     def __init__(self):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self.set_valign(Gtk.Align.START)
+        super().__init__()
+        self.set_hexpand(True)
+        self.set_vexpand(True)
         self.set_focusable(True)
         self.set_focus_on_click(True)
         self.add_css_class("pdf-canvas")
@@ -62,7 +65,6 @@ class PDFCanvas(Gtk.Box):
         self.cache = None
         self.render_worker = None
         self.crop_analyzer = None
-        self.gl_canvas: GLCanvas | None = None
         self.debug_mode: bool = False
         self.settings = None
 
@@ -73,9 +75,8 @@ class PDFCanvas(Gtk.Box):
         self.containers = []
         self.in_flight = set()
         self.page_layout = []
-        self.vadjustment: Gtk.Adjustment | None = None
-        self.hadjustment: Gtk.Adjustment | None = None
-
+        self.vadjustment: Gtk.Adjustment
+        self.hadjustment: Gtk.Adjustment
 
         # Interactive link state
         self.hovered_link: tuple[int, dict] | None = None
@@ -88,22 +89,79 @@ class PDFCanvas(Gtk.Box):
         self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
         self._pending_drag_start: tuple[int, int] | None = None
 
-
-
-
-
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
         self.screen_physical_dpi = 192.0
-
-        self.set_focusable(False)
 
         # Pinch-to-zoom state
         self.is_pinching = False
         self.pinch_center_x: float = 0.0
         self.pinch_center_y: float = 0.0
 
+        # Base layer: OpenGL hardware-accelerated background
+        self.gl_canvas = GLCanvas(canvas_layout_provider=self)
+        self.gl_canvas.set_hexpand(True)
+        self.gl_canvas.set_vexpand(True)
+        self.set_child(self.gl_canvas)
+
+        # Top layer: transparent scroll container holding the page layout
+        self.scrolled_window = Gtk.ScrolledWindow()
+        self.scrolled_window.set_hexpand(True)
+        self.scrolled_window.set_vexpand(True)
+        self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.ALWAYS)
+        self.add_overlay(self.scrolled_window)
+
+        self._layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.scrolled_window.set_child(self._layout)
+
+        # Internal scroll wiring: adjustments feed visibility / render scheduling
+        self.hadjustment = self.scrolled_window.get_hadjustment()
+        self.vadjustment = self.scrolled_window.get_vadjustment()
+        self.vadjustment.connect("value-changed", self._on_scroll)
+        self.hadjustment.connect("value-changed", self._on_scroll)
+
+        self.set_focusable(False)
+
+        self._setup_scroll_input_controllers()
         self._setup_link_controllers()
+
+    def _setup_scroll_input_controllers(self):
+        """Attach full-viewport input controllers to the scroll container."""
+        scroll_click = Gtk.GestureClick.new()
+        scroll_click.set_button(1)
+        scroll_click.connect("pressed", self._on_scrolled_window_click)
+        self.scrolled_window.add_controller(scroll_click)
+
+        scroll_drag = Gtk.GestureDrag.new()
+        scroll_drag.set_button(1)
+        scroll_drag.connect("drag-begin", self.on_drag_begin)
+        scroll_drag.connect("drag-update", self.on_drag_update)
+        scroll_drag.connect("drag-end", self.on_drag_end)
+        self.scrolled_window.add_controller(scroll_drag)
+
+        scroll_motion = Gtk.EventControllerMotion.new()
+        scroll_motion.connect("motion", self._on_motion)
+        scroll_motion.connect("leave", self._on_leave)
+        self.scrolled_window.add_controller(scroll_motion)
+
+    def _on_scrolled_window_click(self, gesture, n_press, x, y):
+        self._on_click(gesture, n_press, x, y)
+
+    def viewport_width(self) -> int:
+        """Width of the visible document viewport, in device pixels."""
+        return self.scrolled_window.get_width()
+
+    def viewport_height(self) -> int:
+        """Height of the visible document viewport, in device pixels."""
+        return self.scrolled_window.get_height()
+
+    def set_kinetic_scrolling(self, enabled: bool) -> None:
+        """Enable or disable kinetic (inertial) scrolling of the document."""
+        self.scrolled_window.set_kinetic_scrolling(enabled)
+
+    def texture_bytes(self) -> int:
+        """Total bytes currently held by the OpenGL texture cache."""
+        return self.gl_canvas.texture_bytes()
 
     def _setup_link_controllers(self):
         motion_controller = Gtk.EventControllerMotion.new()
@@ -322,8 +380,7 @@ class PDFCanvas(Gtk.Box):
         return None
 
     def queue_draw_overlays(self, reason=""):
-        if self.gl_canvas:
-            self.gl_canvas.queue_draw()
+        self.gl_canvas.queue_draw()
 
     def _on_motion(self, controller, x, y):
         hit = self._hit_test_link(x, y)
@@ -427,22 +484,19 @@ class PDFCanvas(Gtk.Box):
         self.text_selection = TextSelection(doc_model) if doc_model else None
 
         # Remove old containers
-        child = self.get_first_child()
+        child = self._layout.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
-            self.remove(child)
+            self._layout.remove(child)
             child = nxt
 
         self.containers = []
         self.page_layout = []
         self.update_layout()
 
-    def set_vadjustment(self, vadjustment: Gtk.Adjustment):
-        self.vadjustment = vadjustment
-        self.vadjustment.connect("value-changed", self._on_scroll)
-
     def _on_scroll(self, adj):
         self._update_visibility()
+        self.gl_canvas.queue_draw()
 
     def set_zoom(self, zoom: float):
         self.zoom = zoom
@@ -466,8 +520,7 @@ class PDFCanvas(Gtk.Box):
 
     def set_highlighted_block(self, page_index: int, bbox: tuple | None):
         self.highlighted_block = (page_index, bbox) if bbox is not None else None
-        if self.gl_canvas:
-            self.gl_canvas.queue_draw()
+        self.gl_canvas.queue_draw()
 
     def update_layout(self):
         if not self.doc_model:
@@ -481,22 +534,22 @@ class PDFCanvas(Gtk.Box):
             self.page_gap = 12
 
         page_count = self.doc_model.page_count
-        self.set_spacing(self.page_gap)
-        self.set_margin_top(int(self.page_gap))
-        self.set_margin_bottom(int(self.page_gap))
+        self._layout.set_spacing(self.page_gap)
+        self._layout.set_margin_top(int(self.page_gap))
+        self._layout.set_margin_bottom(int(self.page_gap))
 
         # Rebuild/recreate container widgets if size differs
         if len(self.containers) != page_count:
-            child = self.get_first_child()
+            child = self._layout.get_first_child()
             while child is not None:
                 nxt = child.get_next_sibling()
-                self.remove(child)
+                self._layout.remove(child)
                 child = nxt
 
             self.containers = []
             for i in range(page_count):
                 container = PageContainer(i)
-                self.append(container)
+                self._layout.append(container)
                 self.containers.append(container)
 
         current_y = float(self.page_gap)
@@ -632,5 +685,4 @@ class PDFCanvas(Gtk.Box):
     def _on_render_complete(self, page_index, zoom_key, scale_factor, crop_key):
         self.in_flight.discard((page_index, zoom_key, scale_factor, crop_key))
         # Always redraw — GL drawing code uses get_best to pick the best available surface
-        if self.gl_canvas:
-            self.gl_canvas.queue_draw()
+        self.gl_canvas.queue_draw()

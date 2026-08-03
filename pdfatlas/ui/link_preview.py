@@ -88,8 +88,8 @@ class LinkPreviewManager:
             else (target_rect.height / 2.0)
         )
 
-        viewport_w = max(300.0, float(self.win.scrolled_window.get_width()))
-        viewport_h = max(300.0, float(self.win.scrolled_window.get_height()))
+        viewport_w = max(300.0, float(self.win.canvas.viewport_width()))
+        viewport_h = max(300.0, float(self.win.canvas.viewport_height()))
 
         scale_factor = float(self.win.canvas.get_scale_factor())
         scale = self.win.zoom * self.win.canvas.dpi_scale_factor
@@ -123,7 +123,7 @@ class LinkPreviewManager:
 
         # Vertical positioning relative to link position using link_center_y
         link_rect = (
-            self.win.canvas.get_link_screen_rect(source_page_index, link, self.win.overlay)
+            self.win.canvas.get_link_screen_rect(source_page_index, link)
             if source_page_index is not None
             else None
         )

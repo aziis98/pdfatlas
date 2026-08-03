@@ -28,7 +28,7 @@ from ..core.settings import CropSettings
 from ..core.pdf_source import PdfSource, RecentFilesManager
 from .arxiv_dialog import ArxivDialog
 from .canvas import PDFCanvas
-from .gl_canvas import GLCanvas
+
 from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
 from .services import IconThemeManager, ScreenshotService
@@ -295,42 +295,13 @@ class MainWindow(Adw.ApplicationWindow):
                 display, self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
 
-        # Child 1: Document View Setup (always using Gtk.Overlay to overlay floating zoom controls)
-        self.scrolled_window = Gtk.ScrolledWindow()
-        self.scrolled_window.set_hexpand(True)
-        self.scrolled_window.set_vexpand(True)
-        self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.ALWAYS)
-
-        # ScrolledWindow Mouse Event Controllers (100% coverage for hover & link clicks)
-        scroll_click = Gtk.GestureClick.new()
-        scroll_click.set_button(1)
-        scroll_click.connect("pressed", lambda ctrl, n_press, x, y: self._on_scrolled_window_click(n_press, x, y))
-        self.scrolled_window.add_controller(scroll_click)
-
-        # Text selection drag gesture on the scrolled_window (avoids conflict with canvas GestureClick)
-        scroll_drag = Gtk.GestureDrag.new()
-        scroll_drag.set_button(1)
-        scroll_drag.connect("drag-begin", lambda g, x, y: self.canvas.on_drag_begin(g, x, y))
-        scroll_drag.connect("drag-update", lambda g, ox, oy: self.canvas.on_drag_update(g, ox, oy))
-        scroll_drag.connect("drag-end", lambda g, ox, oy: self.canvas.on_drag_end(g, ox, oy))
-        self.scrolled_window.add_controller(scroll_drag)
-
-        scroll_motion = Gtk.EventControllerMotion.new()
-        scroll_motion.connect("motion", lambda ctrl, x, y: self.canvas._on_motion(ctrl, x, y))
-        scroll_motion.connect("leave", lambda ctrl: self.canvas._on_leave(ctrl))
-        self.scrolled_window.add_controller(scroll_motion)
-
-        # Inner Canvas Container
+        # Child 1: Document View Setup - the canvas owns its GL + scroll layers
         self.canvas = PDFCanvas()
         self.canvas.debug_mode = self.debug_mode
-        self.canvas.hadjustment = self.scrolled_window.get_hadjustment()
-        self.canvas.vadjustment = self.scrolled_window.get_vadjustment()
-
 
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_page_hovered = self._on_page_hovered
         self.canvas.on_selection_changed = self._update_selection_toolbar
-        self.scrolled_window.set_child(self.canvas)
 
         # Build floating zoom controls box, link preview box, and bottom selection toolbar
         self._build_floating_zoom_controls()
@@ -341,23 +312,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.link_preview_manager = LinkPreviewManager(self)
         self.canvas.on_link_hovered = self.link_preview_manager.on_link_hovered
 
-        self.overlay = Gtk.Overlay()
-        self.overlay.set_hexpand(True)
-        self.overlay.set_vexpand(True)
-
-        self.gl_canvas = GLCanvas(canvas_layout_provider=self.canvas)
-        self.gl_canvas.set_hexpand(True)
-        self.gl_canvas.set_vexpand(True)
-
-        self.overlay.set_child(self.gl_canvas)  # base layer (OpenGL)
-        self.overlay.add_overlay(self.scrolled_window)  # middle layer (GTK scroll container)
-
-        self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
-        self.overlay.add_overlay(self.link_preview_box)  # top layer (Floating link preview label)
-        self.overlay.add_overlay(self.link_preview_manager.portal_card)  # top layer (Floating link portal card)
+        # Floating overlay widgets (top layers) attached onto the document canvas
+        self.canvas.add_overlay(self.zoom_floating_box)  # Floating zoom controls
+        self.canvas.add_overlay(self.link_preview_box)  # Floating link preview label
+        self.canvas.add_overlay(self.link_preview_manager.portal_card)  # Floating link portal card
         if self.debug_mode:
             self._build_debug_cache_box()
-        self.stack.add_named(self.overlay, "document-view")
+        self.stack.add_named(self.canvas, "document-view")
 
         # Child 2: Search View Setup
         self.search_scrolled = Gtk.ScrolledWindow()
@@ -369,17 +330,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_scrolled.set_child(self.results_box)
         self.stack.add_named(self.search_scrolled, "search-view")
 
-        # Adjustments wiring
-        self.vadjustment = self.scrolled_window.get_vadjustment()
-        self.hadjustment = self.scrolled_window.get_hadjustment()
-        self.canvas.set_vadjustment(self.vadjustment)
-
-        self.canvas.gl_canvas = self.gl_canvas
-        # Repaint the GL background layer on scroll
-        def _on_scroll_redraw(adj):
-            if self.gl_canvas:
-                self.gl_canvas.queue_draw()
-        self.vadjustment.connect("value-changed", _on_scroll_redraw)
+        # Adjustments wiring (owned by the canvas)
+        self.vadjustment = self.canvas.vadjustment
+        self.hadjustment = self.canvas.hadjustment
 
         # Connect vertical scroll adjustment to track current page
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
@@ -416,7 +369,8 @@ class MainWindow(Adw.ApplicationWindow):
         if success:
             self.canvas.pinch_center_x = center_x
             self.canvas.pinch_center_y = center_y
-            self.set_zoom_level(new_zoom, center_x=center_x, center_y=center_y)
+            # gesture coords are viewport-relative; convert to document coords for anchoring
+            self.set_zoom_level(new_zoom, center_x=center_x, center_y=center_y + self.vadjustment.get_value())
         else:
             self.set_zoom_level(new_zoom)
 
@@ -429,9 +383,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.grab_focus()
         if self.canvas.highlighted_block is not None:
             self.canvas.set_highlighted_block(0, None)
-            self.canvas.queue_draw()
-            if hasattr(self, "gl_canvas") and self.gl_canvas:
-                self.gl_canvas.queue_draw()
+            self.canvas.queue_draw_overlays("clear-highlight")
 
     def _on_canvas_motion(self, controller, x, y):
         self.pointer_x = x
@@ -443,7 +395,8 @@ class MainWindow(Adw.ApplicationWindow):
             factor = 1.2 if dy < 0 else (1.0 / 1.2)
             px = getattr(self, "pointer_x", 0.0)
             py = getattr(self, "pointer_y", 0.0)
-            self.set_zoom_level(self.zoom * factor, center_x=px, center_y=py)
+            # pointer coords are viewport-relative; convert to document coords for anchoring
+            self.set_zoom_level(self.zoom * factor, center_x=px, center_y=py + self.vadjustment.get_value())
             return True
         return False
 
@@ -945,15 +898,9 @@ class MainWindow(Adw.ApplicationWindow):
                 return i
         return 0
 
-    def _on_scrolled_window_click(self, n_press: int, x: float, y: float):
-        self.set_focus(None)
-        if hasattr(self, "canvas") and self.canvas:
-            self.canvas._on_click(None, n_press, x, y)
-
     def _queue_canvas_redraw(self):
         """Redraws the OpenGL background canvas."""
-        if self.gl_canvas:
-            self.gl_canvas.queue_draw()
+        self.canvas.queue_draw_overlays("redraw")
 
     def page_step(self, forward: bool):
         current_idx = self.get_current_page_index()
@@ -1364,11 +1311,8 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         entries = self.render_cache.total_entries()
         cache_mb = self.render_cache.total_bytes() / (1024 * 1024)
-        if self.gl_canvas:
-            tex_mb = self.gl_canvas.texture_bytes() / (1024 * 1024)
-            text = f"CACHE:    {entries} entries, {cache_mb:.1f}MB\nTEXTURES: {tex_mb:.1f}MB GPU"
-        else:
-            text = f"CACHE:    {entries} entries, {cache_mb:.1f}MB"
+        tex_mb = self.canvas.texture_bytes() / (1024 * 1024)
+        text = f"CACHE:    {entries} entries, {cache_mb:.1f}MB\nTEXTURES: {tex_mb:.1f}MB GPU"
         self.debug_cache_label.set_text(text)
         return True
 

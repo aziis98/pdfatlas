@@ -37,7 +37,7 @@ class NavigationController:
             self.win.vadjustment.set_value(target_y)
 
         self.win.page_input.set_text(str(page_index + 1))
-        self.win.canvas.queue_draw()
+        self.win.canvas.queue_draw_overlays("jump-to-page")
 
     def set_zoom_level(
         self,
@@ -62,7 +62,7 @@ class NavigationController:
         new_zoom = max(0.25, min(50.0, new_zoom))
 
         # Cap zoom: at max, only ~25% of page width visible in viewport
-        viewport_w = float(self.win.scrolled_window.get_width())
+        viewport_w = float(self.win.canvas.viewport_width())
         if viewport_w > 50 and self.win.doc_model:
             max_page_w = 0.0
             for i in range(self.win.doc_model.page_count):
@@ -81,8 +81,8 @@ class NavigationController:
             return
 
         # Halt active GTK 4 kinetic scrolling animations
-        self.win.scrolled_window.set_kinetic_scrolling(False)
-        self.win.scrolled_window.set_kinetic_scrolling(True)
+        self.win.canvas.set_kinetic_scrolling(False)
+        self.win.canvas.set_kinetic_scrolling(True)
 
         val_v = self.win.vadjustment.get_value()
         viewport_h = self.win.vadjustment.get_page_size()
@@ -134,7 +134,7 @@ class NavigationController:
     def zoom_fit_width(self):
         if not self.win.doc_model:
             return
-        viewport_w = float(self.win.scrolled_window.get_width())
+        viewport_w = float(self.win.canvas.viewport_width())
         if viewport_w <= 100:
             return
 
@@ -155,8 +155,8 @@ class NavigationController:
     def zoom_fit_page(self):
         if not self.win.doc_model:
             return
-        viewport_w = float(self.win.scrolled_window.get_width())
-        viewport_h = float(self.win.scrolled_window.get_height())
+        viewport_w = float(self.win.canvas.viewport_width())
+        viewport_h = float(self.win.canvas.viewport_height())
         if viewport_w <= 100 or viewport_h <= 100:
             return
 
