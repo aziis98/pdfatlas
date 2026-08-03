@@ -99,15 +99,6 @@ def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool
                 except Exception:
                     pass
 
-        # Remove any legacy PNG from scalable/apps (scalable is reserved for SVG only in Freedesktop spec)
-        for legacy_name in ["com-aziis98-pdfatlas.png", "com.aziis98.pdfatlas.png"]:
-            legacy_scalable = os.path.join(user_home, ".local", "share", "icons", "hicolor", "scalable", "apps", legacy_name)
-            if os.path.exists(legacy_scalable) or os.path.islink(legacy_scalable):
-                try:
-                    os.remove(legacy_scalable)
-                except Exception:
-                    pass
-
         # Also place pixmaps fallback symlink
         pixmaps_dir = os.path.join(user_home, ".local", "share", "pixmaps")
 
