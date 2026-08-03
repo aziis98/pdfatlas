@@ -511,12 +511,48 @@ class PDFCanvas(Gtk.Overlay):
         self.queue_draw_overlays("set_zoom")
 
     def on_crop_changed(self):
+        anchor = self._anchor_layout_point()
         self.in_flight.clear()
         if self.render_worker:
             self.render_worker.clear_canvas_render_jobs()
         if self.cache:
             self.cache.clear()
         self.update_layout()
+        self._restore_anchor(anchor)
+        self.queue_draw_overlays("crop-changed")
+
+    def _anchor_layout_point(self) -> tuple[int, float] | None:
+        """Capture the (page_index, pdf_y) point currently at viewport center."""
+        if not self.page_layout or self.vadjustment is None:
+            return None
+        point_y = self.vadjustment.get_value() + self.vadjustment.get_page_size() * 0.5
+        scale = self.zoom * self.dpi_scale_factor
+        for i, (y0, _dw, dh, crop) in enumerate(self.page_layout):
+            if y0 + dh >= point_y - 1e-6:
+                crop_off = crop.y0 if crop is not None else 0.0
+                pdf_y = crop_off + (point_y - y0) / scale
+                return (i, pdf_y)
+        if self.page_layout:
+            _y0, _dw, _dh, crop = self.page_layout[-1]
+            return (len(self.page_layout) - 1, crop.y0 if crop is not None else 0.0)
+        return None
+
+    def _restore_anchor(self, anchor: tuple[int, float] | None) -> None:
+        """Keep the anchored document point at viewport center after a layout change."""
+        if anchor is None or self.vadjustment is None or not self.page_layout:
+            return
+        page_index, pdf_y = anchor
+        if page_index >= len(self.page_layout):
+            return
+        y0, _dw, _dh, crop = self.page_layout[page_index]
+        crop_off = crop.y0 if crop is not None else 0.0
+        target_center = y0 + (pdf_y - crop_off) * (self.zoom * self.dpi_scale_factor)
+
+        page_size = self.vadjustment.get_page_size()
+        target_val = target_center - page_size * 0.5
+        lower = self.vadjustment.get_lower()
+        max_y = max(lower, self.vadjustment.get_upper() - page_size)
+        self.vadjustment.set_value(max(lower, min(target_val, max_y)))
 
     def set_highlighted_block(self, page_index: int, bbox: tuple | None):
         self.highlighted_block = (page_index, bbox) if bbox is not None else None
