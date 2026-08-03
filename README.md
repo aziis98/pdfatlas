@@ -30,7 +30,7 @@ Entering text in the headerbar switches the application from Document View to Se
 
 ### Continuous Reading & Gap-less View
 
-Vertical page layout using PyMuPDF with Cairo vector and hardware-accelerated OpenGL (`PyOpenGL`) rendering backends:
+Vertical page layout using PyMuPDF rendered to textures and drawn on a hardware-accelerated OpenGL (`PyOpenGL`) canvas:
 
 - Uses background worker threads for page rendering to keep scrolling responsive.
 - Gap-less mode connects pages vertically without page margins.
@@ -86,15 +86,17 @@ pdfatlas/
 │   │   └── settings.py      # App settings model & state management
 │   └── ui/                  # GTK4 / Libadwaita UI components
 │       ├── __init__.py      # Package init
-│       ├── canvas.py        # Cairo-based continuous scroll PDF canvas
-│       ├── gl_canvas.py     # OpenGL hardware-accelerated continuous scroll canvas
+│       ├── canvas.py        # Continuous scroll layout canvas & page containers
+│       ├── gl_canvas.py     # OpenGL hardware-accelerated background render canvas
 │       ├── minimap.py       # Minimap thumbnail drawing & modal navigator window
 │       ├── portal.py        # FTS search result card list item (ResultRow)
 │       ├── settings.py      # Settings popover & configuration dialog
+│       ├── theme.py         # Window CSS provider loading
 │       └── window.py        # MainWindow (Adw.HeaderBar, Gtk.Stack navigation)
 ├── assets/
 │   ├── sample-files/        # Sample PDF documents
-│   └── screenshots/         # Documentation screenshots
+│   ├── screenshots/         # Documentation screenshots
+│   └── window.css           # Main window GTK CSS theme
 ├── prototypes/              # Prototype scripts & launcher shortcuts
 ├── scripts/                 # Maintenance and benchmark scripts
 ├── pyproject.toml           # Packaging and dependency declarations

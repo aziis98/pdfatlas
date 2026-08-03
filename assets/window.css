@@ -1,0 +1,112 @@
+/* PDF Atlas main window theme. */
+
+/* --- Shared styles (applied for every backend) --- */
+
+.menu-badge-dot {
+    min-width: 8px;
+    min-height: 8px;
+    background-color: @accent_bg_color;
+    border-radius: 9999px;
+}
+
+.zoom-floating-box {
+    background-color: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 10px;
+    padding: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.zoom-floating-label {
+    font-size: 10px;
+    font-weight: bold;
+    color: #2e2e2e;
+    margin: 4px 0;
+}
+.zoom-floating-box button {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 0;
+    border-radius: 6px;
+}
+headerbar entry.page-input text,
+headerbar entry.page-input > text,
+.page-input text,
+entry.page-input > text {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    padding-left: 2px;
+    padding-right: 2px;
+    min-width: 0px;
+    min-height: 0px;
+}
+headerbar entry.page-input,
+.page-input,
+entry.page-input {
+    min-width: 0px;
+    min-height: 0px;
+    padding: 0;
+    margin: 0;
+}
+.link-preview-box {
+    background-color: rgba(30, 30, 30, 0.88);
+    color: #ffffff;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
+}
+.debug-info-label {
+    font-family: monospace, monospace;
+    font-size: 10px;
+    color: #ffffff;
+    background-color: rgba(30, 30, 30, 0.88);
+    border-radius: 6px;
+    padding: 4px 10px;
+    box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
+}
+.link-portal-card {
+    background-color: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    padding: 0px;
+    box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.12), 0px 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.portal-overlay-pin {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px;
+}
+.portal-overlay-pill {
+    background-color: rgba(60, 60, 60, 0.85);
+    color: #ffffff;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 500;
+}
+.selection-toolbar {
+    background-color: @headerbar_bg_color;
+    border-top: 1px solid rgba(0, 0, 0, 0.15);
+    padding: 6px 12px;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
+}
+
+/* --- Canvas styling: OpenGL background layer --- */
+
+.pdf-canvas {
+    background-color: transparent;
+    padding: 0px;
+}
+.page-container {
+    background-color: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+}
+scrolledwindow,
+viewport {
+    background-color: transparent;
+}

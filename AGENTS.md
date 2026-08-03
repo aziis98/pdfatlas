@@ -52,15 +52,17 @@ pdfatlas/
 │   │   ├── renderer.py      # Asynchronous background render worker pool
 │   │   └── settings.py      # App settings model & state persistence
 │   └── ui/                  # GTK4 / Libadwaita UI components
-│       ├── canvas.py        # Cairo continuous scroll canvas & page containers
+│       ├── canvas.py        # Continuous scroll layout canvas & page containers
 │       ├── gl_canvas.py     # OpenGL hardware-accelerated background canvas
 │       ├── minimap.py       # Multi-column grid thumbnail navigator modal
 │       ├── portal.py        # FTS search result card list item (ResultRow)
 │       ├── settings.py      # Settings configuration popover
+│       ├── theme.py         # Window CSS provider loading
 │       └── window.py        # MainWindow (Adw.HeaderBar, Gtk.Stack navigation)
 ├── assets/
 │   ├── sample-files/        # Sample PDF documents
-│   └── screenshots/         # Documentation screenshots
+│   ├── screenshots/         # Documentation screenshots
+│   └── window.css           # Main window GTK CSS theme
 ├── scripts/                 # Maintenance and benchmark scripts
 └── pyproject.toml           # Package configuration & tool settings
 ```

@@ -34,6 +34,7 @@ from .minimap import MinimapWindow
 from .services import IconThemeManager, ScreenshotService
 from .settings import SettingsWindow
 from .shortcuts import ShortcutsController
+from .theme import load_window_css
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
@@ -53,11 +54,10 @@ class MainWindow(Adw.ApplicationWindow):
       - Click-to-navigate search portal coordinates mapping.
     """
 
-    def __init__(self, app, backend="opengl", state=None, screenshot_path=None, follow_link=None, debug_mode=False):
+    def __init__(self, app, state=None, screenshot_path=None, follow_link=None, debug_mode=False):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
-        self.backend = backend
         self.debug_mode = debug_mode
         self.set_default_size(1000, 700)
         self.initial_state = state
@@ -288,8 +288,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_overlay.add_overlay(self.progress_bar)
 
         # Initialize CSS styling for canvas background and page margins
-        self.css_provider = Gtk.CssProvider()
-        self._update_theme_css()
+        self.css_provider = load_window_css()
         display = Gdk.Display.get_default()
         if display is not None:
             Gtk.StyleContext.add_provider_for_display(
@@ -323,7 +322,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Inner Canvas Container
         self.canvas = PDFCanvas()
-        self.canvas.backend = self.backend
         self.canvas.debug_mode = self.debug_mode
         self.canvas.hadjustment = self.scrolled_window.get_hadjustment()
         self.canvas.vadjustment = self.scrolled_window.get_vadjustment()
@@ -347,16 +345,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.overlay.set_hexpand(True)
         self.overlay.set_vexpand(True)
 
-        if self.backend == "opengl":
-            self.gl_canvas = GLCanvas(canvas_layout_provider=self.canvas)
-            self.gl_canvas.set_hexpand(True)
-            self.gl_canvas.set_vexpand(True)
+        self.gl_canvas = GLCanvas(canvas_layout_provider=self.canvas)
+        self.gl_canvas.set_hexpand(True)
+        self.gl_canvas.set_vexpand(True)
 
-            self.overlay.set_child(self.gl_canvas)  # base layer (OpenGL)
-            self.overlay.add_overlay(self.scrolled_window)  # middle layer (GTK scroll container)
-        else:
-            self.gl_canvas = None
-            self.overlay.set_child(self.scrolled_window)  # base layer (Cairo scroll container)
+        self.overlay.set_child(self.gl_canvas)  # base layer (OpenGL)
+        self.overlay.add_overlay(self.scrolled_window)  # middle layer (GTK scroll container)
 
         self.overlay.add_overlay(self.zoom_floating_box)  # top layer (Floating zoom controls)
         self.overlay.add_overlay(self.link_preview_box)  # top layer (Floating link preview label)
@@ -380,14 +374,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.hadjustment = self.scrolled_window.get_hadjustment()
         self.canvas.set_vadjustment(self.vadjustment)
 
-        if self.backend == "opengl":
-            self.canvas.backend = "opengl"
-            self.canvas.gl_canvas = self.gl_canvas
-            # Repaint the GL background layer on scroll
-            def _on_scroll_redraw(adj):
-                if self.gl_canvas:
-                    self.gl_canvas.queue_draw()
-            self.vadjustment.connect("value-changed", _on_scroll_redraw)
+        self.canvas.gl_canvas = self.gl_canvas
+        # Repaint the GL background layer on scroll
+        def _on_scroll_redraw(adj):
+            if self.gl_canvas:
+                self.gl_canvas.queue_draw()
+        self.vadjustment.connect("value-changed", _on_scroll_redraw)
 
         # Connect vertical scroll adjustment to track current page
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
@@ -959,11 +951,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas._on_click(None, n_press, x, y)
 
     def _queue_canvas_redraw(self):
-        """Redraws the active canvas depending on whether OpenGL or Cairo backend is active."""
-        if self.backend == "opengl" and self.gl_canvas:
+        """Redraws the OpenGL background canvas."""
+        if self.gl_canvas:
             self.gl_canvas.queue_draw()
-        else:
-            self.canvas.queue_draw()
 
     def page_step(self, forward: bool):
         current_idx = self.get_current_page_index()
@@ -1111,9 +1101,6 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "gapless_action") and self.gapless_action:
             self.gapless_action.set_state(GLib.Variant.new_boolean(getattr(self.settings, "page_gaps", True)))
 
-        # Apply CSS updates dynamically (e.g. for gap-less mode padding/borders)
-        self._update_theme_css()
-
         if self.crop_analyzer:
             self.crop_analyzer.compute_crop_rects(self.settings)
 
@@ -1217,135 +1204,6 @@ class MainWindow(Adw.ApplicationWindow):
         if self.doc_model:
             self.doc_model.close()
         super().close()
-
-    def _update_theme_css(self):
-        gap_size = 12 if getattr(self.settings, "page_gaps", True) else 0
-
-        shared_css = """
-            .menu-badge-dot {
-                min-width: 8px;
-                min-height: 8px;
-                background-color: @accent_bg_color;
-                border-radius: 9999px;
-            }
-
-            .zoom-floating-box {
-                background-color: rgba(255, 255, 255, 0.9);
-                border: 1px solid rgba(0, 0, 0, 0.15);
-                border-radius: 10px;
-                padding: 4px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            }
-            .zoom-floating-label {
-                font-size: 10px;
-                font-weight: bold;
-                color: #2e2e2e;
-                margin: 4px 0;
-            }
-            .zoom-floating-box button {
-                min-width: 30px;
-                min-height: 30px;
-                padding: 0;
-                border-radius: 6px;
-            }
-            headerbar entry.page-input text,
-            headerbar entry.page-input > text,
-            .page-input text,
-            entry.page-input > text {
-                padding-top: 2px;
-                padding-bottom: 2px;
-                padding-left: 2px;
-                padding-right: 2px;
-                min-width: 0px;
-                min-height: 0px;
-            }
-            headerbar entry.page-input,
-            .page-input,
-            entry.page-input {
-                min-width: 0px;
-                min-height: 0px;
-                padding: 0;
-                margin: 0;
-            }
-            .link-preview-box {
-                background-color: rgba(30, 30, 30, 0.88);
-                color: #ffffff;
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 11px;
-                font-weight: 500;
-                box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
-            }
-            .debug-info-label {
-                font-family: monospace, monospace;
-                font-size: 10px;
-                color: #ffffff;
-                background-color: rgba(30, 30, 30, 0.88);
-                border-radius: 6px;
-                padding: 4px 10px;
-                box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.25);
-            }
-            .link-portal-card {
-                background-color: #ffffff;
-                border: 1px solid rgba(0, 0, 0, 0.12);
-                border-radius: 8px;
-                padding: 0px;
-                box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.12), 0px 1px 3px rgba(0, 0, 0, 0.08);
-            }
-
-            .portal-overlay-pin {
-                min-width: 28px;
-                min-height: 28px;
-                padding: 4px;
-            }
-            .portal-overlay-pill {
-                background-color: rgba(60, 60, 60, 0.85);
-                color: #ffffff;
-                border-radius: 12px;
-                padding: 3px 10px;
-                font-size: 11px;
-                font-weight: 500;
-            }
-            .selection-toolbar {
-                background-color: @headerbar_bg_color;
-                border-top: 1px solid rgba(0, 0, 0, 0.15);
-                padding: 6px 12px;
-                box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
-            }
-        """
-
-        if self.backend == "opengl":
-            css_data = f"""
-                .pdf-canvas {{
-                    background-color: transparent;
-                    padding: 0px;
-                }}
-                .page-container {{
-                    background-color: transparent;
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                    box-shadow: none;
-                }}
-                scrolledwindow, viewport {{
-                    background-color: transparent;
-                }}
-                {shared_css}
-            """
-        else:
-            css_data = f"""
-                .pdf-canvas {{
-                    background-color: #e0e0e0;
-                    padding: 0px;
-                }}
-                .page-container {{
-                    background-color: #ffffff;
-                    border: {"1px solid #b0b0b0" if gap_size > 0 else "none"};
-                    box-shadow: {"0px 3px 6px rgba(0, 0, 0, 0.1)" if gap_size > 0 else "none"};
-                }}
-                {shared_css}
-            """
-        self.css_provider.load_from_data(css_data.encode("utf-8"))
 
     def _build_floating_zoom_controls(self):
         self.zoom_floating_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -1506,7 +1364,7 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         entries = self.render_cache.total_entries()
         cache_mb = self.render_cache.total_bytes() / (1024 * 1024)
-        if self.backend == "opengl" and self.gl_canvas:
+        if self.gl_canvas:
             tex_mb = self.gl_canvas.texture_bytes() / (1024 * 1024)
             text = f"CACHE:    {entries} entries, {cache_mb:.1f}MB\nTEXTURES: {tex_mb:.1f}MB GPU"
         else:
@@ -1531,7 +1389,7 @@ class MainWindow(Adw.ApplicationWindow):
                 f"PAGE:     {page_index + 1} / {total_pages} (index {page_index})\n"
                 f"LAYOUT:   y_off={y_offset:.1f}px | width={dw:.1f}px | height={dh:.1f}px\n"
                 f"CROP:     {crop_str}\n"
-                f"VIEWPORT: zoom={self.zoom:.2f} | scale={self.canvas.dpi_scale_factor:.1f} | scroll_y={scroll_y:.1f}px | backend={self.backend}"
+                f"VIEWPORT: zoom={self.zoom:.2f} | scale={self.canvas.dpi_scale_factor:.1f} | scroll_y={scroll_y:.1f}px"
             )
             self.debug_info_label.set_text(debug_txt)
             self.debug_info_label.set_visible(True)
