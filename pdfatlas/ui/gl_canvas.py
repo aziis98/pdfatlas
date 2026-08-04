@@ -203,10 +203,85 @@ class GLCanvas(Gtk.GLArea):
                     r.fill_rect(sx - 1.0, sy, 2.0, sh, (0.48, 0.48, 0.48, 0.9))
 
                 if (canvas.debug_mode and canvas.text_selection is not None
-                        and canvas.text_selection.is_selecting and canvas.text_selection.anchor_page == i):
+                        and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection())):
                     pi = canvas.text_selection.get_page_index(i)
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
                     co_y = crop_rect.y0 if crop_rect is not None else 0.0
+
+                    # 1. Highlight snapped start and end word boxes in debug selection mode
+                    rng = canvas.text_selection._selection_range(i)
+                    if rng is not None and pi.chars:
+                        s_char, e_char = rng
+
+                        win_obj = getattr(canvas, "win", None)
+                        arxiv_mapper = getattr(win_obj, "arxiv_mapper", None) if win_obj else None
+
+                        if arxiv_mapper and arxiv_mapper.is_ready and arxiv_mapper.word_metadata:
+                            w_start, w_end = arxiv_mapper.find_pdf_word_range(i, s_char, e_char)
+                            if w_start <= w_end:
+                                total_snapped = w_end - w_start + 1
+                                for idx_in_range, w_idx in enumerate(range(w_start, w_end + 1)):
+                                    w_meta = arxiv_mapper.word_metadata[w_idx]
+                                    if w_meta[0] == i:
+                                        _, wc_start, wc_end = w_meta
+                                        if 0 <= wc_start < len(pi.chars) and 0 <= wc_end < len(pi.chars):
+                                            w_chars = pi.chars[wc_start : wc_end + 1]
+                                            if w_chars:
+                                                wx0 = min(c.bbox[0] for c in w_chars)
+                                                wy0 = min(c.bbox[1] for c in w_chars)
+                                                wx1 = max(c.bbox[2] for c in w_chars)
+                                                wy1 = max(c.bbox[3] for c in w_chars)
+
+                                                sx = x_offset + (wx0 - co_x) * scale
+                                                sy = page_y0 + (wy0 - co_y) * scale
+                                                sw = (wx1 - wx0) * scale
+                                                sh = (wy1 - wy0) * scale
+
+                                                is_first = (idx_in_range == 0)
+                                                is_last = (idx_in_range == total_snapped - 1)
+
+                                                if is_first:
+                                                    r.fill_rect(sx, sy, sw, sh, (1.0, 0.2, 0.5, 0.45))
+                                                    r.fill_rect(sx, sy, sw, 2.0, (1.0, 0.2, 0.5, 1.0))
+                                                elif is_last:
+                                                    r.fill_rect(sx, sy, sw, sh, (1.0, 0.6, 0.0, 0.45))
+                                                    r.fill_rect(sx, sy, sw, 2.0, (1.0, 0.6, 0.0, 1.0))
+                                                else:
+                                                    r.fill_rect(sx, sy, sw, sh, (1.0, 0.85, 0.2, 0.2))
+                        else:
+                            # Universal fallback for local PDFs: calculate start and end word boxes
+                            sw_start = canvas.text_selection.get_word_start_char_idx(i, s_char)
+                            sw_end = sw_start
+                            while (sw_end < len(pi.chars) - 1
+                                   and pi.chars[sw_end].char != " "
+                                   and abs(pi.chars[sw_end + 1].line_y - pi.chars[sw_start].line_y) < 3.0):
+                                sw_end += 1
+
+                            s_chars = pi.chars[sw_start : sw_end + 1]
+                            if s_chars:
+                                sx0 = x_offset + (min(c.bbox[0] for c in s_chars) - co_x) * scale
+                                sy0 = page_y0 + (min(c.bbox[1] for c in s_chars) - co_y) * scale
+                                sw = (max(c.bbox[2] for c in s_chars) - min(c.bbox[0] for c in s_chars)) * scale
+                                sh = (max(c.bbox[3] for c in s_chars) - min(c.bbox[1] for c in s_chars)) * scale
+                                r.fill_rect(sx0, sy0, sw, sh, (1.0, 0.2, 0.5, 0.45))
+                                r.fill_rect(sx0, sy0, sw, 2.0, (1.0, 0.2, 0.5, 1.0))
+
+                            ew_start = canvas.text_selection.get_word_start_char_idx(i, e_char)
+                            ew_end = ew_start
+                            while (ew_end < len(pi.chars) - 1
+                                   and pi.chars[ew_end].char != " "
+                                   and abs(pi.chars[ew_end + 1].line_y - pi.chars[ew_start].line_y) < 3.0):
+                                ew_end += 1
+
+                            e_chars = pi.chars[ew_start : ew_end + 1]
+                            if e_chars:
+                                ex0 = x_offset + (min(c.bbox[0] for c in e_chars) - co_x) * scale
+                                ey0 = page_y0 + (min(c.bbox[1] for c in e_chars) - co_y) * scale
+                                ew = (max(c.bbox[2] for c in e_chars) - min(c.bbox[0] for c in e_chars)) * scale
+                                eh = (max(c.bbox[3] for c in e_chars) - min(c.bbox[1] for c in e_chars)) * scale
+                                r.fill_rect(ex0, ey0, ew, eh, (1.0, 0.6, 0.0, 0.45))
+                                r.fill_rect(ex0, ey0, ew, 2.0, (1.0, 0.6, 0.0, 1.0))
+
                     bt = 0.8
                     gc = (0.0, 0.8, 0.0, 0.4)
                     for c in pi.chars:

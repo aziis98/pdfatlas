@@ -6,7 +6,7 @@ import time
 import urllib.request
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Callable, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional, cast
 
 import fitz
 
@@ -100,8 +100,8 @@ def download_arxiv_source(arxiv_id: str) -> tuple[Path, Path]:
 
 def extract_pdf_text_with_metadata(pdf_path: str | Path) -> tuple[str, list[tuple[int, int, int]]]:
     """
-    Extract PDF text words and build metadata linking each word index to (page_idx, word_idx_on_page, word_idx_on_page).
-    Uses PyMuPDF's native words layout engine.
+    Extract PDF text words and build metadata linking each word index to (page_idx, char_start_on_page, char_end_on_page).
+    Uses PyMuPDF's rawdict and words layout engines.
     """
     doc = fitz.open(str(pdf_path))
     word_metadata: list[tuple[int, int, int]] = []
@@ -110,15 +110,38 @@ def extract_pdf_text_with_metadata(pdf_path: str | Path) -> tuple[str, list[tupl
     for page_idx in range(len(doc)):
         page = doc[page_idx]
         try:
+            rawdict = cast(dict[str, Any], page.get_text("rawdict"))
+        except (RuntimeError, ValueError):
+            rawdict = {}
+
+        page_chars: list[str] = []
+        for b in rawdict.get("blocks", []):
+            if b.get("type") == 0:
+                for line in b.get("lines", []):
+                    for s in line.get("spans", []):
+                        for ch in s.get("chars", []):
+                            page_chars.append(str(ch.get("c", "")))
+
+        try:
             raw_words = page.get_text("words")
         except (RuntimeError, ValueError):
             raw_words = []
 
-        for word_idx, w in enumerate(raw_words):
-            word_str = str(w[4])
-            if word_str.strip():
-                pdf_words.append(word_str)
-                word_metadata.append((page_idx, word_idx, word_idx))
+        char_pos = 0
+        for w in raw_words:
+            w_str = str(w[4]).strip()
+            if not w_str:
+                continue
+
+            while char_pos < len(page_chars) and page_chars[char_pos] == " ":
+                char_pos += 1
+
+            w_start = char_pos
+            w_end = min(len(page_chars) - 1, w_start + len(w_str) - 1) if page_chars else char_pos
+            char_pos = max(char_pos + 1, w_end + 1)
+
+            pdf_words.append(w_str)
+            word_metadata.append((page_idx, w_start, w_end))
 
     doc.close()
     full_text = " ".join(pdf_words)
