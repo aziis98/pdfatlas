@@ -429,6 +429,12 @@ class MainWindow(Adw.ApplicationWindow):
             self.recent_files.add(source)
             self._rebuild_open_menu()
 
+            if hasattr(self, "_active_progress_tasks"):
+                self._active_progress_tasks.clear()
+            if hasattr(self, "progress_card_box"):
+                self.progress_card_box.set_visible(False)
+            self.progress_bar.set_visible(False)
+
             self.render_cache.clear()
             self.minimap_cache.clear()
             self.pinned.clear()
@@ -498,8 +504,7 @@ class MainWindow(Adw.ApplicationWindow):
             if source.is_arxiv:
                 aid = arxiv_id_from_path(filepath)
                 if aid:
-                    self.progress_bar.set_fraction(0.0)
-                    self.progress_bar.set_visible(True)
+                    self._show_progress("arxiv_diff", "Analyzing arXiv TeX sources...", 0.0)
                     arxiv_thread = threading.Thread(
                         target=self._arxiv_diff_worker, args=(aid, filepath), daemon=True
                     )
@@ -514,6 +519,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.entry.set_sensitive(False)
             self.stack.set_visible_child_name("document-view")
 
+            self._show_progress("indexing", "Indexing document text for search...", 0.0)
             self.db_service.open_db(filepath, self._on_indexing_complete)
 
 
@@ -618,17 +624,17 @@ class MainWindow(Adw.ApplicationWindow):
 
 
     def _on_arxiv_diff_progress(self, fraction: float):
-        self.progress_bar.set_fraction(fraction)
-        self.progress_bar.set_visible(True)
+        self._show_progress("arxiv_diff", "Analyzing arXiv TeX sources...", fraction)
 
     def _on_arxiv_diff_complete(self, mapper: ArxivDiffMapper | None):
         self.arxiv_mapper = mapper
-        self.progress_bar.set_visible(False)
+        self._hide_progress("arxiv_diff")
         if hasattr(self, "selection_toolbar") and self.selection_toolbar.get_visible():
             self._update_selection_toolbar(True)
 
 
     def _on_indexing_complete(self, conn):
+        self._hide_progress("indexing")
         self.index_conn = conn
         self.entry.set_sensitive(True)
         self.entry.set_placeholder_text("Search document...")
@@ -1033,9 +1039,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.crop_analyzer.scanned = [False] * page_count
         self.crop_analyzer.raw_bboxes = [None] * page_count
 
-        self.progress_bar.set_fraction(0.0)
-        self.progress_bar.set_visible(True)
         self.crop_scanned_count = 0
+        self._show_progress("crop_analysis", "Scanning page margins for auto-crop...", 0.0)
 
         # Run crop analysis in a separate background thread so it doesn't block RenderWorker renders
         crop_thread = threading.Thread(target=self._crop_analysis_worker, daemon=True)
@@ -1062,11 +1067,53 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_crop_page_scanned(self, page_index):
         self.crop_scanned_count += 1
         total = self.doc_model.page_count if self.doc_model else 1
-        self.progress_bar.set_fraction(self.crop_scanned_count / total)
+        self._show_progress("crop_analysis", "Scanning page margins for auto-crop...", self.crop_scanned_count / total)
 
     def _on_crop_analysis_complete(self):
-        self.progress_bar.set_visible(False)
+        self._hide_progress("crop_analysis")
         self.canvas.on_crop_changed()
+
+    def _show_progress(self, task_id: str, description: str, fraction: float):
+        if not hasattr(self, "_active_progress_tasks"):
+            self._active_progress_tasks = {}
+
+        pct = int(round(fraction * 100))
+        formatted_desc = f"{description} ({pct}%)" if fraction > 0 else description
+
+        self._active_progress_tasks[task_id] = {
+            "description": description,
+            "formatted": formatted_desc,
+            "fraction": fraction,
+        }
+
+        max_fraction = max(t["fraction"] for t in self._active_progress_tasks.values())
+        self.progress_bar.set_fraction(max_fraction)
+        self.progress_bar.set_visible(True)
+
+        latest_task = list(self._active_progress_tasks.values())[-1]
+        progress_text = latest_task["formatted"]
+
+        if hasattr(self, "progress_label"):
+            self.progress_label.set_label(progress_text)
+            self.progress_card_box.set_visible(True)
+            self.link_preview_box.set_visible(True)
+
+    def _hide_progress(self, task_id: str):
+        if hasattr(self, "_active_progress_tasks") and task_id in self._active_progress_tasks:
+            del self._active_progress_tasks[task_id]
+
+        if not getattr(self, "_active_progress_tasks", None):
+            self.progress_bar.set_visible(False)
+            if hasattr(self, "progress_card_box"):
+                self.progress_card_box.set_visible(False)
+                if hasattr(self, "link_preview_card_box") and not self.link_preview_card_box.get_visible():
+                    self.link_preview_box.set_visible(False)
+        else:
+            latest_task = list(self._active_progress_tasks.values())[-1]
+            max_fraction = max(t["fraction"] for t in self._active_progress_tasks.values())
+            self.progress_bar.set_fraction(max_fraction)
+            if hasattr(self, "progress_label"):
+                self.progress_label.set_label(latest_task["formatted"])
 
     def add_toast(self, toast: Adw.Toast):
         self.toast_overlay.add_toast(toast)
@@ -1138,10 +1185,18 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.link_preview_card_box.set_visible(False)
 
+        self.progress_label = label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=65)
+        self.progress_card_box = box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+            css_class="link-preview-box", halign=Gtk.Align.START,
+            children=[self.progress_label],
+        )
+        self.progress_card_box.set_visible(False)
+
         self.link_preview_box = box(
             orientation=Gtk.Orientation.VERTICAL, spacing=6,
             halign=Gtk.Align.START, valign=Gtk.Align.END, margin_start=8, margin_bottom=8,
-            children=[self.link_preview_card_box],
+            children=[self.progress_card_box, self.link_preview_card_box],
         )
 
         if self.debug_mode:
