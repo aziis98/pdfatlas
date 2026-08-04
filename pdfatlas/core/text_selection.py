@@ -204,31 +204,7 @@ class TextSelection:
         if not selected:
             return []
 
-        rects: list[tuple[float, float, float, float]] = []
-        line_chars: list[CharInfo] = [selected[0]]
-
-        for c in selected[1:]:
-            if (
-                abs(c.line_y - line_chars[-1].line_y) < 3.0
-                and c.block_no == line_chars[-1].block_no
-                and c.line_no == line_chars[-1].line_no
-            ):
-                line_chars.append(c)
-            else:
-                rects.append(self._merge_line_rect(line_chars))
-                line_chars = [c]
-
-        if line_chars:
-            rects.append(self._merge_line_rect(line_chars))
-
-        return rects
-
-    def _merge_line_rect(self, chars: list[CharInfo]) -> tuple[float, float, float, float]:
-        x0 = min(c.bbox[0] for c in chars)
-        y0 = min(c.bbox[1] for c in chars)
-        x1 = max(c.bbox[2] for c in chars)
-        y1 = max(c.bbox[3] for c in chars)
-        return (x0, y0, x1, y1)
+        return [c.bbox for c in selected]
 
     def get_selected_text(self, page_index: int | None = None) -> str:
         if not self.has_selection() or self.anchor_page is None or self.focus_page is None:
