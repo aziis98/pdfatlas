@@ -3,9 +3,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
-
-import numpy as np
 from OpenGL import GL as gl
+
+from .gl_renderer import QuadRenderer
 
 
 class GLCanvas(Gtk.GLArea):
@@ -16,25 +16,12 @@ class GLCanvas(Gtk.GLArea):
 
     def __init__(self, canvas_layout_provider):
         super().__init__()
-        self.layout_provider = canvas_layout_provider  # PDFCanvas instance
+        self.layout_provider = canvas_layout_provider
+        self._renderer: QuadRenderer | None = None
 
         self.set_required_version(3, 3)
         self.set_has_depth_buffer(False)
         self.set_has_stencil_buffer(False)
-
-        self.shader_program = 0
-        self.vao = 0
-        self.vbo = 0
-
-        # Texture cache: cairo.ImageSurface -> OpenGL texture ID
-        self.textures = {}
-
-        # Shader Uniform Locations
-        self.u_resolution = -1
-        self.u_offset = -1
-        self.u_page_pos = -1
-        self.u_page_size = -1
-        self.u_color = -1
 
         self.connect("realize", self._on_realize)
         self.connect("unrealize", self._on_unrealize)
@@ -46,161 +33,41 @@ class GLCanvas(Gtk.GLArea):
         if err is not None:
             print(f"[GLCanvas] Context realization error: {err.message}")
             return
-
-        # 1. Compile Shaders
-        vertex_shader_source = """
-        #version 330 core
-        layout (location = 0) in vec2 aPos;
-        layout (location = 1) in vec2 aTexCoord;
-        
-        out vec2 TexCoord;
-        
-        uniform vec2 u_resolution;
-        uniform vec2 u_offset;
-        uniform vec2 u_page_pos;
-        uniform vec2 u_page_size;
-        
-        void main() {
-            // Coordinate mapping: page offset -> viewport -> NDC
-            vec2 pixel_pos = u_page_pos + aPos * u_page_size - u_offset;
-            vec2 ndc_pos;
-            ndc_pos.x = (pixel_pos.x / u_resolution.x) * 2.0 - 1.0;
-            ndc_pos.y = 1.0 - (pixel_pos.y / u_resolution.y) * 2.0; // Flip Y for top-down coordinate space
-            
-            gl_Position = vec4(ndc_pos, 0.0, 1.0);
-            TexCoord = aTexCoord;
-        }
-        """
-
-        fragment_shader_source = """
-        #version 330 core
-        in vec2 TexCoord;
-        out vec4 FragColor;
-        
-        uniform sampler2D u_texture;
-        uniform int u_is_placeholder;
-        uniform vec4 u_color;
-        
-        void main() {
-            if (u_is_placeholder == 1) {
-                // White page background placeholder
-                FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-            } else if (u_is_placeholder == 2) {
-                // Solid vector color (e.g. highlight fill / border)
-                FragColor = u_color;
-            } else {
-                vec4 tex = texture(u_texture, TexCoord);
-                // Cairo ARGB32 is stored as BGRA in memory. Swap R & B channels.
-                FragColor = vec4(tex.b, tex.g, tex.r, tex.a);
-            }
-        }
-        """
-
         try:
-            vs = self._compile_shader(gl.GL_VERTEX_SHADER, vertex_shader_source)
-            fs = self._compile_shader(gl.GL_FRAGMENT_SHADER, fragment_shader_source)
-
-            self.shader_program = gl.glCreateProgram()
-            gl.glAttachShader(self.shader_program, vs)
-            gl.glAttachShader(self.shader_program, fs)
-            gl.glLinkProgram(self.shader_program)
-
-            if gl.glGetProgramiv(self.shader_program, gl.GL_LINK_STATUS) != gl.GL_TRUE:
-                info = gl.glGetProgramInfoLog(self.shader_program)
-                raise RuntimeError(f"Shader linking failed: {info}")
-
-            gl.glDeleteShader(vs)
-            gl.glDeleteShader(fs)
-
-            # Get uniform locations
-            self.u_resolution = gl.glGetUniformLocation(self.shader_program, "u_resolution")
-            self.u_offset = gl.glGetUniformLocation(self.shader_program, "u_offset")
-            self.u_page_pos = gl.glGetUniformLocation(self.shader_program, "u_page_pos")
-            self.u_page_size = gl.glGetUniformLocation(self.shader_program, "u_page_size")
-            self.u_is_placeholder = gl.glGetUniformLocation(self.shader_program, "u_is_placeholder")
-            self.u_color = gl.glGetUniformLocation(self.shader_program, "u_color")
-
-            # 2. Quad Mesh VAO/VBO Setup (Position vec2, TexCoord vec2)
-            # Full unit quad [0,0] to [1,1]
-            vertices = np.array(
-                [
-                    # Pos    # TexCoord
-                    0.0, 0.0, 0.0, 0.0,
-                    1.0, 0.0, 1.0, 0.0,
-                    0.0, 1.0, 0.0, 1.0,
-                    0.0, 1.0, 0.0, 1.0,
-                    1.0, 0.0, 1.0, 0.0,
-                    1.0, 1.0, 1.0, 1.0,
-                ],
-                dtype=np.float32,
-            )
-
-            self.vao = gl.glGenVertexArrays(1)
-            self.vbo = gl.glGenBuffers(1)
-
-            gl.glBindVertexArray(self.vao)
-            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
-            gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices.nbytes, vertices, gl.GL_STATIC_DRAW)
-
-            # Attribute 0: Position (2 floats)
-            gl.glVertexAttribPointer(0, 2, gl.GL_FLOAT, gl.GL_FALSE, 4 * 4, gl.ctypes.c_void_p(0))
-            gl.glEnableVertexAttribArray(0)
-
-            # Attribute 1: TexCoord (2 floats)
-            gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 4 * 4, gl.ctypes.c_void_p(2 * 4))
-            gl.glEnableVertexAttribArray(1)
-
-            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
-            gl.glBindVertexArray(0)
-            print("[GLCanvas] OpenGL pipeline initialized successfully.")
+            self._renderer = QuadRenderer()
+            self._renderer.initialize()
         except Exception as e:
             print(f"[GLCanvas] Failed to initialize OpenGL pipeline: {e}")
             self.set_error(GLib.Error.new_literal(GLib.quark_from_string("opengl"), str(e), 1))
 
-    def _compile_shader(self, shader_type, source: str) -> int:
-        shader = gl.glCreateShader(shader_type)
-        gl.glShaderSource(shader, source)
-        gl.glCompileShader(shader)
-        if not gl.glGetShaderiv(shader, gl.GL_COMPILE_STATUS):
-            info_log = gl.glGetShaderInfoLog(shader)
-            raise RuntimeError(f"Shader compilation failed:\n{info_log.decode()}")
-        return int(shader or 0)
-
-    def _link_program(self, vs: int, fs: int) -> int:
-        program = gl.glCreateProgram()
-        gl.glAttachShader(program, vs)
-        gl.glAttachShader(program, fs)
-        gl.glLinkProgram(program)
-        if not gl.glGetProgramiv(program, gl.GL_LINK_STATUS):
-            info_log = gl.glGetProgramInfoLog(program)
-            raise RuntimeError(f"Program linking failed:\n{info_log.decode()}")
-        return int(program or 0)
-
     def _on_unrealize(self, area):
         self.make_current()
-        if self.vao:
-            gl.glDeleteVertexArrays(1, [self.vao])
-        if self.vbo:
-            gl.glDeleteBuffers(1, [self.vbo])
-        if self.shader_program:
-            gl.glDeleteProgram(self.shader_program)
-        for tex_id in self.textures.values():
-            gl.glDeleteTextures(1, [tex_id])
-        self.textures.clear()
+        if self._renderer:
+            self._renderer.cleanup()
+            self._renderer = None
 
     def texture_bytes(self) -> int:
-        """Sum of all uploaded OpenGL texture pixel memory in bytes."""
-        total = 0
-        for surface in self.textures:
-            total += surface.get_width() * surface.get_height() * 4
-        return total
+        if not self._renderer:
+            return 0
+        return sum(
+            tex.get_width() * tex.get_height() * 4
+            for tex in self._renderer.textures.keys()
+        )
+
+    def _draw_rect(self, r: QuadRenderer, x: float, y: float, w: float, h: float,
+                   color: tuple[float, float, float, float], border: float = 0.0):
+        if border > 0.0:
+            r.fill_rect(x, y, w, border, color)
+            r.fill_rect(x, y + h - border, w, border, color)
+            r.fill_rect(x, y, border, h, color)
+            r.fill_rect(x + w - border, y, border, h, color)
+        else:
+            r.fill_rect(x, y, w, h, color)
 
     def _on_render(self, area, context):
         canvas = self.layout_provider
-        if not canvas or not canvas.page_layout:
-            return False
-
-        if not canvas.vadjustment:
+        r = self._renderer
+        if not canvas or not canvas.page_layout or not canvas.vadjustment or not r:
             return False
 
         x_min = canvas.hadjustment.get_value() if canvas.hadjustment else 0.0
@@ -211,397 +78,190 @@ class GLCanvas(Gtk.GLArea):
         scale_factor = canvas.get_scale_factor()
         viewport_w = self.get_allocated_width()
         viewport_h = self.get_allocated_height()
-
-        # Get physical scale factor for the GL viewport
         gl_scale = self.get_scale_factor()
-        physical_w = int(viewport_w * gl_scale)
-        physical_h = int(viewport_h * gl_scale)
+        scale = canvas.zoom * canvas.dpi_scale_factor
 
-        # Set viewport to physical dimensions and clear screen
-        gl.glViewport(0, 0, physical_w, physical_h)
-        gl.glClearColor(0.88, 0.88, 0.88, 1.0)  # Matches workspace gray (#e0e0e0)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-
-        gl.glUseProgram(self.shader_program)
-        gl.glUniform2f(self.u_resolution, float(viewport_w), float(viewport_h))
-        gl.glUniform2f(self.u_offset, float(round(x_min)), float(round(y_min)))
-
-
-        # Enable Alpha Blending for clean page anti-aliasing
-        gl.glEnable(gl.GL_BLEND)
-        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)  # Premultiplied alpha support
-
-        gl.glBindVertexArray(self.vao)
-
-        # Build list of active surfaces currently in the RenderCache
+        r.begin(viewport_w, viewport_h, x_min, y_min, gl_scale)
         active_surfaces = set()
 
-        # Determine which pages are visible in the viewport
         page_count = len(canvas.page_layout)
         for i in range(page_count):
             y_offset, dw, dh, crop_rect = canvas.page_layout[i]
             page_y0 = float(round(y_offset))
             page_y1 = page_y0 + dh
 
-            if page_y1 >= y_min and page_y0 <= y_max:
-                # Center page horizontally inside viewport
-                x_offset = float(round((viewport_w - dw) / 2.0))
+            if page_y1 < y_min or page_y0 > y_max:
+                continue
 
-                # Draw white page background card
-                gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                gl.glUniform1i(self.u_is_placeholder, 1)
-                gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0))
-                gl.glUniform2f(self.u_page_size, float(dw), float(dh))
-                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+            x_offset = float(round((viewport_w - dw) / 2.0))
 
-                # Fetch cached Cairo surface (fall back to best match when zoom changes)
-                surface = canvas.cache.get(i, canvas.zoom, scale_factor, crop_rect)
-                if surface is None:
-                    surface = canvas.cache.get_best(i, canvas.zoom, scale_factor, crop_rect)
+            r.white_card(x_offset, page_y0, dw, dh)
 
-                if surface is not None:
-                    active_surfaces.add(surface)
-                    tex_id = self.textures.get(surface)
+            surface = canvas.cache.get(i, canvas.zoom, scale_factor, crop_rect)
+            if surface is None:
+                surface = canvas.cache.get_best(i, canvas.zoom, scale_factor, crop_rect)
 
-                    if tex_id is None:
-                        # Upload Cairo image surface raw data to GPU texture
-                        w = surface.get_width()
-                        h = surface.get_height()
-                        data = surface.get_data()  # memoryview of raw BGRA bytes
+            if surface is not None:
+                active_surfaces.add(surface)
+                tex_id = r.upload_surface(surface)
+                r.textured(tex_id, x_offset, page_y0, dw, dh)
 
-                        tex_id = gl.glGenTextures(1)
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
+                if canvas.highlighted_block is not None:
+                    h_page_idx, h_bbox = canvas.highlighted_block
+                    if h_page_idx == i:
+                        bx0, by0, bx1, by1 = h_bbox
+                        co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        hx = x_offset + (bx0 - co_x) * scale
+                        hy = page_y0 + (by0 - co_y) * scale
+                        hw = (bx1 - bx0) * scale
+                        hh = (by1 - by0) * scale
+                        r.fill_rect(hx, hy, hw, hh, (0.35, 0.2975, 0.0, 0.35))
 
-                        # Upload bytes as GL_RGBA (premultiplied BGRA layout mapped via shader)
-                        gl.glTexImage2D(
-                            gl.GL_TEXTURE_2D,
-                            0,
-                            gl.GL_RGBA8,
-                            w,
-                            h,
-                            0,
-                            gl.GL_RGBA,
-                            gl.GL_UNSIGNED_BYTE,
-                            data.tobytes(),
-                        )
-
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
-                        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
-
-                        self.textures[surface] = tex_id
-
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
-                    gl.glUniform1i(self.u_is_placeholder, 0)
-
-                    # Draw page textured quad
-                    gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-
-                    # Draw block highlights if selected
-                    if canvas.highlighted_block is not None:
-                        h_page_idx, h_bbox = canvas.highlighted_block
-                        if h_page_idx == i:
-                            bx0, by0, bx1, by1 = h_bbox
-                            crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-                            crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-
-                            # Highlight bounds relative to page top-left
-                            hx = x_offset + (bx0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
-                            hy = page_y0 + (by0 - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
-                            hw = (bx1 - bx0) * canvas.zoom * canvas.dpi_scale_factor
-                            hh = (by1 - by0) * canvas.zoom * canvas.dpi_scale_factor
-
-                            # Bind null texture for solid colors
-                            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                            gl.glUniform1i(self.u_is_placeholder, 2)
-
-                            # Light yellow fill quad with no border (premultiplied RGBA)
-                            gl.glUniform4f(self.u_color, 0.35, 0.2975, 0.0, 0.35)
-                            gl.glUniform2f(self.u_page_pos, float(hx), float(hy))
-                            gl.glUniform2f(self.u_page_size, float(hw), float(hh))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-
-                    # Draw Text Selection Highlight
-                    if canvas.text_selection is not None:
-                        sel_rects = canvas.text_selection.get_selection_rects(i)
-                        if sel_rects:
-                            crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-                            crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-                            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                            gl.glUniform1i(self.u_is_placeholder, 2)
-                            # Blue selection: [0.2, 0.5, 1.0, 0.35] premultiplied
-                            gl.glUniform4f(self.u_color, 0.07, 0.175, 0.35, 0.35)
-                            for rx0, ry0, rx1, ry1 in sel_rects:
-                                sx = x_offset + (rx0 - crop_off_x) * canvas.zoom * canvas.dpi_scale_factor
-                                sy = page_y0 + (ry0 - crop_off_y) * canvas.zoom * canvas.dpi_scale_factor
-                                sw = (rx1 - rx0) * canvas.zoom * canvas.dpi_scale_factor
-                                sh = (ry1 - ry0) * canvas.zoom * canvas.dpi_scale_factor
-                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
-                                gl.glUniform2f(self.u_page_size, float(sw), float(sh))
-                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-
-                    # Draw Debug arXiv Cursor Fragment Overlays
-                    if (
-                        canvas.debug_mode
-                        and getattr(canvas, "debug_arxiv_data", None) is not None
-                        and canvas.debug_arxiv_data.get("page_index") == i
-                    ):
-                        d_data = canvas.debug_arxiv_data
-                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        scale = canvas.zoom * canvas.dpi_scale_factor
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                        gl.glUniform1i(self.u_is_placeholder, 2)
-
-                        # 1. Current Word Fill @ 0.75 Opacity: RGBA (0.7*0.75, 0.35*0.75, 1.0*0.75, 0.75) -> (0.525, 0.2625, 0.75, 0.75)
-                        curr_w_rects = d_data.get("curr_word_rects", [])
-                        if curr_w_rects:
-                            gl.glUniform4f(self.u_color, 0.525, 0.2625, 0.75, 0.75)
-                            for rx0, ry0, rx1, ry1 in curr_w_rects:
-                                sx = x_offset + (rx0 - crop_off_x) * scale
-                                sy = page_y0 + (ry0 - crop_off_y) * scale
-                                sw = (rx1 - rx0) * scale
-                                sh = (ry1 - ry0) * scale
-                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
-                                gl.glUniform2f(self.u_page_size, float(sw), float(sh))
-                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-
-                        # 2. Forward Chars Stroke @ 0.25 Opacity: RGBA (0.7*0.25, 0.35*0.25, 1.0*0.25, 0.25) -> (0.175, 0.0875, 0.25, 0.25)
-                        fwd_c_rects = d_data.get("forward_char_rects", [])
-                        if fwd_c_rects:
-                            gl.glUniform4f(self.u_color, 0.175, 0.0875, 0.25, 0.25)
-                            border_t = 1.0
-                            for rx0, ry0, rx1, ry1 in fwd_c_rects:
-                                sx = x_offset + (rx0 - crop_off_x) * scale
-                                sy = page_y0 + (ry0 - crop_off_y) * scale
-                                sw = (rx1 - rx0) * scale
-                                sh = (ry1 - ry0) * scale
-                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
-                                gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
-                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy + sh - border_t))
-                                gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
-                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                                gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
-                                gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
-                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                                gl.glUniform2f(self.u_page_pos, float(sx + sw - border_t), float(sy))
-                                gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
-                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-
-                        # 3. Current Char Stroke @ 1.0 Opacity: RGBA (0.7*1.0, 0.35*1.0, 1.0*1.0, 1.0) -> (0.7, 0.35, 1.0, 1.0)
-                        c_rect = d_data.get("curr_char_rect")
-                        if c_rect:
-                            gl.glUniform4f(self.u_color, 0.7, 0.35, 1.0, 1.0)
-                            border_t = 1.5
-                            rx0, ry0, rx1, ry1 = c_rect
-                            sx = x_offset + (rx0 - crop_off_x) * scale
-                            sy = page_y0 + (ry0 - crop_off_y) * scale
+                if canvas.text_selection is not None:
+                    sel_rects = canvas.text_selection.get_selection_rects(i)
+                    if sel_rects:
+                        co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        for rx0, ry0, rx1, ry1 in sel_rects:
+                            sx = x_offset + (rx0 - co_x) * scale
+                            sy = page_y0 + (ry0 - co_y) * scale
                             sw = (rx1 - rx0) * scale
                             sh = (ry1 - ry0) * scale
-                            gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
-                            gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            gl.glUniform2f(self.u_page_pos, float(sx), float(sy + sh - border_t))
-                            gl.glUniform2f(self.u_page_size, float(sw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            gl.glUniform2f(self.u_page_pos, float(sx), float(sy))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            gl.glUniform2f(self.u_page_pos, float(sx + sw - border_t), float(sy))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(sh))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                            r.fill_rect(sx, sy, sw, sh, (0.07, 0.175, 0.35, 0.35))
 
-                    # Draw Hover Text Caret Overlay (Accent Blue Vertical Bar)
-                    if (
-                        getattr(canvas, "hover_caret", None) is not None
-                        and canvas.hover_caret[0] == i
-                    ):
-                        page_idx, (cx, y0, y1) = canvas.hover_caret
-                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        scale = canvas.zoom * canvas.dpi_scale_factor
-                        sx = x_offset + (cx - crop_off_x) * scale
-                        sy = page_y0 + (y0 - crop_off_y) * scale
-                        sh = (y1 - y0) * scale
-                        caret_w = 2.0
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                        gl.glUniform1i(self.u_is_placeholder, 2)
-                        # Premultiplied #888 gray caret (0.533 * 0.9 = 0.48)
-                        gl.glUniform4f(self.u_color, 0.48, 0.48, 0.48, 0.9)
+                if (canvas.debug_mode and getattr(canvas, "debug_arxiv_data", None) is not None
+                        and canvas.debug_arxiv_data.get("page_index") == i):
+                    d_data = canvas.debug_arxiv_data
+                    co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                    co_y = crop_rect.y0 if crop_rect is not None else 0.0
 
-                        gl.glUniform2f(self.u_page_pos, float(sx - caret_w / 2.0), float(sy))
-                        gl.glUniform2f(self.u_page_size, float(caret_w), float(sh))
-                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                    for rx0, ry0, rx1, ry1 in d_data.get("curr_word_rects", []):
+                        r.fill_rect(
+                            x_offset + (rx0 - co_x) * scale,
+                            page_y0 + (ry0 - co_y) * scale,
+                            (rx1 - rx0) * scale, (ry1 - ry0) * scale,
+                            (0.525, 0.2625, 0.75, 0.75),
+                        )
 
+                    bt = 1.0
+                    for rx0, ry0, rx1, ry1 in d_data.get("forward_char_rects", []):
+                        sx = x_offset + (rx0 - co_x) * scale
+                        sy = page_y0 + (ry0 - co_y) * scale
+                        sw = (rx1 - rx0) * scale
+                        sh = (ry1 - ry0) * scale
+                        c = (0.175, 0.0875, 0.25, 0.25)
+                        r.fill_rect(sx, sy, sw, bt, c)
+                        r.fill_rect(sx, sy + sh - bt, sw, bt, c)
+                        r.fill_rect(sx, sy, bt, sh, c)
+                        r.fill_rect(sx + sw - bt, sy, bt, sh, c)
 
+                    c_rect = d_data.get("curr_char_rect")
+                    if c_rect:
+                        rx0, ry0, rx1, ry1 = c_rect
+                        sx = x_offset + (rx0 - co_x) * scale
+                        sy = page_y0 + (ry0 - co_y) * scale
+                        sw = (rx1 - rx0) * scale
+                        sh = (ry1 - ry0) * scale
+                        c = (0.7, 0.35, 1.0, 1.0)
+                        bt = 1.5
+                        r.fill_rect(sx, sy, sw, bt, c)
+                        r.fill_rect(sx, sy + sh - bt, sw, bt, c)
+                        r.fill_rect(sx, sy, bt, sh, c)
+                        r.fill_rect(sx + sw - bt, sy, bt, sh, c)
 
+                if getattr(canvas, "hover_caret", None) is not None and canvas.hover_caret[0] == i:
+                    _page_idx, (cx, cy0, cy1) = canvas.hover_caret
+                    co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                    co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                    sx = x_offset + (cx - co_x) * scale
+                    sy = page_y0 + (cy0 - co_y) * scale
+                    sh = (cy1 - cy0) * scale
+                    r.fill_rect(sx - 1.0, sy, 2.0, sh, (0.48, 0.48, 0.48, 0.9))
 
+                if (canvas.debug_mode and canvas.text_selection is not None
+                        and canvas.text_selection.is_selecting and canvas.text_selection.anchor_page == i):
+                    pi = canvas.text_selection.get_page_index(i)
+                    co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                    co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                    bt = 0.8
+                    gc = (0.0, 0.8, 0.0, 0.4)
+                    for c in pi.chars:
+                        cx0 = x_offset + (c.bbox[0] - co_x) * scale
+                        cy0 = page_y0 + (c.bbox[1] - co_y) * scale
+                        cw = (c.bbox[2] - c.bbox[0]) * scale
+                        ch = (c.bbox[3] - c.bbox[1]) * scale
+                        r.fill_rect(cx0, cy0, cw, bt, gc)
+                        r.fill_rect(cx0, cy0 + ch - bt, cw, bt, gc)
+                        r.fill_rect(cx0, cy0, bt, ch, gc)
+                        r.fill_rect(cx0 + cw - bt, cy0, bt, ch, gc)
 
-                    # Debug: draw all character bboxes when actively selecting
-                    if (
-                        canvas.debug_mode
-                        and canvas.text_selection is not None
-                        and canvas.text_selection.is_selecting
-                        and canvas.text_selection.anchor_page == i
-                    ):
-                        pi = canvas.text_selection.get_page_index(i)
-                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        scale = canvas.zoom * canvas.dpi_scale_factor
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                        gl.glUniform1i(self.u_is_placeholder, 2)
+                    if canvas.text_selection.anchor_char_idx is not None:
+                        ac = pi.chars[canvas.text_selection.anchor_char_idx]
+                        ax = x_offset + ((ac.bbox[0] + ac.bbox[2]) / 2.0 - co_x) * scale - 4.0
+                        ay = page_y0 + ((ac.bbox[1] + ac.bbox[3]) / 2.0 - co_y) * scale - 4.0
+                        r.fill_rect(ax, ay, 8.0, 8.0, (1.0, 0.0, 0.0, 0.9))
 
-                        # Draw all char bboxes as thin green outlines
-                        # Green [0.0, 0.8, 0.0, 0.4]
-                        gl.glUniform4f(self.u_color, 0.0, 0.8, 0.0, 0.4)
-                        border_t = 0.8
-                        for c in pi.chars:
-                            cx0 = x_offset + (c.bbox[0] - crop_off_x) * scale
-                            cy0 = page_y0 + (c.bbox[1] - crop_off_y) * scale
-                            cw = (c.bbox[2] - c.bbox[0]) * scale
-                            ch = (c.bbox[3] - c.bbox[1]) * scale
-                            # Top
-                            gl.glUniform2f(self.u_page_pos, float(cx0), float(cy0))
-                            gl.glUniform2f(self.u_page_size, float(cw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Bottom
-                            gl.glUniform2f(self.u_page_pos, float(cx0), float(cy0 + ch - border_t))
-                            gl.glUniform2f(self.u_page_size, float(cw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Left
-                            gl.glUniform2f(self.u_page_pos, float(cx0), float(cy0))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(ch))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Right
-                            gl.glUniform2f(self.u_page_pos, float(cx0 + cw - border_t), float(cy0))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(ch))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                    if canvas.text_selection.focus_char_idx is not None:
+                        fc = pi.chars[canvas.text_selection.focus_char_idx]
+                        fx = x_offset + ((fc.bbox[0] + fc.bbox[2]) / 2.0 - co_x) * scale - 4.0
+                        fy = page_y0 + ((fc.bbox[1] + fc.bbox[3]) / 2.0 - co_y) * scale - 4.0
+                        r.fill_rect(fx, fy, 8.0, 8.0, (0.0, 0.0, 1.0, 0.9))
 
-                        # Anchor char in red [1.0, 0.0, 0.0, 0.9]
-                        if canvas.text_selection.anchor_char_idx is not None:
-                            ac = pi.chars[canvas.text_selection.anchor_char_idx]
-                            ax = x_offset + ((ac.bbox[0] + ac.bbox[2]) / 2.0 - crop_off_x) * scale - 4.0
-                            ay = page_y0 + ((ac.bbox[1] + ac.bbox[3]) / 2.0 - crop_off_y) * scale - 4.0
-                            gl.glUniform4f(self.u_color, 1.0, 0.0, 0.0, 0.9)
-                            gl.glUniform2f(self.u_page_pos, float(ax), float(ay))
-                            gl.glUniform2f(self.u_page_size, 8.0, 8.0)
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                if canvas.doc_model:
+                    links = canvas.doc_model.get_page_links(i)
+                    co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                    co_y = crop_rect.y0 if crop_rect is not None else 0.0
 
-                        # Focus char in blue [0.0, 0.0, 1.0, 0.9]
-                        if canvas.text_selection.focus_char_idx is not None:
-                            fc = pi.chars[canvas.text_selection.focus_char_idx]
-                            fx = x_offset + ((fc.bbox[0] + fc.bbox[2]) / 2.0 - crop_off_x) * scale - 4.0
-                            fy = page_y0 + ((fc.bbox[1] + fc.bbox[3]) / 2.0 - crop_off_y) * scale - 4.0
-                            gl.glUniform4f(self.u_color, 0.0, 0.0, 1.0, 0.9)
-                            gl.glUniform2f(self.u_page_pos, float(fx), float(fy))
-                            gl.glUniform2f(self.u_page_size, 8.0, 8.0)
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                    for link in links:
+                        from_rect = link.get("from")
+                        if not from_rect:
+                            continue
 
-                    # Draw Interactive PDF Links directly in OpenGL
-                    if canvas.doc_model:
-                        links = canvas.doc_model.get_page_links(i)
-                        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-                        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        scale = canvas.zoom * canvas.dpi_scale_factor
+                        lx0 = x_offset + (from_rect.x0 - co_x) * scale
+                        ly0 = page_y0 + (from_rect.y0 - co_y) * scale
+                        lw = (from_rect.x1 - from_rect.x0) * scale
+                        lh = (from_rect.y1 - from_rect.y0) * scale
 
-                        for link in links:
-                            from_rect = link.get("from")
-                            if not from_rect:
-                                continue
+                        is_hovered = (
+                            canvas.hovered_link is not None
+                            and canvas.hovered_link[0] == i
+                            and canvas.hovered_link[1] is link
+                        )
+                        is_uri = link.get("kind") == 2
 
-                            lx0 = x_offset + (from_rect.x0 - crop_off_x) * scale
-                            ly0 = page_y0 + (from_rect.y0 - crop_off_y) * scale
-                            lw = (from_rect.x1 - from_rect.x0) * scale
-                            lh = (from_rect.y1 - from_rect.y0) * scale
-
-                            is_hovered = (
-                                canvas.hovered_link is not None
-                                and canvas.hovered_link[0] == i
-                                and canvas.hovered_link[1] is link
-                            )
-                            is_uri = link.get("kind") == 2  # fitz.LINK_URI (2)
-
-                            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                            gl.glUniform1i(self.u_is_placeholder, 2)
-
-                            if is_hovered:
-                                if is_uri:
-                                    # Premultiplied green [0.18, 0.76, 0.49, 0.30]
-                                    gl.glUniform4f(self.u_color, 0.054, 0.228, 0.147, 0.30)
-                                else:
-                                    # Premultiplied blue [0.20, 0.52, 0.90, 0.30]
-                                    gl.glUniform4f(self.u_color, 0.06, 0.156, 0.27, 0.30)
-                                gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0))
-                                gl.glUniform2f(self.u_page_size, float(lw), float(lh))
-                                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-
-                            # Stroke outline border quads (1.8px)
-                            border_t = 1.8
+                        if is_hovered:
                             if is_uri:
-                                # Premultiplied green outline [0.18, 0.76, 0.49, 0.85]
-                                gl.glUniform4f(self.u_color, 0.153, 0.646, 0.4165, 0.85)
+                                r.fill_rect(lx0, ly0, lw, lh, (0.054, 0.228, 0.147, 0.30))
                             else:
-                                # Premultiplied blue outline [0.20, 0.52, 0.90, 0.85]
-                                gl.glUniform4f(self.u_color, 0.17, 0.442, 0.765, 0.85)
+                                r.fill_rect(lx0, ly0, lw, lh, (0.06, 0.156, 0.27, 0.30))
 
-                            # Top Edge
-                            gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0))
-                            gl.glUniform2f(self.u_page_size, float(lw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Bottom Edge
-                            gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0 + lh - border_t))
-                            gl.glUniform2f(self.u_page_size, float(lw), float(border_t))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Left Edge
-                            gl.glUniform2f(self.u_page_pos, float(lx0), float(ly0))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(lh))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                            # Right Edge
-                            gl.glUniform2f(self.u_page_pos, float(lx0 + lw - border_t), float(ly0))
-                            gl.glUniform2f(self.u_page_size, float(border_t), float(lh))
-                            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                        if is_uri:
+                            ec = (0.153, 0.646, 0.4165, 0.85)
+                        else:
+                            ec = (0.17, 0.442, 0.765, 0.85)
+                        bt = 1.8
+                        r.fill_rect(lx0, ly0, lw, bt, ec)
+                        r.fill_rect(lx0, ly0 + lh - bt, lw, bt, ec)
+                        r.fill_rect(lx0, ly0, bt, lh, ec)
+                        r.fill_rect(lx0 + lw - bt, ly0, bt, lh, ec)
 
-                    # Draw Debug Magenta Border if in debug_mode
-                    if getattr(canvas, "debug_mode", False):
-                        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                        gl.glUniform1i(self.u_is_placeholder, 2)
-                        gl.glUniform4f(self.u_color, 0.9, 0.0, 0.9, 0.9)  # Magenta
-                        mb_t = 2.0
-                        # Top Edge
-                        gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0))
-                        gl.glUniform2f(self.u_page_size, float(dw), float(mb_t))
-                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                        # Bottom Edge
-                        gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0 + dh - mb_t))
-                        gl.glUniform2f(self.u_page_size, float(dw), float(mb_t))
-                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                        # Left Edge
-                        gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0))
-                        gl.glUniform2f(self.u_page_size, float(mb_t), float(dh))
-                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                        # Right Edge
-                        gl.glUniform2f(self.u_page_pos, float(x_offset + dw - mb_t), float(page_y0))
-                        gl.glUniform2f(self.u_page_size, float(mb_t), float(dh))
-                        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
-                else:
-                    # Draw a nice loading placeholder (grey)
-                    gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                    gl.glUniform1i(self.u_is_placeholder, 2)
-                    gl.glUniform4f(self.u_color, 0.95, 0.95, 0.95, 1.0)
-                    gl.glUniform2f(self.u_page_pos, float(x_offset), float(page_y0))
-                    gl.glUniform2f(self.u_page_size, float(dw), float(dh))
-                    gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+                if getattr(canvas, "debug_mode", False):
+                    mc = (0.9, 0.0, 0.9, 0.9)
+                    mb_t = 2.0
+                    r.fill_rect(x_offset, page_y0, dw, mb_t, mc)
+                    r.fill_rect(x_offset, page_y0 + dh - mb_t, dw, mb_t, mc)
+                    r.fill_rect(x_offset, page_y0, mb_t, dh, mc)
+                    r.fill_rect(x_offset + dw - mb_t, page_y0, mb_t, dh, mc)
+            else:
+                r.fill_rect(x_offset, page_y0, dw, dh, (0.95, 0.95, 0.95, 1.0))
 
-        # Housekeeping: delete textures for surfaces that have been evicted from RenderCache
-        evicted = [s for s in self.textures if s not in active_surfaces]
+        evicted = [s for s in r.textures if s not in active_surfaces]
         for s in evicted:
-            tex_id = self.textures.pop(s)
+            tex_id = r.textures.pop(s)
             gl.glDeleteTextures([tex_id])
 
-        gl.glBindVertexArray(0)
+        r.end()
         gl.glUseProgram(0)
         gl.glDisable(gl.GL_BLEND)
-
-        return True
+        return False

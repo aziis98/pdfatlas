@@ -39,4 +39,8 @@ ignore = ["E402"]
 [tool.pyright]
 reportMissingModuleSource = false
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+
 

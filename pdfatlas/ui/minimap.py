@@ -14,6 +14,27 @@ from ..core.document import DocumentModel
 from ..core.settings import CropSettings
 
 
+def compute_grid(page_count: int, alloc_w: float, alloc_h: float,
+                 first_page_w: float, first_page_h: float):
+    best_scale = 0.0
+    best_C = 1
+    best_R = page_count
+    for C in range(1, page_count + 1):
+        R = math.ceil(page_count / C)
+        cell_w = alloc_w / C
+        cell_h = alloc_h / R
+        scale = min(cell_w / first_page_w, cell_h / first_page_h)
+        if scale > best_scale:
+            best_scale = scale
+            best_C = C
+            best_R = R
+    thumb_w = first_page_w * best_scale
+    thumb_h = first_page_h * best_scale
+    cell_w = alloc_w / best_C
+    cell_h = alloc_h / best_R
+    return best_C, best_R, best_scale, thumb_w, thumb_h, cell_w, cell_h
+
+
 class MiniMap(Gtk.DrawingArea):
     """
     Sidebar Minimap displaying thumbnails in a vertical column-wrapping layout.
@@ -122,57 +143,25 @@ class MiniMap(Gtk.DrawingArea):
     def _relayout(self, allocated_width, allocated_height):
         if not self.doc_model or allocated_width <= 0 or allocated_height <= 0:
             return
-
-        # Check if size actually changed to avoid redundant layout passes and timer resets
         if allocated_width == self.last_width and allocated_height == self.last_height:
             return
 
         self.last_width = allocated_width
         self.last_height = allocated_height
-
-        # Mark as not settled while resizing is active
         self.resize_settled = False
 
         if self.resize_timer_id is not None:
             GLib.source_remove(self.resize_timer_id)
             self.resize_timer_id = None
-
         self.resize_timer_id = GLib.timeout_add(200, self._on_resize_settled)
 
         page_count = self.doc_model.page_count
         if page_count == 0:
             return
 
-        # Get first page dimensions
         first_page = self.doc_model.page_rect(0)
-        w_p = first_page.width
-        h_p = first_page.height
-
-        # Find best grid (C x R) that maximizes page thumbnail size inside allocated bounds
-        best_scale = 0.0
-        best_C = 1
-        best_R = page_count
-
-        for C in range(1, page_count + 1):
-            R = math.ceil(page_count / C)
-            cell_w = allocated_width / C
-            cell_h = allocated_height / R
-            # Maximum scale factor for portrait/landscape page to fit in cell
-            scale = min(cell_w / w_p, cell_h / h_p)
-            if scale > best_scale:
-                best_scale = scale
-                best_C = C
-                best_R = R
-
-        self.n_cols = best_C
-        self.n_rows = best_R
-        self.thumb_scale = best_scale
-
-        # Save actual thumbnail dimensions and cell dimensions
-        self.thumb_w = w_p * best_scale
-        self.thumb_h = h_p * best_scale
-        self.cell_w = allocated_width / self.n_cols
-        self.cell_h = allocated_height / self.n_rows
+        self.n_cols, self.n_rows, self.thumb_scale, self.thumb_w, self.thumb_h, self.cell_w, self.cell_h = \
+            compute_grid(page_count, allocated_width, allocated_height, first_page.width, first_page.height)
 
         self.queue_draw()
 

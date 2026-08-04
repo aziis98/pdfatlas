@@ -9,6 +9,7 @@ from gi.repository import Gdk, Gtk
 from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
 from ..core.document import DocumentModel
+from ..core.layout import layout_scale, screen_to_pdf, page_at_point, link_screen_rect, anchor_before, anchor_after
 from ..core.text_selection import TextSelection
 from .gl_canvas import GLCanvas
 
@@ -175,11 +176,7 @@ class PDFCanvas(Gtk.Overlay):
         self.add_controller(click_gesture)
 
     def _screen_to_pdf_point(self, x: float, y: float, page_index: int) -> tuple[float, float] | None:
-        """Convert screen coordinates (viewport relative) to PDF point coordinates on a given page."""
-        if not self.page_layout or page_index >= len(self.page_layout):
-            return None
-
-        scale = self.zoom * self.dpi_scale_factor
+        scale = layout_scale(self.zoom, self.dpi_scale_factor)
         viewport_w = (
             self.hadjustment.get_page_size()
             if self.hadjustment and self.hadjustment.get_page_size() > 0
@@ -187,19 +184,7 @@ class PDFCanvas(Gtk.Overlay):
         )
         scroll_x = self.hadjustment.get_value() if self.hadjustment else 0.0
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
-
-        y_offset, dw, dh, crop_rect = self.page_layout[page_index]
-        page_x0 = (viewport_w - dw) / 2.0
-
-        rel_x = (x + scroll_x) - page_x0
-        rel_y = (y + scroll_y) - y_offset
-
-        crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-
-        pt_x = (rel_x / scale) + crop_off_x
-        pt_y = (rel_y / scale) + crop_off_y
-        return (pt_x, pt_y)
+        return screen_to_pdf(self.page_layout, page_index, scale, x, y, scroll_x, scroll_y, viewport_w)
 
     def on_drag_begin(self, gesture, start_x, start_y):
         """Handle drag begin - prepare text selection if no link is hit."""
@@ -292,22 +277,14 @@ class PDFCanvas(Gtk.Overlay):
 
 
     def _hit_test_page(self, x: float, y: float) -> int | None:
-        if not self.page_layout:
-            return None
-        half_gap = self.page_gap / 2.0
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
-        canvas_y = y + scroll_y
-        for i, layout in enumerate(self.page_layout):
-            y_offset, dw, dh, crop_rect = layout
-            if y_offset - half_gap <= canvas_y <= y_offset + dh + half_gap:
-                return i
-        return None
+        return page_at_point(self.page_layout, self.page_gap, x, y, scroll_y)
 
     def _hit_test_link(self, x: float, y: float) -> tuple[int, dict] | None:
         if not self.doc_model or not self.page_layout:
             return None
 
-        scale = self.zoom * self.dpi_scale_factor
+        scale = layout_scale(self.zoom, self.dpi_scale_factor)
         viewport_w = (
             self.hadjustment.get_page_size()
             if self.hadjustment and self.hadjustment.get_page_size() > 0
@@ -319,28 +296,23 @@ class PDFCanvas(Gtk.Overlay):
         canvas_x = x + scroll_x
         canvas_y = y + scroll_y
 
-        for i, layout in enumerate(self.page_layout):
-            y_offset, dw, dh, crop_rect = layout
+        for i, (y_offset, dw, dh, crop_rect) in enumerate(self.page_layout):
             page_x0 = (viewport_w - dw) / 2.0
             page_x1 = page_x0 + dw
-
             page_y0 = y_offset
             page_y1 = y_offset + dh
 
             if page_x0 <= canvas_x <= page_x1 and page_y0 <= canvas_y <= page_y1:
-                rel_x = canvas_x - page_x0
-                rel_y = canvas_y - y_offset
-
                 crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
                 crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-
+                rel_x = canvas_x - page_x0
+                rel_y = canvas_y - y_offset
                 pt_x = (rel_x / scale) + crop_off_x
                 pt_y = (rel_y / scale) + crop_off_y
 
-                links = self.doc_model.get_page_links(i)
-                for link in links:
+                for link in self.doc_model.get_page_links(i):
                     from_rect = link.get("from")
-                    if from_rect and (from_rect.x0 <= pt_x <= from_rect.x1 and from_rect.y0 <= pt_y <= from_rect.y1):
+                    if from_rect and from_rect.x0 <= pt_x <= from_rect.x1 and from_rect.y0 <= pt_y <= from_rect.y1:
                         return (i, link)
                 break
         return None
@@ -353,7 +325,7 @@ class PDFCanvas(Gtk.Overlay):
         if not from_rect or not self.page_layout:
             return None
 
-        scale = self.zoom * self.dpi_scale_factor
+        scale = layout_scale(self.zoom, self.dpi_scale_factor)
         viewport_w = (
             self.hadjustment.get_page_size()
             if self.hadjustment and self.hadjustment.get_page_size() > 0
@@ -361,23 +333,7 @@ class PDFCanvas(Gtk.Overlay):
         )
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
 
-        if 0 <= page_index < len(self.page_layout):
-            y_offset, dw, dh, crop_rect = self.page_layout[page_index]
-            page_x0 = (viewport_w - dw) / 2.0
-            page_y0 = y_offset - scroll_y
-
-            crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
-            crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-
-            link_screen_x0 = page_x0 + (from_rect.x0 - crop_off_x) * scale
-            link_screen_y0 = page_y0 + (from_rect.y0 - crop_off_y) * scale
-            link_screen_w = (from_rect.x1 - from_rect.x0) * scale
-            link_screen_h = (from_rect.y1 - from_rect.y0) * scale
-
-            return (link_screen_x0, link_screen_y0, link_screen_w, link_screen_h)
-        return None
-
-        return None
+        return link_screen_rect(self.page_layout, page_index, scale, viewport_w, scroll_y, link)
 
     def queue_draw_overlays(self, reason=""):
         self.gl_canvas.queue_draw()
@@ -522,37 +478,18 @@ class PDFCanvas(Gtk.Overlay):
         self.queue_draw_overlays("crop-changed")
 
     def _anchor_layout_point(self) -> tuple[int, float] | None:
-        """Capture the (page_index, pdf_y) point currently at viewport center."""
         if not self.page_layout or self.vadjustment is None:
             return None
-        point_y = self.vadjustment.get_value() + self.vadjustment.get_page_size() * 0.5
-        scale = self.zoom * self.dpi_scale_factor
-        for i, (y0, _dw, dh, crop) in enumerate(self.page_layout):
-            if y0 + dh >= point_y - 1e-6:
-                crop_off = crop.y0 if crop is not None else 0.0
-                pdf_y = crop_off + (point_y - y0) / scale
-                return (i, pdf_y)
-        if self.page_layout:
-            _y0, _dw, _dh, crop = self.page_layout[-1]
-            return (len(self.page_layout) - 1, crop.y0 if crop is not None else 0.0)
-        return None
+        return anchor_before(self.page_layout, self.vadjustment.get_value(),
+                             self.vadjustment.get_page_size(), self.zoom, self.dpi_scale_factor)
 
     def _restore_anchor(self, anchor: tuple[int, float] | None) -> None:
-        """Keep the anchored document point at viewport center after a layout change."""
         if anchor is None or self.vadjustment is None or not self.page_layout:
             return
-        page_index, pdf_y = anchor
-        if page_index >= len(self.page_layout):
-            return
-        y0, _dw, _dh, crop = self.page_layout[page_index]
-        crop_off = crop.y0 if crop is not None else 0.0
-        target_center = y0 + (pdf_y - crop_off) * (self.zoom * self.dpi_scale_factor)
-
-        page_size = self.vadjustment.get_page_size()
-        target_val = target_center - page_size * 0.5
-        lower = self.vadjustment.get_lower()
-        max_y = max(lower, self.vadjustment.get_upper() - page_size)
-        self.vadjustment.set_value(max(lower, min(target_val, max_y)))
+        self.vadjustment.set_value(
+            anchor_after(self.page_layout, anchor, self.zoom, self.dpi_scale_factor,
+                         self.vadjustment.get_upper(), self.vadjustment.get_page_size())
+        )
 
     def set_highlighted_block(self, page_index: int, bbox: tuple | None):
         self.highlighted_block = (page_index, bbox) if bbox is not None else None
@@ -600,8 +537,8 @@ class PDFCanvas(Gtk.Overlay):
             rect = crop_rect if crop_rect is not None else page_rect
 
             # Apply dpi_scale_factor to logical layout dimensions
-            dw = rect.width * self.zoom * self.dpi_scale_factor
-            dh = rect.height * self.zoom * self.dpi_scale_factor
+            dw = rect.width * layout_scale(self.zoom, self.dpi_scale_factor)
+            dh = rect.height * layout_scale(self.zoom, self.dpi_scale_factor)
 
             self.page_layout.append((current_y, dw, dh, crop_rect))
 
@@ -614,6 +551,47 @@ class PDFCanvas(Gtk.Overlay):
             self.vadjustment.set_upper(current_y)
 
         self._update_visibility()
+
+    def _request_render(self, page_index: int, zoom_key: float, scale_factor: int, crop_key, priority: int = 0):
+        if not self.cache or not self.render_worker:
+            return
+        container = self.containers[page_index]
+        job_key = (page_index, zoom_key, scale_factor, crop_key)
+        if job_key not in self.in_flight and self.cache.get(page_index, self.zoom, scale_factor, container.crop_rect) is None:
+            self.in_flight.add(job_key)
+
+            def make_cb(p_idx, zk, sf, ck):
+                return lambda: self._on_render_complete(p_idx, zk, sf, ck)
+
+            self.render_worker.queue_render_job(
+                priority=priority,
+                doc_model=self.doc_model,
+                page_index=page_index,
+                zoom=layout_scale(self.zoom, self.dpi_scale_factor),
+                scale_factor=scale_factor,
+                crop_rect=container.crop_rect,
+                is_minimap=False,
+                target_cache=self.cache,
+                redraw_callback=make_cb(page_index, zoom_key, scale_factor, crop_key),
+                screen_physical_dpi=self.screen_physical_dpi,
+            )
+
+    def _crop_key(self, page_index: int):
+        c = self.containers[page_index].crop_rect
+        if c is None:
+            return None
+        return (c.x0, c.y0, c.x1, c.y1)
+
+    def _prefetch_targets(self, first_visible: int, last_visible: int) -> list[tuple[int, int]]:
+        targets = []
+        page_count = len(self.containers)
+        for idx, priority in [
+            (first_visible - 1, 1), (last_visible + 1, 1),
+            (first_visible - 2, 2), (last_visible + 2, 2),
+        ]:
+            if 0 <= idx < page_count:
+                targets.append((idx, priority))
+        return targets
 
     def _update_visibility(self):
         if not self.vadjustment or not self.doc_model:
@@ -628,7 +606,6 @@ class PDFCanvas(Gtk.Overlay):
         first_visible = None
         last_visible = None
 
-        # 1. Collect visible pages and queue render requests for them
         for i, container in enumerate(self.containers):
             page_y0 = container.y_offset
             page_y1 = container.y_offset + container.h
@@ -636,87 +613,12 @@ class PDFCanvas(Gtk.Overlay):
                 if first_visible is None:
                     first_visible = i
                 last_visible = i
-
                 if not self.is_pinching:
-                    crop_key = (
-                        (
-                            container.crop_rect.x0,
-                            container.crop_rect.y0,
-                            container.crop_rect.x1,
-                            container.crop_rect.y1,
-                        )
-                        if container.crop_rect is not None
-                        else None
-                    )
-                    if self.cache and self.cache.get(i, self.zoom, scale_factor, container.crop_rect) is None:
-                        job_key = (i, zoom_key, scale_factor, crop_key)
-                        if job_key not in self.in_flight and self.render_worker:
-                            self.in_flight.add(job_key)
+                    self._request_render(i, zoom_key, scale_factor, self._crop_key(i), priority=0)
 
-                            def make_cb(p_idx, zk, sf, ck):
-                                return lambda: self._on_render_complete(p_idx, zk, sf, ck)
-
-                            self.render_worker.queue_render_job(
-                                priority=0,  # High priority for visible pages
-                                doc_model=self.doc_model,
-                                page_index=i,
-                                zoom=self.zoom * self.dpi_scale_factor,
-                                scale_factor=scale_factor,
-                                crop_rect=container.crop_rect,
-                                is_minimap=False,
-                                target_cache=self.cache,
-                                redraw_callback=make_cb(i, zoom_key, scale_factor, crop_key),
-                                screen_physical_dpi=self.screen_physical_dpi,
-                            )
-
-        # 2. Queue prefetch jobs for adjacent pages (skipped during pinch)
-        if not self.is_pinching and first_visible is not None and last_visible is not None and self.cache and self.render_worker:
-            prefetch_targets = []
-            page_count = len(self.containers)
-            # Priority 1: Adjacent ±1
-            if first_visible - 1 >= 0:
-                prefetch_targets.append((first_visible - 1, 1))
-            if last_visible + 1 < page_count:
-                prefetch_targets.append((last_visible + 1, 1))
-            # Priority 2: Adjacent ±2
-            if first_visible - 2 >= 0:
-                prefetch_targets.append((first_visible - 2, 2))
-            if last_visible + 2 < page_count:
-                prefetch_targets.append((last_visible + 2, 2))
-
-            for idx, priority in prefetch_targets:
-                container = self.containers[idx]
-                crop_key = (
-                    (
-                        container.crop_rect.x0,
-                        container.crop_rect.y0,
-                        container.crop_rect.x1,
-                        container.crop_rect.y1,
-                    )
-                    if container.crop_rect is not None
-                    else None
-                )
-
-                if self.cache.get(idx, self.zoom, scale_factor, container.crop_rect) is None:
-                    job_key = (idx, zoom_key, scale_factor, crop_key)
-                    if job_key not in self.in_flight:
-                        self.in_flight.add(job_key)
-
-                        def make_cb(p_idx, zk, sf, ck):
-                            return lambda: self._on_render_complete(p_idx, zk, sf, ck)
-
-                        self.render_worker.queue_render_job(
-                            priority=priority,
-                            doc_model=self.doc_model,
-                            page_index=idx,
-                            zoom=self.zoom * self.dpi_scale_factor,
-                            scale_factor=scale_factor,
-                            crop_rect=container.crop_rect,
-                            is_minimap=False,
-                            target_cache=self.cache,
-                            redraw_callback=make_cb(idx, zoom_key, scale_factor, crop_key),
-                            screen_physical_dpi=self.screen_physical_dpi,
-                        )
+        if not self.is_pinching and first_visible is not None and last_visible is not None:
+            for idx, priority in self._prefetch_targets(first_visible, last_visible):
+                self._request_render(idx, zoom_key, scale_factor, self._crop_key(idx), priority=priority)
 
     def _on_render_complete(self, page_index, zoom_key, scale_factor, crop_key):
         self.in_flight.discard((page_index, zoom_key, scale_factor, crop_key))

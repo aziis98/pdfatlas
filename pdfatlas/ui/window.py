@@ -35,6 +35,7 @@ from .services import IconThemeManager, ScreenshotService
 from .settings import SettingsWindow
 from .shortcuts import ShortcutsController
 from .theme import load_window_css
+from .gui import box, button, label, search_entry, scrolled_window, spacer
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
@@ -66,8 +67,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._deferred_state_query = None
 
         if self.screenshot_path:
-            dir_name = os.path.dirname(self.screenshot_path)
-            if dir_name:
+            if (dir_name := os.path.dirname(self.screenshot_path)):
                 os.makedirs(dir_name, exist_ok=True)
             GLib.timeout_add(2000, self._take_programmatic_screenshot)
 
@@ -164,91 +164,72 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
 
-        # Main vertical container
-        main_layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        main_layout = box()
         self.toast_overlay.set_child(main_layout)
 
-        # HeaderBar Setup
         header = Adw.HeaderBar()
         main_layout.append(header)
 
         # Left: Open Button & Filename Label
-        left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-
         self.open_btn = Adw.SplitButton()
         self.open_btn.set_icon_name("document-open-symbolic")
         self.open_btn.set_tooltip_text("Open PDF [Ctrl+O]")
         self.open_btn.add_css_class("raised")
         self.open_btn.connect("clicked", lambda b: self._open_file_dialog())
         self._rebuild_open_menu()
-        left_box.append(self.open_btn)
 
-        self.filename_label = Gtk.Label(label="No document loaded")
-        self.filename_label.set_ellipsize(Pango.EllipsizeMode.END)  # End ellipsizing
-        self.filename_label.set_max_width_chars(40)
-        self.filename_label.set_xalign(0)
-        self.filename_label.add_css_class("caption")
-        left_box.append(self.filename_label)
-
+        self.filename_label = label(text="No document loaded", css_class="caption",
+                                    ellipsize=Pango.EllipsizeMode.END, max_width_chars=40, xalign=0)
+        left_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+                       children=[self.open_btn, self.filename_label])
         header.pack_start(left_box)
 
         # Center: Search Entry
-        self.entry = Gtk.SearchEntry()
-        self.entry.set_placeholder_text("No document loaded")
-        self.entry.set_sensitive(False)
-        self.entry.set_hexpand(False)
-        self.entry.set_halign(Gtk.Align.CENTER)
-        self.entry.set_size_request(300, -1)
-        self.entry.set_max_width_chars(45)
+        self.entry = search_entry(placeholder="No document loaded", sensitive=False)
         self.entry.connect("search-changed", self.search_controller.on_search_changed_debounced)
         self.entry.connect("activate", self.search_controller.on_activate_immediate)
         header.set_title_widget(self.entry)
 
         # Right: Page Navigation Entry + Total Pages Label, Menu Button
-        right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        right_box.set_margin_end(12)
+        right_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_end=12)
         header.pack_end(right_box)
 
-        # 4-character wide page text input
         self.page_input = Gtk.Entry()
-        self.page_input.add_css_class("page-input")
         self.page_input.set_width_chars(4)
-        self.page_input.set_max_width_chars(4)  # Enforce tight 4-character natural size constraint
+        self.page_input.set_max_width_chars(4)
         self.page_input.set_max_length(5)
         self.page_input.set_alignment(0.5)
         self.page_input.set_sensitive(False)
         self.page_input.set_text("1")
         self.page_input.set_hexpand(False)
         self.page_input.set_halign(Gtk.Align.CENTER)
+        self.page_input.add_css_class("page-input")
         self.page_input.connect("activate", self._on_page_input_activate)
         page_input_focus = Gtk.EventControllerFocus.new()
         page_input_focus.connect("leave", lambda ctrl: self._on_scroll_page_changed(self.vadjustment))
         self.page_input.add_controller(page_input_focus)
         right_box.append(self.page_input)
 
-        self.page_total_label = Gtk.Label(label="of 0")
+        self.page_total_label = label(text="of 0")
         right_box.append(self.page_total_label)
 
-        # Build native options menu using GMenu Model for checkmarks
+        # GMenu Model
         menu = Gio.Menu.new()
         menu.append("Gap-less Mode", "win.gapless-mode")
         menu.append("Auto-crop Mode", "win.crop-mode")
-
         section = Gio.Menu.new()
         section.append("Open Settings", "win.open-settings")
         section.append("About PDF Atlas", "win.about")
         menu.append_section(None, section)
-
         install_section = Gio.Menu.new()
         install_section.append("Install Desktop Application", "win.install-app")
         menu.append_section(None, install_section)
 
-        # Three-dot Action Menu with Badge Overlay
-        self.menu_button_overlay = Gtk.Overlay()
         self.menu_button = Gtk.MenuButton()
         self.menu_button.set_icon_name("view-more-symbolic")
         self.menu_button.set_tooltip_text("Options")
         self.menu_button.set_menu_model(menu)
+        self.menu_button_overlay = Gtk.Overlay()
         self.menu_button_overlay.set_child(self.menu_button)
 
         self.menu_badge_dot = Gtk.Box()
@@ -263,15 +244,12 @@ class MainWindow(Adw.ApplicationWindow):
         right_box.append(self.menu_button_overlay)
         self._update_installation_badge_status()
 
-
-
-        # Content Overlay wrapping view stack & OSD progress bar
+        # Content Overlay + Stack
         self.content_overlay = Gtk.Overlay()
         self.content_overlay.set_hexpand(True)
         self.content_overlay.set_vexpand(True)
         main_layout.append(self.content_overlay)
 
-        # Gtk.Stack for View Switching
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
         self.stack.set_hexpand(True)
@@ -279,7 +257,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.set_transition_duration(150)
         self.content_overlay.set_child(self.stack)
 
-        # OSD Progress Bar overlay attached to top of window content
         self.progress_bar = Gtk.ProgressBar()
         self.progress_bar.add_css_class("osd")
         self.progress_bar.set_valign(Gtk.Align.START)
@@ -287,7 +264,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.progress_bar.set_visible(False)
         self.content_overlay.add_overlay(self.progress_bar)
 
-        # Initialize CSS styling for canvas background and page margins
         self.css_provider = load_window_css()
         display = Gdk.Display.get_default()
         if display is not None:
@@ -295,49 +271,39 @@ class MainWindow(Adw.ApplicationWindow):
                 display, self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
 
-        # Child 1: Document View Setup - the canvas owns its GL + scroll layers
+        # Document View
         self.canvas = PDFCanvas()
         self.canvas.debug_mode = self.debug_mode
-
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_page_hovered = self._on_page_hovered
         self.canvas.on_selection_changed = self._update_selection_toolbar
 
-        # Build floating zoom controls box, link preview box, and bottom selection toolbar
         self._build_floating_zoom_controls()
         self._build_floating_link_preview()
         self._build_selection_toolbar()
 
-        # Link Preview Manager setup
         self.link_preview_manager = LinkPreviewManager(self)
         self.canvas.on_link_hovered = self.link_preview_manager.on_link_hovered
 
-        # Floating overlay widgets (top layers) attached onto the document canvas
-        self.canvas.add_overlay(self.zoom_floating_box)  # Floating zoom controls
-        self.canvas.add_overlay(self.link_preview_box)  # Floating link preview label
-        self.canvas.add_overlay(self.link_preview_manager.portal_card)  # Floating link portal card
+        self.canvas.add_overlay(self.zoom_floating_box)
+        self.canvas.add_overlay(self.link_preview_box)
+        self.canvas.add_overlay(self.link_preview_manager.portal_card)
         if self.debug_mode:
             self._build_debug_cache_box()
         self.stack.add_named(self.canvas, "document-view")
 
-        # Child 2: Search View Setup
-        self.search_scrolled = Gtk.ScrolledWindow()
-        self.search_scrolled.set_hexpand(True)
-        self.search_scrolled.set_vexpand(True)
-        self.results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        self.results_box.set_margin_top(16)
-        self.results_box.set_margin_bottom(24)
+        # Search View
+        self.search_scrolled = scrolled_window()
+        self.results_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                               margin_top=16, margin_bottom=24)
         self.search_scrolled.set_child(self.results_box)
         self.stack.add_named(self.search_scrolled, "search-view")
 
         # Adjustments wiring (owned by the canvas)
         self.vadjustment = self.canvas.vadjustment
         self.hadjustment = self.canvas.hadjustment
-
-        # Connect vertical scroll adjustment to track current page
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
 
-        # Gestures for canvas zooming/scrolling
         self._setup_canvas_gestures()
 
     def _setup_canvas_gestures(self):
@@ -612,8 +578,13 @@ class MainWindow(Adw.ApplicationWindow):
                         return False
 
                     GLib.idle_add(apply_deferred_state)
+
+                    # If page is specified, navigate to it after layout
+                    if "page" in state:
+                        target_page = int(state["page"]) - 1
+                        GLib.idle_add(lambda: self.jump_to_page(target_page))
                 except Exception as e:
-                    print(f"[MainWindow] Error restoring programmatic state: {e}", flush=True)
+                    print(f"Failed to restore initial CLI state: {e}")
 
             if self.follow_link is not None:
                 follow_idx: int = self.follow_link
@@ -717,8 +688,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_open_response(self, dialog, response_id):
         if response_id == Gtk.ResponseType.ACCEPT:
-            file = dialog.get_file()
-            path = file.get_path()
+            path = dialog.get_file().get_path()
             if path:
                 existing = self.recent_files.get_by_uri(path)
                 aid = arxiv_id_from_path(path)
@@ -912,10 +882,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         target_page = link.get("page")
-        uri = link.get("uri")
 
         if target_page is None or not isinstance(target_page, int) or target_page < 0 or target_page >= self.doc_model.page_count:
-            if uri:
+            if uri := link.get("uri"):
                 try:
                     Gtk.show_uri(self, uri, Gdk.CURRENT_TIME)
                 except Exception as e:
@@ -1017,23 +986,21 @@ class MainWindow(Adw.ApplicationWindow):
         self._on_crop_settings_updated()
 
     def _on_settings_btn_clicked(self, btn):
-        dialog = SettingsWindow(
+        SettingsWindow(
             parent_window=self,
             settings=self.settings,
             on_changed=self._on_settings_changed,
             on_reanalyze=self._on_reanalyze,
-        )
-        dialog.present()
+        ).present()
 
     def _on_about_action_activated(self, action=None, param=None):
-        about = Adw.AboutDialog(
+        Adw.AboutDialog(
             application_name="PDF Atlas",
             application_icon=IconThemeManager.get_app_icon_name(),
             developer_name="PDF Atlas Team",
             version="1.0.0",
             comments="High-performance PDF document viewer with spatial navigator and FTS5 search.",
-        )
-        about.present(self)
+        ).present(self)
 
     def _on_settings_changed(self):
         self._on_crop_settings_updated()
@@ -1127,14 +1094,11 @@ class MainWindow(Adw.ApplicationWindow):
 
 
     def _on_install_app_action_activated(self):
-        success = ensure_app_installed(force=True)
-        if success:
-            toast = Adw.Toast.new("Desktop application launcher installed!")
-            self.add_toast(toast)
+        if ensure_app_installed(force=True):
+            self.add_toast(Adw.Toast.new("Desktop application launcher installed!"))
             self._update_installation_badge_status()
         else:
-            toast = Adw.Toast.new("Installation failed.")
-            self.add_toast(toast)
+            self.add_toast(Adw.Toast.new("Installation failed."))
 
 
     def close(self):
@@ -1153,62 +1117,43 @@ class MainWindow(Adw.ApplicationWindow):
         super().close()
 
     def _build_floating_zoom_controls(self):
-        self.zoom_floating_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.zoom_floating_box.add_css_class("zoom-floating-box")
-        self.zoom_floating_box.set_halign(Gtk.Align.END)
-        self.zoom_floating_box.set_valign(Gtk.Align.END)
-        self.zoom_floating_box.set_margin_end(20)
-        self.zoom_floating_box.set_margin_bottom(20)
-
-        self.zoom_in_btn = Gtk.Button()
-        self.zoom_in_btn.set_icon_name("zoom-in-symbolic")
-        self.zoom_in_btn.set_tooltip_text("Zoom In")
-        self.zoom_in_btn.connect("clicked", lambda b: self.zoom_in())
-        self.zoom_floating_box.append(self.zoom_in_btn)
-
-        self.zoom_label = Gtk.Label(label="100%")
-        self.zoom_label.add_css_class("zoom-floating-label")
-        self.zoom_floating_box.append(self.zoom_label)
-
-        self.zoom_out_btn = Gtk.Button()
-        self.zoom_out_btn.set_icon_name("zoom-out-symbolic")
-        self.zoom_out_btn.set_tooltip_text("Zoom Out")
-        self.zoom_out_btn.connect("clicked", lambda b: self.zoom_out())
-        self.zoom_floating_box.append(self.zoom_out_btn)
+        self.zoom_label = label(text="100%", css_class="zoom-floating-label")
+        self.zoom_floating_box = box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4, css_class="zoom-floating-box",
+            halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=20, margin_bottom=20,
+            children=[
+                button(icon_name="zoom-in-symbolic", tooltip="Zoom In", on_clicked=lambda b: self.zoom_in()),
+                self.zoom_label,
+                button(icon_name="zoom-out-symbolic", tooltip="Zoom Out", on_clicked=lambda b: self.zoom_out()),
+            ],
+        )
 
     def _build_floating_link_preview(self):
-        self.link_preview_label = Gtk.Label()
-        self.link_preview_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.link_preview_label.set_max_width_chars(65)
+        self.link_preview_label = label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=65)
 
-        self.link_preview_card_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.link_preview_card_box.add_css_class("link-preview-box")
-        self.link_preview_card_box.set_halign(Gtk.Align.START)
-        self.link_preview_card_box.append(self.link_preview_label)
+        self.link_preview_card_box = box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+            css_class="link-preview-box", halign=Gtk.Align.START,
+            children=[self.link_preview_label],
+        )
         self.link_preview_card_box.set_visible(False)
 
-        self.link_preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.link_preview_box.set_halign(Gtk.Align.START)
-        self.link_preview_box.set_valign(Gtk.Align.END)
-        self.link_preview_box.set_margin_start(8)
-        self.link_preview_box.set_margin_bottom(8)
-        self.link_preview_box.append(self.link_preview_card_box)
+        self.link_preview_box = box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6,
+            halign=Gtk.Align.START, valign=Gtk.Align.END, margin_start=8, margin_bottom=8,
+            children=[self.link_preview_card_box],
+        )
 
         if self.debug_mode:
-            self.debug_info_label = Gtk.Label(xalign=0.0)
-            self.debug_info_label.set_halign(Gtk.Align.START)
-            self.debug_info_label.set_justify(Gtk.Justification.LEFT)
-            self.debug_info_label.add_css_class("debug-info-label")
+            self.debug_info_label = label(xalign=0.0, halign=Gtk.Align.START,
+                                          justify=Gtk.Justification.LEFT, css_class="debug-info-label")
             self.debug_info_label.set_visible(False)
             self.link_preview_box.append(self.debug_info_label)
 
-            self.debug_arxiv_label = Gtk.Label(xalign=0.0)
-            self.debug_arxiv_label.set_halign(Gtk.Align.START)
-            self.debug_arxiv_label.set_justify(Gtk.Justification.LEFT)
-            self.debug_arxiv_label.add_css_class("debug-info-label")
+            self.debug_arxiv_label = label(xalign=0.0, halign=Gtk.Align.START,
+                                           justify=Gtk.Justification.LEFT, css_class="debug-info-label",
+                                           wrap=True, max_width_chars=80)
             self.debug_arxiv_label.set_visible(False)
-            self.debug_arxiv_label.set_wrap(True)
-            self.debug_arxiv_label.set_max_width_chars(80)
             self.link_preview_box.append(self.debug_arxiv_label)
         else:
             self.debug_info_label = None
@@ -1217,35 +1162,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.link_preview_box.set_visible(False)
 
     def _build_selection_toolbar(self):
-        self.selection_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.selection_toolbar.add_css_class("selection-toolbar")
-        self.selection_toolbar.set_valign(Gtk.Align.END)
-        self.selection_toolbar.set_halign(Gtk.Align.FILL)
+        self.btn_copy_text = button(label="Copy", tooltip="Copy selected PDF text [Ctrl+Shift+C]",
+                                    on_clicked=lambda b: self._copy_pdf_text_to_clipboard())
+        self.btn_copy_tex = button(label="Copy Source TeX", tooltip="Copy source TeX for selection [Ctrl+C]",
+                                   on_clicked=lambda b: self._copy_tex_to_clipboard())
+        self.selection_toolbar = box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
+            css_class="selection-toolbar", valign=Gtk.Align.END, halign=Gtk.Align.FILL,
+            children=[
+                box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+                    children=[self.btn_copy_text, self.btn_copy_tex]),
+                spacer(),
+            ],
+        )
         self.selection_toolbar.set_visible(False)
 
-        # Left box: Copy buttons
-        left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-
-        # Copy PDF text button ("Copy")
-        self.btn_copy_text = Gtk.Button(label="Copy")
-        self.btn_copy_text.set_tooltip_text("Copy selected PDF text [Ctrl+Shift+C]")
-        self.btn_copy_text.connect("clicked", lambda b: self._copy_pdf_text_to_clipboard())
-        left_box.append(self.btn_copy_text)
-
-        # Copy Source TeX button
-        self.btn_copy_tex = Gtk.Button(label="Copy Source TeX")
-        self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
-        self.btn_copy_tex.connect("clicked", lambda b: self._copy_tex_to_clipboard())
-        left_box.append(self.btn_copy_tex)
-
-        self.selection_toolbar.append(left_box)
-
-        # Expanding spacer between left buttons and right info icon
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        self.selection_toolbar.append(spacer)
-
-        # Right info button with Gtk.Popover for shortcuts info
         self.info_menu_btn = Gtk.MenuButton()
         self.info_menu_btn.set_icon_name("dialog-information-symbolic")
         self.info_menu_btn.set_direction(Gtk.ArrowType.UP)
@@ -1254,41 +1185,19 @@ class MainWindow(Adw.ApplicationWindow):
 
         popover = Gtk.Popover()
         popover.set_position(Gtk.PositionType.TOP)
-        popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        popover_box.set_margin_top(10)
-        popover_box.set_margin_bottom(10)
-        popover_box.set_margin_start(12)
-        popover_box.set_margin_end(12)
-
-        title_label = Gtk.Label(label="Text Selection Shortcuts")
-        title_label.add_css_class("heading")
-        title_label.set_xalign(0)
-        popover_box.append(title_label)
-
-        grid = Gtk.Grid()
-        grid.set_column_spacing(16)
-        grid.set_row_spacing(6)
-
-        # Row 1: Ctrl+C
-        k1 = Gtk.Label(label="Ctrl+C")
-        k1.add_css_class("dim-label")
-        k1.set_xalign(0)
-        v1 = Gtk.Label(label="Copy source (if available)")
-        v1.set_xalign(0)
-        grid.attach(k1, 0, 0, 1, 1)
-        grid.attach(v1, 1, 0, 1, 1)
-
-        # Row 2: Ctrl+Shift+C
-        k2 = Gtk.Label(label="Ctrl+Shift+C")
-        k2.add_css_class("dim-label")
-        k2.set_xalign(0)
-        v2 = Gtk.Label(label="Copy PDF text")
-        v2.set_xalign(0)
-        grid.attach(k2, 0, 1, 1, 1)
-        grid.attach(v2, 1, 1, 1, 1)
-
-        popover_box.append(grid)
-        popover.set_child(popover_box)
+        popover_grid = Gtk.Grid(column_spacing=16, row_spacing=6)
+        popover.set_child(box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8,
+            margin_top=10, margin_bottom=10, margin_start=12, margin_end=12,
+            children=[
+                label(text="Text Selection Shortcuts", css_class="heading", xalign=0),
+                popover_grid,
+            ],
+        ))
+        popover_grid.attach(label(text="Ctrl+C", css_class="dim-label", xalign=0), 0, 0, 1, 1)
+        popover_grid.attach(label(text="Copy source (if available)", xalign=0), 1, 0, 1, 1)
+        popover_grid.attach(label(text="Ctrl+Shift+C", css_class="dim-label", xalign=0), 0, 1, 1, 1)
+        popover_grid.attach(label(text="Copy PDF text", xalign=0), 1, 1, 1, 1)
         self.info_menu_btn.set_popover(popover)
 
         self.selection_toolbar.append(self.info_menu_btn)

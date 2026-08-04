@@ -98,6 +98,13 @@ This document records durable technical findings, architectural decisions, mathe
   - **Icon Theme Suffix Resolution in GTK ([`gtk/gtkicontheme.c#L2775-L2787`](https://gitlab.gnome.org/GNOME/gtk/-/blob/main/gtk/gtkicontheme.c#L2775-L2787)):** GTK's `GtkIconTheme` matches filenames against specific extension suffixes (`.symbolic.png`, `.png`, `.svg`, `.xpm`).
 - **Application:** Adopted `Icon=com-aziis98-pdfatlas` (hyphenated) across `.desktop` entries, installer scripts (`PKGBUILD`), and Linux installation services (`pdfatlas/core/installation.py`) as a pragmatic fix.
 
+### 1.14. Modular Layout, GTK GUI Builder & OpenGL Quad Renderer Decoupling
+- **Finding:** Concentrating GTK widget construction, Cairo utility drawing, OpenGL shader lifecycle, and multi-page coordinate conversion within monolithic UI components (`window.py`, `canvas.py`, `gl_canvas.py`) led to code repetition and reduced testability.
+- **Solution:**
+  1. Extracted pure geometric coordinate conversions (`screen_to_pdf`, `pdf_rect_to_screen`, `page_at_point`, `anchor_before`, `anchor_after`, `layout_scale`) into [`pdfatlas/core/layout.py`](pdfatlas/core/layout.py) and added comprehensive unit test suites in `tests/test_layout.py`.
+  2. Extracted OpenGL shader loading, program linking, and quad drawing into [`pdfatlas/ui/gl_renderer.py`](pdfatlas/ui/gl_renderer.py) with vertex/fragment shaders in `assets/shaders/`.
+  3. Created declarative widget builders (`box`, `button`, `label`, `search_entry`, `scrolled_window`, `spacer`) in [`pdfatlas/ui/gui.py`](pdfatlas/ui/gui.py) and Cairo helpers in [`pdfatlas/ui/cairo_utils.py`](pdfatlas/ui/cairo_utils.py) to streamline GTK container assembly.
+
 ---
 
 ## 2. Rejected Approaches
