@@ -98,13 +98,13 @@ def download_arxiv_source(arxiv_id: str) -> tuple[Path, Path]:
     return pdf_path, cache_dir
 
 
-def extract_pdf_text_with_metadata(pdf_path: str | Path) -> tuple[str, list[tuple[int, int, int]]]:
+def extract_pdf_text_with_metadata(pdf_path: str | Path) -> tuple[str, list[tuple[int, float, float, float, float]]]:
     """
-    Extract PDF text words and build metadata linking each word index to (page_idx, word_idx_on_page, word_idx_on_page).
+    Extract PDF text words and build metadata linking each word index to (page_idx, x0, y0, x1, y1).
     Uses PyMuPDF's native words layout engine.
     """
     doc = fitz.open(str(pdf_path))
-    word_metadata: list[tuple[int, int, int]] = []
+    word_metadata: list[tuple[int, float, float, float, float]] = []
     pdf_words: list[str] = []
 
     for page_idx in range(len(doc)):
@@ -114,11 +114,12 @@ def extract_pdf_text_with_metadata(pdf_path: str | Path) -> tuple[str, list[tupl
         except (RuntimeError, ValueError):
             raw_words = []
 
-        for word_idx, w in enumerate(raw_words):
-            word_str = str(w[4])
+        for w in raw_words:
+            # w is (x0, y0, x1, y1, word_str, block_no, line_no, word_no)
+            x0, y0, x1, y1, word_str = float(w[0]), float(w[1]), float(w[2]), float(w[3]), str(w[4])
             if word_str.strip():
                 pdf_words.append(word_str)
-                word_metadata.append((page_idx, word_idx, word_idx))
+                word_metadata.append((page_idx, x0, y0, x1, y1))
 
     doc.close()
     full_text = " ".join(pdf_words)
@@ -189,7 +190,7 @@ class ArxivDiffMapper:
         self.tex_text: str = ""
         self.pdf_words: list[str] = []
         self.tex_words: list[str] = []
-        self.word_metadata: list[tuple[int, int, int]] = []
+        self.word_metadata: list[tuple[int, float, float, float, float]] = []
         self.diff_opcodes: list[tuple] = []
         self.pdf_to_tex_map: dict[int, int] = {}
         self.tex_to_pdf_map: dict[int, int] = {}
@@ -292,25 +293,37 @@ class ArxivDiffMapper:
             flush=True,
         )
 
-    def find_pdf_word_range(self, page_index: int, start_char: int, end_char: int) -> tuple[int, int]:
-        """Find the start and end PDF word indices for a given page character range."""
+    def find_pdf_word_range(
+        self,
+        page_index: int,
+        start_char: int,
+        end_char: int,
+        char_rects: list[tuple[float, float, float, float]] | None = None,
+    ) -> tuple[int, int]:
+        """Find start and end PDF word indices whose word boxes intersect the selection character boxes."""
         if not self.word_metadata:
             return (0, 0)
 
         min_w = None
         max_w = None
 
-        for idx, (p_idx, c_start, c_end) in enumerate(self.word_metadata):
-            if p_idx == page_index:
-                if c_end >= start_char and c_start <= end_char:
-                    if min_w is None:
-                        min_w = idx
-                    max_w = idx
+        if char_rects:
+            for idx, item in enumerate(self.word_metadata):
+                p_idx = item[0]
+                if p_idx == page_index:
+                    w_box = (item[1], item[2], item[3], item[4])
+                    if any(
+                        not (w_box[2] < c_box[0] - 1.0 or w_box[0] > c_box[2] + 1.0 or w_box[3] < c_box[1] - 1.0 or w_box[1] > c_box[3] + 1.0)
+                        for c_box in char_rects
+                    ):
+                        if min_w is None:
+                            min_w = idx
+                        max_w = idx
 
         if min_w is None or max_w is None:
-            # Fallback: locate nearest word on page
-            for idx, (p_idx, c_start, _) in enumerate(self.word_metadata):
-                if p_idx == page_index:
+            # Fallback based on page index
+            for idx, item in enumerate(self.word_metadata):
+                if item[0] == page_index:
                     if min_w is None:
                         min_w = idx
                     max_w = idx
@@ -320,12 +333,18 @@ class ArxivDiffMapper:
 
         return (min_w, max_w)
 
-    def get_latex_for_pdf_range(self, page_index: int, start_char: int, end_char: int) -> str:
-        """Map selected PDF character range to raw LaTeX source snippet."""
+    def get_latex_for_pdf_range(
+        self,
+        page_index: int,
+        start_char: int,
+        end_char: int,
+        char_rects: list[tuple[float, float, float, float]] | None = None,
+    ) -> str:
+        """Map selected PDF character range or bounding boxes to raw LaTeX source snippet."""
         if not self.is_ready or not self.pdf_words or not self.tex_words:
             return ""
 
-        w_start, w_end = self.find_pdf_word_range(page_index, start_char, end_char)
+        w_start, w_end = self.find_pdf_word_range(page_index, start_char, end_char, char_rects=char_rects)
         return self.get_latex_for_pdf_words(w_start, w_end)
 
     def get_latex_for_pdf_words(self, pdf_start_word: int, pdf_end_word: int) -> str:
@@ -360,18 +379,13 @@ class ArxivDiffMapper:
         center_word = 0
         found = False
         last_page_word = 0
-        for idx, (p_idx, c_start, c_end) in enumerate(self.word_metadata):
+        for idx, item in enumerate(self.word_metadata):
+            p_idx = item[0]
             if p_idx == page_index:
                 last_page_word = idx
-                if c_start <= char_index <= c_end:
-                    center_word = idx
-                    found = True
-                    break
-
-                elif char_index < c_start:
-                    center_word = idx
-                    found = True
-                    break
+                center_word = idx
+                found = True
+                break
 
         if not found:
             center_word = last_page_word

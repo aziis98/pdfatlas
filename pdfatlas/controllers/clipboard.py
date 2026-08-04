@@ -46,7 +46,8 @@ class ClipboardController:
                     rng = sel._selection_range(pi)
                     if rng:
                         s_char, e_char = rng
-                        tex_snippet = self.win.arxiv_mapper.get_latex_for_pdf_range(pi, s_char, e_char)
+                        rects = sel.get_selection_rects(pi)
+                        tex_snippet = self.win.arxiv_mapper.get_latex_for_pdf_range(pi, s_char, e_char, char_rects=rects)
                         if tex_snippet:
                             latex_parts.append(tex_snippet)
 
