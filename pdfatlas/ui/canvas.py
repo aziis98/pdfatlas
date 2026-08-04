@@ -72,6 +72,7 @@ class PDFCanvas(Gtk.Overlay):
         self.zoom = 1.0
         self.crop_active = False
         self.page_gap = 12
+        self.highlighted_block = None
         self.containers = []
         self.in_flight = set()
         self.page_layout = []

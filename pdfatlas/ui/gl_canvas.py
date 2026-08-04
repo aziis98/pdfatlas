@@ -1,4 +1,6 @@
 
+from typing import TYPE_CHECKING
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -8,6 +10,9 @@ from OpenGL import GL as gl
 from .cairo_utils import hex_to_rgba
 from .gl_renderer import QuadRenderer
 
+if TYPE_CHECKING:
+    from .canvas import PDFCanvas
+
 
 class GLCanvas(Gtk.GLArea):
     """
@@ -15,9 +20,9 @@ class GLCanvas(Gtk.GLArea):
     Renders visible pages from the RenderCache as GPU textures behind the transparent Gtk.ScrolledWindow.
     """
 
-    def __init__(self, canvas_layout_provider):
+    def __init__(self, canvas_layout_provider: "PDFCanvas"):
         super().__init__()
-        self.layout_provider = canvas_layout_provider
+        self.layout_provider: PDFCanvas = canvas_layout_provider
         self._renderer: QuadRenderer | None = None
 
         self.set_required_version(3, 3)
@@ -98,6 +103,9 @@ class GLCanvas(Gtk.GLArea):
 
             r.white_card(x_offset, page_y0, dw, dh)
 
+            if canvas.cache is None:
+                continue
+
             surface = canvas.cache.get(i, canvas.zoom, scale_factor, crop_rect)
             if surface is None:
                 surface = canvas.cache.get_best(i, canvas.zoom, scale_factor, crop_rect)
@@ -107,8 +115,9 @@ class GLCanvas(Gtk.GLArea):
                 tex_id = r.upload_surface(surface)
                 r.textured(tex_id, x_offset, page_y0, dw, dh)
 
-                if canvas.highlighted_block is not None:
-                    h_page_idx, h_bbox = canvas.highlighted_block
+                hl_block = getattr(canvas, "highlighted_block", None)
+                if hl_block is not None:
+                    h_page_idx, h_bbox = hl_block
                     if h_page_idx == i:
                         bx0, by0, bx1, by1 = h_bbox
                         co_x = crop_rect.x0 if crop_rect is not None else 0.0
@@ -145,8 +154,7 @@ class GLCanvas(Gtk.GLArea):
                             sh = (ry1 - ry0) * scale
                             r.fill_rect(sx, sy, sw, sh, (0.07, 0.175, 0.35, 0.35))
 
-                if (canvas.debug_mode and getattr(canvas, "debug_arxiv_data", None) is not None
-                        and canvas.debug_arxiv_data.get("page_index") == i):
+                if canvas.debug_mode and canvas.debug_arxiv_data is not None and canvas.debug_arxiv_data.get("page_index") == i:
                     d_data = canvas.debug_arxiv_data
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
                     co_y = crop_rect.y0 if crop_rect is not None else 0.0
@@ -185,7 +193,7 @@ class GLCanvas(Gtk.GLArea):
                         r.fill_rect(sx, sy, bt, sh, c)
                         r.fill_rect(sx + sw - bt, sy, bt, sh, c)
 
-                if getattr(canvas, "hover_caret", None) is not None and canvas.hover_caret[0] == i:
+                if canvas.hover_caret is not None and canvas.hover_caret[0] == i:
                     _page_idx, (cx, cy0, cy1) = canvas.hover_caret
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
                     co_y = crop_rect.y0 if crop_rect is not None else 0.0
