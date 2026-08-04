@@ -857,8 +857,7 @@ class MainWindow(Adw.ApplicationWindow):
                     rng = sel._selection_range(pi)
                     if rng:
                         s_char, e_char = rng
-                        rects = sel.get_selection_rects(pi)
-                        tex_snippet = self.arxiv_mapper.get_latex_for_pdf_range(pi, s_char, e_char, char_rects=rects)
+                        tex_snippet = self.arxiv_mapper.get_latex_for_pdf_range(pi, s_char, e_char)
                         if tex_snippet:
                             latex_parts.append(tex_snippet)
 
@@ -1337,11 +1336,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_overlay.add_overlay(self.selection_toolbar)
 
     def _update_highlight_split_button_label(self):
-        circle_swatch = box(css_class="highlight-circle-swatch", halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        circle_swatch.set_size_request(16, 16)
+        circle_swatch = box(css_class="highlight-circle-swatch")
         provider = Gtk.CssProvider()
         provider.load_from_data(
-            f".highlight-circle-swatch {{ min-width: 16px; min-height: 16px; max-width: 16px; max-height: 16px; background-color: {self.active_highlight_color}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); }}".encode("utf-8")
+            f".highlight-circle-swatch {{ min-width: 18px; min-height: 18px; background-color: {self.active_highlight_color}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); }}".encode("utf-8")
         )
         circle_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.btn_highlight.set_child(circle_swatch)
