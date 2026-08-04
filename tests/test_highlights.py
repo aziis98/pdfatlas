@@ -54,3 +54,17 @@ def test_highlight_db_operations():
     finally:
         if os.path.exists(db_path):
             os.remove(db_path)
+
+
+def test_double_click_word_selection():
+    from pdfatlas.core.document import DocumentModel
+    from pdfatlas.core.text_selection import TextSelection
+
+    doc = DocumentModel("./assets/sample-files/attention_is_all_you_need.pdf")
+    sel = TextSelection(doc)
+
+    sel.select_word_at(0, 2)
+    assert sel.has_selection()
+    assert sel.anchor_char_idx == 0
+    assert sel.focus_char_idx == 7
+    assert sel.get_selected_text(0) == "Provided"

@@ -90,6 +90,7 @@ class PDFCanvas(Gtk.Overlay):
         self.debug_arxiv_data: dict[str, Any] | None = None
         self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
         self._pending_drag_start: tuple[int, int] | None = None
+        self._is_word_drag_mode: bool = False
 
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
@@ -231,7 +232,16 @@ class PDFCanvas(Gtk.Overlay):
 
         if self._pending_drag_start is not None and not self.text_selection.is_selecting:
             p_idx, c_idx = self._pending_drag_start
-            self.text_selection.start_selection(p_idx, c_idx)
+            if self._is_word_drag_mode:
+                w_start = self.text_selection.get_word_start_char_idx(p_idx, c_idx)
+                w_end = self.text_selection.get_word_end_char_idx(p_idx, c_idx)
+                self.text_selection.anchor_page = p_idx
+                self.text_selection.anchor_char_idx = w_start
+                self.text_selection.focus_page = p_idx
+                self.text_selection.focus_char_idx = w_end
+                self.text_selection.is_selecting = True
+            else:
+                self.text_selection.start_selection(p_idx, c_idx)
             self._pending_drag_start = None
 
         if not self.text_selection.is_selecting:
@@ -256,13 +266,24 @@ class PDFCanvas(Gtk.Overlay):
         if char_idx is None:
             return
 
-        self.text_selection.update_focus(page_idx, char_idx)
+        if self._is_word_drag_mode:
+            anc_page = self.text_selection.anchor_page or page_idx
+            anc_idx = self.text_selection.anchor_char_idx or char_idx
+            if (page_idx > anc_page) or (page_idx == anc_page and char_idx >= anc_idx):
+                snapped_focus = self.text_selection.get_word_end_char_idx(page_idx, char_idx)
+            else:
+                snapped_focus = self.text_selection.get_word_start_char_idx(page_idx, char_idx)
+            self.text_selection.update_focus(page_idx, snapped_focus)
+        else:
+            self.text_selection.update_focus(page_idx, char_idx)
+
         self.queue_draw_overlays("selection-update")
         if self.on_selection_changed:
             self.on_selection_changed(self.text_selection.has_selection())
 
     def clear_selection(self):
         """Clear text selection and notify UI components."""
+        self._is_word_drag_mode = False
         if self.text_selection is not None:
             self.text_selection.clear_selection()
             self.queue_draw_overlays("selection-cleared")
@@ -274,7 +295,8 @@ class PDFCanvas(Gtk.Overlay):
         self._pending_drag_start = None
         if self.text_selection is not None:
             if abs(offset_x) < 3 and abs(offset_y) < 3:
-                self.clear_selection()
+                if not self._is_word_drag_mode:
+                    self.clear_selection()
             else:
                 self.text_selection.end_selection()
                 if self.on_selection_changed:
@@ -426,6 +448,19 @@ class PDFCanvas(Gtk.Overlay):
                 page_idx, link = hit
                 if self.on_link_clicked:
                     self.on_link_clicked(page_idx, link)
+
+        elif n_press == 2:
+            page_idx = self._hit_test_page(x, y)
+            if page_idx is not None and self.text_selection:
+                pt = self._screen_to_pdf_point(x, y, page_idx)
+                if pt is not None:
+                    char_idx = self.text_selection.hit_test(page_idx, pt[0], pt[1])
+                    if char_idx is not None:
+                        self.text_selection.select_word_at(page_idx, char_idx)
+                        self._is_word_drag_mode = True
+                        self.queue_draw_overlays("double-click-word")
+                        if self.on_selection_changed:
+                            self.on_selection_changed(True)
 
     def set_document(
         self,

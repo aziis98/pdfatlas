@@ -126,6 +126,26 @@ class TextSelection:
             idx -= 1
         return idx
 
+    def get_word_end_char_idx(self, page_index: int, char_idx: int) -> int:
+        """Find the end char index of the word containing char_idx."""
+        pi = self.get_page_index(page_index)
+        if not pi.chars or char_idx < 0 or char_idx >= len(pi.chars):
+            return char_idx
+        idx = char_idx
+        while idx < len(pi.chars) - 1 and pi.chars[idx + 1].char != " " and abs(pi.chars[idx + 1].line_y - pi.chars[char_idx].line_y) < 3.0:
+            idx += 1
+        return idx
+
+    def select_word_at(self, page_index: int, char_idx: int) -> None:
+        """Select the entire word containing char_idx."""
+        w_start = self.get_word_start_char_idx(page_index, char_idx)
+        w_end = self.get_word_end_char_idx(page_index, char_idx)
+        self.anchor_page = page_index
+        self.anchor_char_idx = w_start
+        self.focus_page = page_index
+        self.focus_char_idx = w_end
+        self.is_selecting = False
+
     def start_selection(self, page_index: int, char_idx: int) -> None:
         """Begin a new selection at the given element."""
         self.anchor_page = page_index
