@@ -40,15 +40,15 @@ from .gui import box, button, label, search_entry, scrolled_window, spacer
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
 PALETTE_COLORS = [
-    # Row 1: Classic & Warm Tones
-    "#FFEE55", "#FFD700", "#FFAA00", "#FF7700", "#FF4444", "#FF66AA",
-    "#EE4488", "#CC44FF", "#8844FF", "#4466FF", "#2288FF", "#00AAFF",
-    # Row 2: Cool & Green Tones
-    "#00CCEE", "#00DDCC", "#00CC88", "#22CC44", "#66DD22", "#AADD11",
-    "#DDEE22", "#FFDD44", "#FFAA66", "#FF8888", "#DD88FF", "#88BBFF",
-    # Row 3: Soft Pastels & Earth Tones
-    "#FFF3A0", "#FFE0B2", "#FFCDD2", "#F8BBD0", "#E1BEE7", "#D1C4E9",
-    "#C5CAE9", "#BBDEFB", "#B2EBF2", "#B2DFDB", "#C8E6C9", "#DCEDC8",
+    # Row 1: Pale Warm & Yellow Tones
+    "#FFF49C", "#FFE885", "#FFD770", "#FFCA78", "#FFBB7C", "#FFA885",
+    "#FFA0A0", "#FFB2CE", "#F8B6EB", "#E8B8FF", "#D5B8FF", "#C3BDFF",
+    # Row 2: Pale Cool & Green Tones
+    "#B8CAFF", "#B8DBFF", "#B8EBFF", "#B8F5FF", "#B8F7ED", "#B8F5D8",
+    "#C0F5BE", "#D2F5B8", "#E2F5B8", "#EDF5B8", "#F7F5B8", "#F5EAB8",
+    # Row 3: Soft Muted & Neutral Earth Pastels
+    "#EFE7CC", "#EFE0CC", "#EFD9CC", "#EFD1CC", "#E8D1EF", "#D9D1EF",
+    "#CCD1EF", "#CCE2EF", "#CCEFE8", "#CCEFE0", "#D4EFCB", "#EBEFCB",
 ]
 
 
@@ -109,7 +109,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Highlights state
         self.highlights: list[dict] = []
-        self.active_highlight_color: str = "#FFEE55"
+        self.active_highlight_color: str = "#FFF49C"
 
         # UI Zoom state
         self.zoom = 1.0
@@ -1270,7 +1270,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             provider = Gtk.CssProvider()
             provider.load_from_data(
-                f"button {{ background-color: {hex_color}; background-image: none; border-radius: 4px; border: 1px solid rgba(0,0,0,0.2); min-width: 24px; min-height: 24px; padding: 0; }} button:hover {{ border: 2px solid #ffffff; }}".encode("utf-8")
+                f"button {{ background-color: {hex_color}; background-image: none; border-radius: 4px; border: 1px solid rgba(0,0,0,0.2); min-width: 24px; min-height: 24px; padding: 0; margin: 0; }} button:hover {{ outline: 2px solid #ffffff; outline-offset: -2px; }}".encode("utf-8")
             )
             color_btn.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
@@ -1336,19 +1336,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_overlay.add_overlay(self.selection_toolbar)
 
     def _update_highlight_split_button_label(self):
-        swatch_box = box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
-            children=[
-                box(css_class="highlight-swatch-indicator"),
-                label(text="Highlight"),
-            ],
-        )
+        circle_swatch = box(css_class="highlight-circle-swatch")
         provider = Gtk.CssProvider()
         provider.load_from_data(
-            f".highlight-swatch-indicator {{ min-width: 14px; min-height: 14px; background-color: {self.active_highlight_color}; border-radius: 3px; border: 1px solid rgba(0,0,0,0.3); }}".encode("utf-8")
+            f".highlight-circle-swatch {{ min-width: 18px; min-height: 18px; background-color: {self.active_highlight_color}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); }}".encode("utf-8")
         )
-        swatch_box.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        self.btn_highlight.set_child(swatch_box)
+        circle_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.btn_highlight.set_child(circle_swatch)
 
     def _select_highlight_color(self, hex_color: str, popover: Gtk.Popover):
         self.active_highlight_color = hex_color

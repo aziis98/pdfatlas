@@ -43,7 +43,7 @@ def stroke_rect(cr: cairo.Context, x: float, y: float, w: float, h: float,
     cr.restore()
 
 
-def hex_to_rgba(hex_str: str, alpha: float = 0.40) -> tuple[float, float, float, float]:
+def hex_to_rgba(hex_str: str, alpha: float = 1.0) -> tuple[float, float, float, float]:
     hex_str = hex_str.lstrip("#")
     if len(hex_str) == 6:
         try:

@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-
+from typing import Any, cast
 
 from .document import DocumentModel
 
@@ -49,31 +47,37 @@ class TextSelection:
         return self._page_indices[page_index]
 
     def _build_page_index(self, page_index: int) -> None:
-        """Extract word tokens from a page using PyMuPDF's native words layout engine."""
+        """Extract individual character tokens from a page using PyMuPDF's rawdict layout engine."""
         page = self.doc_model.get_page(page_index)
         try:
-            raw_words = page.get_text("words")
+            rawdict = cast(dict[str, Any], page.get_text("rawdict"))
         except (RuntimeError, ValueError):
             self._page_indices[page_index] = PageCharIndex(page_index=page_index)
             return
 
         chars: list[CharInfo] = []
-        for w in raw_words:
-            # w is (x0, y0, x1, y1, word_str, block_no, line_no, word_no)
-            x0, y0, x1, y1, word_str, b_no, l_no, w_no = w
-            w_text = str(word_str)
-            if w_text.strip():
-                line_y = (float(y0) + float(y1)) / 2.0
-                chars.append(
-                    CharInfo(
-                        char=w_text,
-                        bbox=(float(x0), float(y0), float(x1), float(y1)),
-                        line_y=line_y,
-                        block_no=int(b_no),
-                        line_no=int(l_no),
-                        word_no=int(w_no),
-                    )
-                )
+        for b_no, block in enumerate(rawdict.get("blocks", [])):
+            if block.get("type") != 0:
+                continue
+            for l_no, line in enumerate(block.get("lines", [])):
+                bbox_line = line.get("bbox", (0, 0, 0, 0))
+                line_y = (float(bbox_line[1]) + float(bbox_line[3])) / 2.0
+                for span in line.get("spans", []):
+                    for w_no, ch in enumerate(span.get("chars", [])):
+                        c_text = str(ch.get("c", ""))
+                        c_bbox = ch.get("bbox")
+                        if c_bbox and len(c_bbox) == 4:
+                            x0, y0, x1, y1 = c_bbox
+                            chars.append(
+                                CharInfo(
+                                    char=c_text,
+                                    bbox=(float(x0), float(y0), float(x1), float(y1)),
+                                    line_y=line_y,
+                                    block_no=b_no,
+                                    line_no=l_no,
+                                    word_no=w_no,
+                                )
+                            )
 
         self._page_indices[page_index] = PageCharIndex(
             page_index=page_index,
@@ -82,8 +86,8 @@ class TextSelection:
 
     def hit_test(self, page_index: int, pt_x: float, pt_y: float) -> int | None:
         """
-        Find the word index closest to the given PDF point (pt_x, pt_y) on a page.
-        Returns the index into the page's char/word list, or None if empty.
+        Find the character index closest to the given PDF point (pt_x, pt_y) on a page.
+        Returns the index into the page's char list, or None if empty.
         """
         pi = self.get_page_index(page_index)
         if not pi.chars:
@@ -113,8 +117,14 @@ class TextSelection:
         return best_idx
 
     def get_word_start_char_idx(self, page_index: int, char_idx: int) -> int:
-        """Return word index (identity mapping under words engine)."""
-        return char_idx
+        """Find the start char index of the word containing char_idx."""
+        pi = self.get_page_index(page_index)
+        if not pi.chars or char_idx < 0 or char_idx >= len(pi.chars):
+            return char_idx
+        idx = char_idx
+        while idx > 0 and pi.chars[idx - 1].char != " " and abs(pi.chars[idx - 1].line_y - pi.chars[char_idx].line_y) < 3.0:
+            idx -= 1
+        return idx
 
     def start_selection(self, page_index: int, char_idx: int) -> None:
         """Begin a new selection at the given element."""
@@ -199,7 +209,7 @@ class TextSelection:
 
         for c in selected[1:]:
             if (
-                abs(c.line_y - line_chars[-1].line_y) < 2.0
+                abs(c.line_y - line_chars[-1].line_y) < 3.0
                 and c.block_no == line_chars[-1].block_no
                 and c.line_no == line_chars[-1].line_no
             ):
@@ -241,8 +251,20 @@ class TextSelection:
             pi = self.get_page_index(pi_idx)
             end = min(end, len(pi.chars) - 1)
             if start <= end and start < len(pi.chars):
-                page_text = " ".join(c.char for c in pi.chars[start : end + 1])
-                parts.append(page_text)
+                selected = pi.chars[start : end + 1]
+                page_text_arr = []
+                for idx, c in enumerate(selected):
+                    page_text_arr.append(c.char)
+                    if idx < len(selected) - 1:
+                        next_c = selected[idx + 1]
+                        if (
+                            c.char != " "
+                            and next_c.char != " "
+                            and abs(c.line_y - next_c.line_y) < 3.0
+                            and next_c.bbox[0] - c.bbox[2] > 2.0
+                        ):
+                            page_text_arr.append(" ")
+                parts.append("".join(page_text_arr))
 
         return "\n".join(parts)
 

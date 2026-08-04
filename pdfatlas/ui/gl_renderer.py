@@ -156,7 +156,7 @@ class QuadRenderer:
         gl.glUniform2f(self.u_page_pos, float(x), float(y))
         gl.glUniform2f(self.u_page_size, float(w), float(h))
         if mode == "multiply":
-            gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ONE_MINUS_SRC_ALPHA)
+            gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
         else:
             gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)

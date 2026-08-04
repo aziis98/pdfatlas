@@ -134,10 +134,10 @@ class GLCanvas(Gtk.GLArea):
                     for hl in canvas.highlights:
                         if hl.get("page") == i:
                             color_hex = hl.get("color", "#FFEE55")
-                            cr_val, cg_val, cb_val, ca_val = hex_to_rgba(color_hex, 0.40)
+                            cr_val, cg_val, cb_val, ca_val = hex_to_rgba(color_hex, 1.0)
                             for rx0, ry0, rx1, ry1 in hl.get("rects", []):
                                 hx0 = x_offset + (rx0 - co_x) * scale
-                                hy0 = page_y0 + (ry0 - co_y) * scale
+                                hy0 = page_y0 + (ry0 + 2.0 - co_y) * scale
                                 hw = (rx1 - rx0) * scale
                                 hh = (ry1 - ry0) * scale
                                 r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val), mode="multiply")

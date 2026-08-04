@@ -12,13 +12,13 @@ from pdfatlas.ui.cairo_utils import hex_to_rgba
 
 
 def test_hex_to_rgba():
-    r, g, b, a = hex_to_rgba("#FFEE55", 0.40)
+    r, g, b, a = hex_to_rgba("#FFEE55")
     assert round(r, 2) == 1.0
     assert round(g, 2) == 0.93
     assert round(b, 2) == 0.33
-    assert a == 0.40
+    assert a == 1.0
 
-    assert hex_to_rgba("invalid") == (1.0, 0.933, 0.333, 0.40)
+    assert hex_to_rgba("invalid") == (1.0, 0.933, 0.333, 1.0)
 
 
 def test_highlight_db_operations():
