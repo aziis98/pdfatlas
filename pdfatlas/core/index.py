@@ -215,6 +215,83 @@ def load_doc_state(conn: sqlite3.Connection) -> dict[str, float]:
         return {}
 
 
+def ensure_highlights_table(conn: sqlite3.Connection):
+    """Ensure the highlights table exists in the database."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS highlights (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            page        INTEGER NOT NULL,
+            char_start  INTEGER NOT NULL,
+            char_end    INTEGER NOT NULL,
+            color       TEXT NOT NULL,
+            rects_json  TEXT NOT NULL,
+            text        TEXT NOT NULL,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_highlights_page ON highlights(page);")
+    conn.commit()
+
+
+def save_highlight_to_db(
+    conn: sqlite3.Connection,
+    page: int,
+    char_start: int,
+    char_end: int,
+    color: str,
+    rects: list[tuple[float, float, float, float]],
+    text: str,
+) -> int:
+    """Save a new highlight to the database and return its row ID."""
+    import json
+    ensure_highlights_table(conn)
+    rects_json = json.dumps(rects)
+    cursor = conn.execute(
+        """INSERT INTO highlights (page, char_start, char_end, color, rects_json, text)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (page, char_start, char_end, color, rects_json, text),
+    )
+    conn.commit()
+    return cursor.lastrowid or 0
+
+
+def delete_highlight_from_db(conn: sqlite3.Connection, highlight_id: int):
+    """Delete a highlight by ID from the database."""
+    ensure_highlights_table(conn)
+    conn.execute("DELETE FROM highlights WHERE id = ?", (highlight_id,))
+    conn.commit()
+
+
+def load_highlights_from_db(conn: sqlite3.Connection) -> list[dict]:
+    """Load all highlights for the document from the database."""
+    import json
+    try:
+        ensure_highlights_table(conn)
+        rows = conn.execute(
+            "SELECT id, page, char_start, char_end, color, rects_json, text FROM highlights ORDER BY page, char_start"
+        ).fetchall()
+        results = []
+        for row in rows:
+            try:
+                raw_rects = json.loads(row[5])
+                rects = [(float(r[0]), float(r[1]), float(r[2]), float(r[3])) for r in raw_rects]
+            except Exception:
+                rects = []
+            results.append({
+                "id": row[0],
+                "page": row[1],
+                "char_start": row[2],
+                "char_end": row[3],
+                "color": row[4],
+                "rects": rects,
+                "text": row[6],
+            })
+        return results
+    except Exception as e:
+        print(f"[Index] Error loading highlights: {e}", flush=True)
+        return []
+
+
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 import gi
@@ -292,6 +369,52 @@ class DatabaseService:
     def _bg_save_state(self, zoom: float, scroll_y: float):
         if self._conn:
             save_doc_state(self._conn, zoom, scroll_y)
+
+    def save_highlight(
+        self,
+        page: int,
+        char_start: int,
+        char_end: int,
+        color: str,
+        rects: list[tuple[float, float, float, float]],
+        text: str,
+        on_complete: Callable[[int], None] | None = None,
+    ):
+        self._executor.submit(self._bg_save_highlight, page, char_start, char_end, color, rects, text, on_complete)
+
+    def _bg_save_highlight(
+        self,
+        page: int,
+        char_start: int,
+        char_end: int,
+        color: str,
+        rects: list[tuple[float, float, float, float]],
+        text: str,
+        on_complete: Callable[[int], None] | None = None,
+    ):
+        if self._conn:
+            hid = save_highlight_to_db(self._conn, page, char_start, char_end, color, rects, text)
+            if on_complete:
+                GLib.idle_add(on_complete, hid)
+
+    def delete_highlight(self, highlight_id: int, on_complete: Callable[[], None] | None = None):
+        self._executor.submit(self._bg_delete_highlight, highlight_id, on_complete)
+
+    def _bg_delete_highlight(self, highlight_id: int, on_complete: Callable[[], None] | None = None):
+        if self._conn:
+            delete_highlight_from_db(self._conn, highlight_id)
+            if on_complete:
+                GLib.idle_add(on_complete)
+
+    def load_highlights(self, on_complete: Callable[[list[dict]], None]):
+        self._executor.submit(self._bg_load_highlights, on_complete)
+
+    def _bg_load_highlights(self, on_complete: Callable[[list[dict]], None]):
+        if self._conn:
+            hl = load_highlights_from_db(self._conn)
+            GLib.idle_add(on_complete, hl)
+        else:
+            GLib.idle_add(on_complete, [])
 
     def close(self):
         """Close database connection on the DB thread and shutdown executor."""

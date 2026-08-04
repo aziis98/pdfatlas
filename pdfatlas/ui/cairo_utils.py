@@ -41,3 +41,16 @@ def stroke_rect(cr: cairo.Context, x: float, y: float, w: float, h: float,
     cr.rectangle(x, y, w, h)
     cr.stroke()
     cr.restore()
+
+
+def hex_to_rgba(hex_str: str, alpha: float = 0.40) -> tuple[float, float, float, float]:
+    hex_str = hex_str.lstrip("#")
+    if len(hex_str) == 6:
+        try:
+            r = int(hex_str[0:2], 16) / 255.0
+            g = int(hex_str[2:4], 16) / 255.0
+            b = int(hex_str[4:6], 16) / 255.0
+            return (r, g, b, alpha)
+        except ValueError:
+            pass
+    return (1.0, 0.933, 0.333, alpha)

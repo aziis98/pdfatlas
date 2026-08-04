@@ -5,6 +5,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 from OpenGL import GL as gl
 
+from .cairo_utils import hex_to_rgba
 from .gl_renderer import QuadRenderer
 
 
@@ -117,6 +118,20 @@ class GLCanvas(Gtk.GLArea):
                         hw = (bx1 - bx0) * scale
                         hh = (by1 - by0) * scale
                         r.fill_rect(hx, hy, hw, hh, (0.35, 0.2975, 0.0, 0.35))
+
+                if hasattr(canvas, "highlights") and canvas.highlights:
+                    co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                    co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                    for hl in canvas.highlights:
+                        if hl.get("page") == i:
+                            color_hex = hl.get("color", "#FFEE55")
+                            cr_val, cg_val, cb_val, ca_val = hex_to_rgba(color_hex, 0.40)
+                            for rx0, ry0, rx1, ry1 in hl.get("rects", []):
+                                hx0 = x_offset + (rx0 - co_x) * scale
+                                hy0 = page_y0 + (ry0 - co_y) * scale
+                                hw = (rx1 - rx0) * scale
+                                hh = (ry1 - ry0) * scale
+                                r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val))
 
                 if canvas.text_selection is not None:
                     sel_rects = canvas.text_selection.get_selection_rects(i)

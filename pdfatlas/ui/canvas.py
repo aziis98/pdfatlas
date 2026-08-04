@@ -72,10 +72,10 @@ class PDFCanvas(Gtk.Overlay):
         self.zoom = 1.0
         self.crop_active = False
         self.page_gap = 12
-        self.highlighted_block = None
         self.containers = []
         self.in_flight = set()
         self.page_layout = []
+        self.highlights: list[dict] = []
         self.vadjustment: Gtk.Adjustment
         self.hadjustment: Gtk.Adjustment
 
@@ -125,6 +125,10 @@ class PDFCanvas(Gtk.Overlay):
 
         self._setup_scroll_input_controllers()
         self._setup_link_controllers()
+
+    def set_highlights(self, highlights: list[dict]):
+        self.highlights = highlights
+        self.queue_draw_overlays("highlights-updated")
 
     def _setup_scroll_input_controllers(self):
         """Attach full-viewport input controllers to the scroll container."""

@@ -39,6 +39,18 @@ from .gui import box, button, label, search_entry, scrolled_window, spacer
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
+PALETTE_COLORS = [
+    # Row 1: Classic & Warm Tones
+    "#FFEE55", "#FFD700", "#FFAA00", "#FF7700", "#FF4444", "#FF66AA",
+    "#EE4488", "#CC44FF", "#8844FF", "#4466FF", "#2288FF", "#00AAFF",
+    # Row 2: Cool & Green Tones
+    "#00CCEE", "#00DDCC", "#00CC88", "#22CC44", "#66DD22", "#AADD11",
+    "#DDEE22", "#FFDD44", "#FFAA66", "#FF8888", "#DD88FF", "#88BBFF",
+    # Row 3: Soft Pastels & Earth Tones
+    "#FFF3A0", "#FFE0B2", "#FFCDD2", "#F8BBD0", "#E1BEE7", "#D1C4E9",
+    "#C5CAE9", "#BBDEFB", "#B2EBF2", "#B2DFDB", "#C8E6C9", "#DCEDC8",
+]
+
 
 def clamp(min_val: float, val: float, max_val: float) -> float:
     """Clamps a numeric value within the range [min_val, max_val]."""
@@ -94,6 +106,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._debounce_source_id = None
         self._last_query = ""
+
+        # Highlights state
+        self.highlights: list[dict] = []
+        self.active_highlight_color: str = "#FFEE55"
 
         # UI Zoom state
         self.zoom = 1.0
@@ -435,6 +451,9 @@ class MainWindow(Adw.ApplicationWindow):
                 self.progress_card_box.set_visible(False)
             self.progress_bar.set_visible(False)
 
+            self.highlights = []
+            self.canvas.set_highlights([])
+
             self.render_cache.clear()
             self.minimap_cache.clear()
             self.pinned.clear()
@@ -638,9 +657,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.index_conn = conn
         self.entry.set_sensitive(True)
         self.entry.set_placeholder_text("Search document...")
+        self.db_service.load_highlights(self._on_highlights_loaded)
 
         # Restore saved zoom & scroll_y state from .db if no CLI state was specified
-        if not self.initial_state:
+        if not self.initial_state and conn is not None:
             saved_state = load_doc_state(conn)
             if "zoom" in saved_state:
                 self.set_zoom_level(saved_state["zoom"])
@@ -649,9 +669,13 @@ class MainWindow(Adw.ApplicationWindow):
 
                 def apply_saved_scroll():
                     self.vadjustment.set_value(scroll_y)
-                    return False
 
                 GLib.idle_add(apply_saved_scroll)
+
+    def _on_highlights_loaded(self, highlights: list[dict]):
+        self.highlights = highlights
+        self.canvas.set_highlights(highlights)
+        self.canvas.queue_draw()
 
         # If there's a deferred query from state restoration, execute it now
         if hasattr(self, "_deferred_state_query") and self._deferred_state_query:
@@ -1221,12 +1245,63 @@ class MainWindow(Adw.ApplicationWindow):
                                     on_clicked=lambda b: self._copy_pdf_text_to_clipboard())
         self.btn_copy_tex = button(label="Copy Source TeX", tooltip="Copy source TeX for selection [Ctrl+C]",
                                    on_clicked=lambda b: self._copy_tex_to_clipboard())
+
+        # Highlight SplitButton
+        self.btn_highlight = Adw.SplitButton()
+        self.btn_highlight.set_tooltip_text("Highlight selected text [Ctrl+H]")
+        self.btn_highlight.connect("clicked", lambda b: self._apply_highlight_to_selection())
+        self._update_highlight_split_button_label()
+
+        popover_palette = Gtk.Popover()
+        popover_palette.set_position(Gtk.PositionType.TOP)
+
+        grid = Gtk.Grid(column_spacing=4, row_spacing=4)
+        grid.set_margin_top(6)
+        grid.set_margin_bottom(6)
+        grid.set_margin_start(6)
+        grid.set_margin_end(6)
+
+        for idx, hex_color in enumerate(PALETTE_COLORS):
+            row = idx // 12
+            col = idx % 12
+            color_btn = Gtk.Button()
+            color_btn.set_size_request(24, 24)
+            color_btn.set_tooltip_text(hex_color)
+
+            provider = Gtk.CssProvider()
+            provider.load_from_data(
+                f"button {{ background-color: {hex_color}; background-image: none; border-radius: 4px; border: 1px solid rgba(0,0,0,0.2); min-width: 24px; min-height: 24px; padding: 0; }} button:hover {{ border: 2px solid #ffffff; }}".encode("utf-8")
+            )
+            color_btn.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+            def make_color_cb(c: str):
+                return lambda b: self._select_highlight_color(c, popover_palette)
+
+            color_btn.connect("clicked", make_color_cb(hex_color))
+            grid.attach(color_btn, col, row, 1, 1)
+
+        popover_box = box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6,
+            margin_top=6, margin_bottom=6, margin_start=6, margin_end=6,
+            children=[
+                label(text="Highlight Color", css_class="heading", xalign=0),
+                grid,
+            ],
+        )
+
+        btn_clear_hl = button(label="Remove Highlights", tooltip="Remove highlights in selection",
+                              on_clicked=lambda b: self._remove_highlights_in_selection(popover_palette))
+        popover_box.append(btn_clear_hl)
+
+        popover_palette.set_child(popover_box)
+        self.btn_highlight.set_popover(popover_palette)
+
         self.selection_toolbar = box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
             css_class="selection-toolbar", valign=Gtk.Align.END, halign=Gtk.Align.FILL,
             children=[
                 box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
-                    children=[self.btn_copy_text, self.btn_copy_tex]),
+                    children=[self.btn_highlight, self.btn_copy_text, self.btn_copy_tex]),
                 spacer(),
             ],
         )
@@ -1249,14 +1324,112 @@ class MainWindow(Adw.ApplicationWindow):
                 popover_grid,
             ],
         ))
-        popover_grid.attach(label(text="Ctrl+C", css_class="dim-label", xalign=0), 0, 0, 1, 1)
-        popover_grid.attach(label(text="Copy source (if available)", xalign=0), 1, 0, 1, 1)
-        popover_grid.attach(label(text="Ctrl+Shift+C", css_class="dim-label", xalign=0), 0, 1, 1, 1)
-        popover_grid.attach(label(text="Copy PDF text", xalign=0), 1, 1, 1, 1)
+        popover_grid.attach(label(text="Ctrl+H", css_class="dim-label", xalign=0), 0, 0, 1, 1)
+        popover_grid.attach(label(text="Highlight selection", xalign=0), 1, 0, 1, 1)
+        popover_grid.attach(label(text="Ctrl+C", css_class="dim-label", xalign=0), 0, 1, 1, 1)
+        popover_grid.attach(label(text="Copy source (if available)", xalign=0), 1, 1, 1, 1)
+        popover_grid.attach(label(text="Ctrl+Shift+C", css_class="dim-label", xalign=0), 0, 2, 1, 1)
+        popover_grid.attach(label(text="Copy PDF text", xalign=0), 1, 2, 1, 1)
         self.info_menu_btn.set_popover(popover)
 
         self.selection_toolbar.append(self.info_menu_btn)
         self.content_overlay.add_overlay(self.selection_toolbar)
+
+    def _update_highlight_split_button_label(self):
+        swatch_box = box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
+            children=[
+                box(css_class="highlight-swatch-indicator"),
+                label(text="Highlight"),
+            ],
+        )
+        provider = Gtk.CssProvider()
+        provider.load_from_data(
+            f".highlight-swatch-indicator {{ min-width: 14px; min-height: 14px; background-color: {self.active_highlight_color}; border-radius: 3px; border: 1px solid rgba(0,0,0,0.3); }}".encode("utf-8")
+        )
+        swatch_box.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.btn_highlight.set_child(swatch_box)
+
+    def _select_highlight_color(self, hex_color: str, popover: Gtk.Popover):
+        self.active_highlight_color = hex_color
+        self._update_highlight_split_button_label()
+        popover.popdown()
+        self._apply_highlight_to_selection()
+
+    def _apply_highlight_to_selection(self):
+        sel = self.canvas.text_selection if self.canvas else None
+        if not sel or not sel.has_selection() or sel.anchor_page is None or sel.focus_page is None:
+            return
+
+        if sel.anchor_page <= sel.focus_page:
+            p_start, p_end = sel.anchor_page, sel.focus_page
+        else:
+            p_start, p_end = sel.focus_page, sel.anchor_page
+
+        color = self.active_highlight_color
+
+        for page_idx in range(p_start, p_end + 1):
+            rng = sel._selection_range(page_idx)
+            if rng is None:
+                continue
+            char_start, char_end = rng
+            rects = sel.get_selection_rects(page_idx)
+            text = sel.get_selected_text(page_idx)
+            if not rects:
+                continue
+
+            def make_on_saved(p_i, c_s, c_e, col, rcts, txt):
+                def _on_saved(hid: int):
+                    hl_obj = {
+                        "id": hid,
+                        "page": p_i,
+                        "char_start": c_s,
+                        "char_end": c_e,
+                        "color": col,
+                        "rects": rcts,
+                        "text": txt,
+                    }
+                    self.highlights.append(hl_obj)
+                    self.canvas.set_highlights(self.highlights)
+                    self.canvas.queue_draw()
+                return _on_saved
+
+            self.db_service.save_highlight(
+                page_idx, char_start, char_end, color, rects, text,
+                make_on_saved(page_idx, char_start, char_end, color, rects, text)
+            )
+
+        sel.clear_selection()
+        self._update_selection_toolbar(False)
+        self.canvas.queue_draw()
+
+    def _remove_highlights_in_selection(self, popover: Gtk.Popover | None = None):
+        if popover:
+            popover.popdown()
+
+        sel = self.canvas.text_selection if self.canvas else None
+        if not sel or not sel.has_selection() or sel.anchor_page is None or sel.focus_page is None:
+            return
+
+        if sel.anchor_page <= sel.focus_page:
+            p_start, p_end = sel.anchor_page, sel.focus_page
+        else:
+            p_start, p_end = sel.focus_page, sel.anchor_page
+
+        to_remove = []
+        for hl in self.highlights:
+            if p_start <= hl["page"] <= p_end:
+                to_remove.append(hl)
+
+        for hl in to_remove:
+            self.db_service.delete_highlight(hl["id"])
+            if hl in self.highlights:
+                self.highlights.remove(hl)
+
+        self.canvas.set_highlights(self.highlights)
+        self.canvas.queue_draw()
+        sel.clear_selection()
+        self._update_selection_toolbar(False)
 
     def _build_debug_cache_box(self):
         self.debug_cache_label = Gtk.Label(xalign=0.0)
