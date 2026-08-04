@@ -150,8 +150,9 @@ class GLCanvas(Gtk.GLArea):
                         co_x = crop_rect.x0 if crop_rect is not None else 0.0
                         co_y = crop_rect.y0 if crop_rect is not None else 0.0
                         light_green = (0.2, 0.9, 0.3, 0.15)
+                        mapped_set = getattr(arxiv_mapper, "mapped_pdf_indices", set(arxiv_mapper.tex_to_pdf_map.values()))
                         for w_idx, w_meta in enumerate(arxiv_mapper.word_metadata):
-                            if w_meta[0] == i and w_idx in arxiv_mapper.pdf_to_tex_map:
+                            if w_meta[0] == i and w_idx in mapped_set:
                                 _, wc_start, wc_end = w_meta
                                 if 0 <= wc_start < len(pi.chars) and 0 <= wc_end < len(pi.chars):
                                     w_chars = pi.chars[wc_start : wc_end + 1]

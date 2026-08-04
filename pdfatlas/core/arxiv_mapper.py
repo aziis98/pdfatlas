@@ -216,6 +216,7 @@ class ArxivDiffMapper:
         self.diff_opcodes: list[tuple] = []
         self.pdf_to_tex_map: dict[int, int] = {}
         self.tex_to_pdf_map: dict[int, int] = {}
+        self.mapped_pdf_indices: set[int] = set()
         self.is_ready: bool = False
 
     def process(
@@ -298,6 +299,7 @@ class ArxivDiffMapper:
 
         t_map = time.perf_counter() - t0
         t_total = time.perf_counter() - t_start
+        self.mapped_pdf_indices = set(self.tex_to_pdf_map.values())
         self.is_ready = True
 
         if progress_callback:
