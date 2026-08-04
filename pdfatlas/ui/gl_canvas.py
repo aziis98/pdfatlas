@@ -142,7 +142,30 @@ class GLCanvas(Gtk.GLArea):
                                 hh = (ry1 - ry0) * scale
                                 r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val), mode="multiply")
 
-                if canvas.text_selection is not None:
+                if canvas.text_selection is not None and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection()):
+                    win_obj = getattr(canvas, "win", None)
+                    arxiv_mapper = getattr(win_obj, "arxiv_mapper", None) if win_obj else None
+                    if arxiv_mapper and arxiv_mapper.is_ready and arxiv_mapper.word_metadata:
+                        pi = canvas.text_selection.get_page_index(i)
+                        co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        light_green = (0.2, 0.9, 0.3, 0.15)
+                        for w_idx, w_meta in enumerate(arxiv_mapper.word_metadata):
+                            if w_meta[0] == i and w_idx in arxiv_mapper.pdf_to_tex_map:
+                                _, wc_start, wc_end = w_meta
+                                if 0 <= wc_start < len(pi.chars) and 0 <= wc_end < len(pi.chars):
+                                    w_chars = pi.chars[wc_start : wc_end + 1]
+                                    if w_chars:
+                                        wx0 = min(c.bbox[0] for c in w_chars)
+                                        wy0 = min(c.bbox[1] for c in w_chars)
+                                        wx1 = max(c.bbox[2] for c in w_chars)
+                                        wy1 = max(c.bbox[3] for c in w_chars)
+                                        sx = x_offset + (wx0 - co_x) * scale
+                                        sy = page_y0 + (wy0 - co_y) * scale
+                                        sw = (wx1 - wx0) * scale
+                                        sh = (wy1 - wy0) * scale
+                                        r.fill_rect(sx, sy, sw, sh, light_green)
+
                     sel_rects = canvas.text_selection.get_selection_rects(i)
                     if sel_rects:
                         co_x = crop_rect.x0 if crop_rect is not None else 0.0
