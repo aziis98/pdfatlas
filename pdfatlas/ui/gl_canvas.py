@@ -140,7 +140,7 @@ class GLCanvas(Gtk.GLArea):
                                 hy0 = page_y0 + (ry0 - co_y) * scale
                                 hw = (rx1 - rx0) * scale
                                 hh = (ry1 - ry0) * scale
-                                r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val))
+                                r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val), mode="multiply")
 
                 if canvas.text_selection is not None:
                     sel_rects = canvas.text_selection.get_selection_rects(i)

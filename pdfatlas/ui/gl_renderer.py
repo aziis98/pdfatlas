@@ -149,13 +149,19 @@ class QuadRenderer:
         gl.glUniform2f(self.u_page_size, float(w), float(h))
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
 
-    def fill_rect(self, x: float, y: float, w: float, h: float, color: tuple[float, float, float, float]):
+    def fill_rect(self, x: float, y: float, w: float, h: float, color: tuple[float, float, float, float], mode: str = "alpha"):
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         gl.glUniform1i(self.u_is_placeholder, 2)
         gl.glUniform4f(self.u_color, *color)
         gl.glUniform2f(self.u_page_pos, float(x), float(y))
         gl.glUniform2f(self.u_page_size, float(w), float(h))
+        if mode == "multiply":
+            gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ONE_MINUS_SRC_ALPHA)
+        else:
+            gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+        if mode == "multiply":
+            gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
 
     def textured(self, tex_id: int, x: float, y: float, w: float, h: float):
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
