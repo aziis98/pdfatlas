@@ -689,12 +689,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.annotations_popover = Gtk.Popover()
         self.annotations_btn.set_popover(self.annotations_popover)
 
-        popover_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=10, margin_end=10, margin_top=10, margin_bottom=10)
+        popover_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=8, margin_end=8, margin_top=8, margin_bottom=8)
         # ~4:3 aspect ratio size request (360px width x 270px height)
         popover_box.set_size_request(360, 270)
 
         # Header Title
-        title_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        title_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=4, margin_top=2)
         self.annotations_count_label = label(text="Annotations (0)", css_class="bold")
         self.annotations_count_label.set_hexpand(True)
         self.annotations_count_label.set_halign(Gtk.Align.START)
@@ -711,11 +711,30 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.annotations_listbox = Gtk.ListBox()
         self.annotations_listbox.add_css_class("rich-list")
+        self.annotations_listbox.set_header_func(self._update_annotations_header)
         self.annotations_listbox.connect("row-activated", self._on_annotation_row_activated)
         scrolled.set_child(self.annotations_listbox)
         popover_box.append(scrolled)
 
         self.annotations_popover.set_child(popover_box)
+
+    def _update_annotations_header(self, row: Gtk.ListBoxRow, before: Gtk.ListBoxRow | None):
+        hl = self._row_to_hl_map.get(row)
+        before_hl = self._row_to_hl_map.get(before) if before else None
+
+        page_idx = hl.get("page", 0) if hl else 0
+        before_page_idx = before_hl.get("page", 0) if before_hl else None
+
+        if before is None or page_idx != before_page_idx:
+            hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=6, margin_top=8, margin_bottom=2)
+            lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
+            lbl.add_css_class("caption")
+            lbl.add_css_class("bold")
+            lbl.set_halign(Gtk.Align.START)
+            hdr_box.append(lbl)
+            row.set_header(hdr_box)
+        else:
+            row.set_header(None)
 
     def _update_annotations_button(self):
         count = len(self.highlights)
@@ -733,35 +752,32 @@ class MainWindow(Adw.ApplicationWindow):
             self.annotations_listbox.remove(child)
             child = nxt
 
-        for hl in self.highlights:
+        sorted_highlights = sorted(self.highlights, key=lambda h: (h.get("page", 0), h.get("char_start", 0)))
+        for hl in sorted_highlights:
             row = Gtk.ListBoxRow()
-            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_start=8, margin_end=8, margin_top=8, margin_bottom=8)
+            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=6, margin_end=6, margin_top=6, margin_bottom=6)
 
+            # Minimal color circle swatch
             color_swatch = Gtk.Box()
-            color_swatch.set_size_request(14, 14)
+            color_swatch.set_size_request(10, 10)
             color_swatch.set_valign(Gtk.Align.CENTER)
             color_swatch.add_css_class("highlight-circle-swatch")
             bg_color = hl.get("color", "#FFEE55")
             provider = Gtk.CssProvider()
-            provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}")
+            provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 10px; min-height: 10px; }}")
             color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             item_box.append(color_swatch)
 
-            vbox = box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            page_num = hl.get("page", 0) + 1
-            page_lbl = label(text=f"Page {page_num}", css_class="dim-label")
-            page_lbl.set_halign(Gtk.Align.START)
-            vbox.append(page_lbl)
-
+            # Minimal text snippet label
             txt = (hl.get("text", "") or "").strip() or "(Highlight)"
             txt_lbl = label(text=txt)
             txt_lbl.set_lines(2)
             txt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
             txt_lbl.set_halign(Gtk.Align.START)
             txt_lbl.set_xalign(0.0)
-            vbox.append(txt_lbl)
+            txt_lbl.set_hexpand(True)
+            item_box.append(txt_lbl)
 
-            item_box.append(vbox)
             row.set_child(item_box)
             self._row_to_hl_map[row] = hl
             self.annotations_listbox.append(row)
