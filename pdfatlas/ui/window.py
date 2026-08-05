@@ -36,20 +36,36 @@ from .settings import SettingsWindow
 from .shortcuts import ShortcutsController
 from .theme import load_window_css
 from .gui import box, button, label, search_entry, scrolled_window, spacer
+from .cairo_utils import hsl_to_hex
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
 PALETTE_COLORS = [
-    # Row 1: Pale Warm & Yellow Tones
-    "#FFF49C", "#FFE885", "#FFD770", "#FFCA78", "#FFBB7C", "#FFA885",
-    "#FFA0A0", "#FFB2CE", "#F8B6EB", "#E8B8FF", "#D5B8FF", "#C3BDFF",
-    # Row 2: Pale Cool & Green Tones
-    "#B8CAFF", "#B8DBFF", "#B8EBFF", "#B8F5FF", "#B8F7ED", "#B8F5D8",
-    "#C0F5BE", "#D2F5B8", "#E2F5B8", "#EDF5B8", "#F7F5B8", "#F5EAB8",
-    # Row 3: Soft Muted & Neutral Earth Pastels
-    "#EFE7CC", "#EFE0CC", "#EFD9CC", "#EFD1CC", "#E8D1EF", "#D9D1EF",
-    "#CCD1EF", "#CCE2EF", "#CCEFE8", "#CCEFE0", "#D4EFCB", "#EBEFCB",
+    # HSL tuples: (hue, saturation %, lightness %) — vivid, non-pastel tones
+    # Row 1: Warm
+    (50, 95, 68),    # yellow
+    (38, 95, 66),    # amber
+    (26, 92, 64),    # orange
+    (14, 90, 64),    # coral
+    (4, 86, 66),     # red
+    (348, 82, 70),   # rose
+    # Row 2: Pink / Purple / Blue
+    (326, 80, 70),   # pink
+    (300, 74, 68),   # magenta
+    (272, 72, 66),   # purple
+    (252, 76, 68),   # violet
+    (232, 82, 68),   # blue
+    (210, 85, 66),   # azure
+    # Row 3: Cyan / Green / Neutral
+    (188, 86, 64),   # cyan
+    (168, 74, 62),   # teal
+    (142, 70, 60),   # green
+    (110, 76, 62),   # lime
+    (80, 78, 62),    # yellow-green
+    (55, 65, 60),    # olive
 ]
+
+PALETTE_COLS = 6
 
 
 def clamp(min_val: float, val: float, max_val: float) -> float:
@@ -702,7 +718,6 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.idle_add(apply_saved_scroll)
 
     def _build_annotations_popover(self):
-        self._row_to_hl_map: dict[Gtk.ListBoxRow, dict] = {}
         self.annotations_popover = Gtk.Popover()
         self.annotations_btn.set_popover(self.annotations_popover)
 
@@ -726,33 +741,12 @@ class MainWindow(Adw.ApplicationWindow):
         scrolled.set_vexpand(True)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
-        self.annotations_listbox = Gtk.ListBox()
-        self.annotations_listbox.add_css_class("annotation-list")
-        self.annotations_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.annotations_listbox.set_header_func(self._update_annotations_header)
-        self.annotations_listbox.connect("row-activated", self._on_annotation_row_activated)
-        scrolled.set_child(self.annotations_listbox)
+        self.annotations_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.annotations_list.add_css_class("annotation-list")
+        scrolled.set_child(self.annotations_list)
         popover_box.append(scrolled)
 
         self.annotations_popover.set_child(popover_box)
-
-    def _update_annotations_header(self, row: Gtk.ListBoxRow, before: Gtk.ListBoxRow | None):
-        hl = self._row_to_hl_map.get(row)
-        before_hl = self._row_to_hl_map.get(before) if before else None
-
-        page_idx = hl.get("page", 0) if hl else 0
-        before_page_idx = before_hl.get("page", 0) if before_hl else None
-
-        if before is None or page_idx != before_page_idx:
-            hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=4, margin_bottom=1)
-            lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
-            lbl.add_css_class("caption")
-            lbl.add_css_class("bold")
-            lbl.set_halign(Gtk.Align.START)
-            hdr_box.append(lbl)
-            row.set_header(hdr_box)
-        else:
-            row.set_header(None)
 
     def _update_annotations_button(self):
         count = len(self.highlights)
@@ -760,20 +754,29 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "annotations_count_label"):
             self.annotations_count_label.set_text(f"Annotations ({count})")
 
-        if not hasattr(self, "annotations_listbox"):
+        if not hasattr(self, "annotations_list"):
             return
 
-        self._row_to_hl_map.clear()
-        child = self.annotations_listbox.get_first_child()
+        child = self.annotations_list.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
-            self.annotations_listbox.remove(child)
+            self.annotations_list.remove(child)
             child = nxt
 
         sorted_highlights = sorted(self.highlights, key=lambda h: (h.get("page", 0), h.get("char_start", 0)))
+        last_page: int | None = None
         for hl in sorted_highlights:
-            row = Gtk.ListBoxRow()
-            row.add_css_class("raised")
+            page_idx = hl.get("page", 0)
+            if page_idx != last_page:
+                hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=4, margin_bottom=1)
+                lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
+                lbl.add_css_class("caption")
+                lbl.add_css_class("bold")
+                lbl.set_halign(Gtk.Align.START)
+                hdr_box.append(lbl)
+                self.annotations_list.append(hdr_box)
+                last_page = page_idx
+
             item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
 
             # Prominent color circle swatch (14px)
@@ -798,15 +801,35 @@ class MainWindow(Adw.ApplicationWindow):
             txt_lbl.set_hexpand(True)
             item_box.append(txt_lbl)
 
-            row.set_child(item_box)
-            self._row_to_hl_map[row] = hl
-            self.annotations_listbox.append(row)
+            linked_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            linked_box.add_css_class("linked")
+            linked_box.set_hexpand(True)
 
-    def _on_annotation_row_activated(self, listbox, row: Gtk.ListBoxRow):
-        hl = self._row_to_hl_map.get(row)
-        if hl:
-            self.nav_controller.jump_to_annotation(hl)
-            self.annotations_popover.popdown()
+            main_btn = Gtk.Button()
+            main_btn.set_hexpand(True)
+            main_btn.set_child(item_box)
+            main_btn.set_tooltip_text("Go to annotation")
+            main_btn.connect("clicked", lambda b, h=hl: self._activate_annotation(h))
+            linked_box.append(main_btn)
+
+            btn_delete = Gtk.Button(icon_name="user-trash-symbolic")
+            btn_delete.set_tooltip_text("Delete annotation")
+            btn_delete.connect("clicked", lambda b, h=hl: self._delete_annotation(h))
+            linked_box.append(btn_delete)
+
+            self.annotations_list.append(linked_box)
+
+    def _activate_annotation(self, hl: dict):
+        self.nav_controller.jump_to_annotation(hl)
+        self.annotations_popover.popdown()
+
+    def _delete_annotation(self, hl: dict):
+        if hl in self.highlights:
+            self.highlights.remove(hl)
+        self.db_service.delete_highlight(hl["id"])
+        self.canvas.set_highlights(self.highlights)
+        self.canvas.queue_draw()
+        self._update_annotations_button()
 
     def _on_highlights_loaded(self, highlights: list[dict]):
         self.highlights = highlights
@@ -952,6 +975,23 @@ class MainWindow(Adw.ApplicationWindow):
 
         return False
 
+    def _selection_matching_highlights(self) -> list[dict]:
+        """Return highlights whose page and char range exactly match the current selection."""
+        sel = self.canvas.text_selection if self.canvas else None
+        if not sel or not sel.has_selection() or sel.anchor_page is None or sel.focus_page is None:
+            return []
+        if sel.anchor_page != sel.focus_page:
+            return []
+        c_start = min(sel.anchor_char_idx or 0, sel.focus_char_idx or 0)
+        c_end = max(sel.anchor_char_idx or 0, sel.focus_char_idx or 0)
+        return [
+            hl
+            for hl in self.highlights
+            if hl.get("page") == sel.anchor_page
+            and hl.get("char_start") == c_start
+            and hl.get("char_end") == c_end
+        ]
+
     def _update_selection_toolbar(self, has_selection: bool):
         if hasattr(self, "selection_toolbar"):
             if has_selection and self.canvas.text_selection and self.canvas.text_selection.has_selection():
@@ -960,6 +1000,8 @@ class MainWindow(Adw.ApplicationWindow):
                 self.btn_copy_tex.set_sensitive(is_tex_available)
                 if is_tex_available:
                     self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
+                if hasattr(self, "btn_remove_hl"):
+                    self.btn_remove_hl.set_visible(bool(self._selection_matching_highlights()))
                 self.selection_toolbar.set_visible(True)
             else:
                 self.selection_toolbar.set_visible(False)
@@ -1389,6 +1431,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.btn_highlight.connect("clicked", lambda b: self._apply_highlight_to_selection())
         self._update_highlight_split_button_label()
 
+        self.btn_remove_hl = button(label="Remove", tooltip="Remove the selected highlight",
+                                    on_clicked=lambda b: self._remove_matching_highlights())
+
         popover_palette = Gtk.Popover()
         popover_palette.set_position(Gtk.PositionType.TOP)
 
@@ -1398,9 +1443,10 @@ class MainWindow(Adw.ApplicationWindow):
         grid.set_margin_start(6)
         grid.set_margin_end(6)
 
-        for idx, hex_color in enumerate(PALETTE_COLORS):
-            row = idx // 12
-            col = idx % 12
+        for idx, hsl in enumerate(PALETTE_COLORS):
+            row = idx // PALETTE_COLS
+            col = idx % PALETTE_COLS
+            hex_color = hsl_to_hex(*hsl)
             color_btn = Gtk.Button()
             color_btn.set_size_request(24, 24)
             color_btn.set_tooltip_text(hex_color)
@@ -1438,7 +1484,7 @@ class MainWindow(Adw.ApplicationWindow):
             css_class="selection-toolbar", valign=Gtk.Align.END, halign=Gtk.Align.FILL,
             children=[
                 box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
-                    children=[self.btn_highlight, self.btn_copy_text, self.btn_copy_tex]),
+                    children=[self.btn_highlight, self.btn_remove_hl, self.btn_copy_text, self.btn_copy_tex]),
                 spacer(),
             ],
         )
@@ -1562,6 +1608,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.queue_draw()
         self._update_annotations_button()
         sel.clear_selection()
+        self._update_selection_toolbar(False)
+
+    def _remove_matching_highlights(self):
+        to_remove = self._selection_matching_highlights()
+        if not to_remove:
+            return
+        for hl in to_remove:
+            self.db_service.delete_highlight(hl["id"])
+            if hl in self.highlights:
+                self.highlights.remove(hl)
+        self.canvas.set_highlights(self.highlights)
+        self.canvas.queue_draw()
+        self._update_annotations_button()
+        sel = self.canvas.text_selection if self.canvas else None
+        if sel:
+            sel.clear_selection()
         self._update_selection_toolbar(False)
 
     def _build_debug_cache_box(self):

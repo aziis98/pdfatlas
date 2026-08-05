@@ -14,6 +14,24 @@ from ..core.text_selection import TextSelection
 from .gl_canvas import GLCanvas
 
 
+def highlight_at_point(
+    highlights: list[dict], page_idx: int, pt: tuple[float, float], tolerance: float = 2.0
+) -> dict | None:
+    """
+    Return the first highlight on `page_idx` whose rects contain the PDF point
+    (pt_x, pt_y), expanded by `tolerance` PDF points on every side.
+    """
+    pt_x, pt_y = pt
+    for hl in highlights:
+        if hl.get("page") != page_idx:
+            continue
+        for rx0, ry0, rx1, ry1 in hl.get("rects", []):
+            if (rx0 - tolerance <= pt_x <= rx1 + tolerance
+                    and ry0 - tolerance <= pt_y <= ry1 + tolerance):
+                return hl
+    return None
+
+
 class PageContainer(Gtk.Box):
     """
     A lightweight layout container representing a single PDF page.
@@ -90,6 +108,7 @@ class PDFCanvas(Gtk.Overlay):
         self.debug_arxiv_data: dict[str, Any] | None = None
         self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
         self._pending_drag_start: tuple[int, int] | None = None
+        self._suppress_drag_clear: bool = False
         self._is_word_drag_mode: bool = False
         self.win: Any = None
 
@@ -294,6 +313,9 @@ class PDFCanvas(Gtk.Overlay):
     def on_drag_end(self, gesture, offset_x, offset_y):
         """Handle drag end - finalize selection or clear if drag didn't start."""
         self._pending_drag_start = None
+        if self._suppress_drag_clear:
+            self._suppress_drag_clear = False
+            return
         if self.text_selection is not None:
             if abs(offset_x) < 3 and abs(offset_y) < 3:
                 self.clear_selection()
@@ -457,10 +479,25 @@ class PDFCanvas(Gtk.Overlay):
             if page_idx is not None and self.text_selection:
                 pt = self._screen_to_pdf_point(x, y, page_idx)
                 if pt is not None:
+                    hl = highlight_at_point(self.highlights, page_idx, pt)
+                    if hl is not None:
+                        self.text_selection.anchor_page = page_idx
+                        self.text_selection.anchor_char_idx = hl.get("char_start")
+                        self.text_selection.focus_page = page_idx
+                        self.text_selection.focus_char_idx = hl.get("char_end")
+                        self.text_selection.is_selecting = False
+                        self._is_word_drag_mode = False
+                        self._suppress_drag_clear = True
+                        self.queue_draw_overlays("double-click-highlight")
+                        if self.on_selection_changed:
+                            self.on_selection_changed(True)
+                        return
+
                     char_idx = self.text_selection.hit_test(page_idx, pt[0], pt[1])
                     if char_idx is not None:
                         self.text_selection.select_word_at(page_idx, char_idx)
                         self._is_word_drag_mode = True
+                        self._suppress_drag_clear = True
                         self.queue_draw_overlays("double-click-word")
                         if self.on_selection_changed:
                             self.on_selection_changed(True)

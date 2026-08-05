@@ -1,3 +1,4 @@
+import colorsys
 import math
 
 import cairo
@@ -54,3 +55,9 @@ def hex_to_rgba(hex_str: str, alpha: float = 1.0) -> tuple[float, float, float, 
         except ValueError:
             pass
     return (1.0, 0.933, 0.333, alpha)
+
+
+def hsl_to_hex(h: float, s: float, lightness: float) -> str:
+    """Convert HSL (h in degrees, s and lightness in percent) to a #RRGGBB hex string."""
+    r, g, b = colorsys.hls_to_rgb((h % 360.0) / 360.0, lightness / 100.0, s / 100.0)
+    return f"#{int(round(r * 255)):02X}{int(round(g * 255)):02X}{int(round(b * 255)):02X}"

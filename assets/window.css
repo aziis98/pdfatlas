@@ -9,13 +9,26 @@
     border-radius: 9999px;
 }
 
-.annotation-list row {
-    padding: 3px 6px;
-    min-height: 26px;
+.annotation-list {
     margin: 2px 0;
-    border-radius: 8px;
 }
-.annotation-list row:hover {
+.annotation-list box.linked {
+    margin: 2px 0;
+}
+.annotation-list box.linked button:first-child {
+    border-radius: 8px 0 0 8px;
+    padding: 3px 10px 3px 6px;
+    min-height: 26px;
+}
+.annotation-list box.linked button:first-child label {
+    font-weight: 400;
+}
+.annotation-list box.linked button:last-child {
+    border-radius: 0 8px 8px 0;
+    min-width: 32px;
+    padding: 0;
+}
+.annotation-list box.linked button:hover {
     background-color: rgba(0, 0, 0, 0.05);
 }
 

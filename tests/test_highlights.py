@@ -8,7 +8,7 @@ from pdfatlas.core.index import (
     load_highlights_from_db,
     save_highlight_to_db,
 )
-from pdfatlas.ui.cairo_utils import hex_to_rgba
+from pdfatlas.ui.cairo_utils import hex_to_rgba, hsl_to_hex
 
 
 def test_hex_to_rgba():
@@ -19,6 +19,15 @@ def test_hex_to_rgba():
     assert a == 1.0
 
     assert hex_to_rgba("invalid") == (1.0, 0.933, 0.333, 1.0)
+
+
+def test_hsl_to_hex():
+    assert hsl_to_hex(0, 100, 50) == "#FF0000"
+    assert hsl_to_hex(120, 100, 50) == "#00FF00"
+    assert hsl_to_hex(240, 100, 50) == "#0000FF"
+    assert hsl_to_hex(50, 95, 68) == "#FBE160"
+    assert hsl_to_hex(360, 100, 50) == "#FF0000"
+    assert hsl_to_hex(-120, 100, 50) == "#0000FF"
 
 
 def test_highlight_db_operations():
@@ -115,3 +124,83 @@ def test_jump_to_annotation():
     # Page 1 offset = 720.0, center_pts = 325.0, scale = 1.0 -> y_pixels = 1045.0
     # target_y = 1045.0 - (400.0 / 2.0) = 845.0
     win.vadjustment.set_value.assert_called_with(845.0)
+
+
+def test_highlight_at_point():
+    from pdfatlas.ui.canvas import highlight_at_point
+
+    hl = {"page": 1, "rects": [(100.0, 200.0, 300.0, 250.0)]}
+    highlights = [{"page": 0, "rects": [(0.0, 0.0, 10.0, 10.0)]}, hl]
+
+    assert highlight_at_point(highlights, 1, (200.0, 225.0)) is hl
+    assert highlight_at_point(highlights, 1, (302.0, 225.0)) is hl
+    assert highlight_at_point(highlights, 1, (97.0, 225.0)) is None
+    assert highlight_at_point(highlights, 0, (5.0, 5.0)) is highlights[0]
+    assert highlight_at_point(highlights, 2, (200.0, 225.0)) is None
+    assert highlight_at_point([], 1, (200.0, 225.0)) is None
+    assert highlight_at_point(highlights, 1, (200.0, 225.0), tolerance=0.0) is hl
+
+
+def test_annotations_delete_button():
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gtk
+    app = Adw.Application(application_id="com.example.testannotationsdel")
+    app.register(None)
+    from pdfatlas.ui.window import MainWindow
+
+    win = MainWindow(app)
+    win.highlights = [
+        {"id": 1, "page": 0, "color": "#FFEE55", "text": "One", "rects": []},
+        {"id": 2, "page": 1, "color": "#FFEE55", "text": "Two", "rects": []},
+    ]
+    win._update_annotations_button()
+    assert win.annotations_btn.get_visible()
+
+    def walk(widget, acc):
+        acc.append(widget)
+        child = widget.get_first_child()
+        while child is not None:
+            walk(child, acc)
+            child = child.get_next_sibling()
+        return acc
+
+    delete_buttons = [w for w in walk(win.annotations_list, [])
+                      if isinstance(w, Gtk.Button) and w.get_icon_name() == "user-trash-symbolic"]
+    assert len(delete_buttons) == 2
+
+    delete_buttons[0].emit("clicked")
+    assert len(win.highlights) == 1
+    assert win.highlights[0]["id"] == 2
+
+
+def test_remove_matching_highlights():
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+    app = Adw.Application(application_id="com.example.testremovematching")
+    app.register(None)
+    from pdfatlas.ui.window import MainWindow
+
+    win = MainWindow(app)
+    win.highlights = [
+        {"id": 1, "page": 0, "char_start": 0, "char_end": 5, "color": "#FFEE55", "text": "A", "rects": []},
+        {"id": 2, "page": 0, "char_start": 10, "char_end": 15, "color": "#FFEE55", "text": "B", "rects": []},
+        {"id": 3, "page": 1, "char_start": 0, "char_end": 5, "color": "#FFEE55", "text": "C", "rects": []},
+    ]
+
+    from unittest.mock import MagicMock
+    from pdfatlas.core.text_selection import TextSelection
+    sel = TextSelection(MagicMock())
+    win.canvas.text_selection = sel
+    sel.anchor_page = 0
+    sel.anchor_char_idx = 0
+    sel.focus_page = 0
+    sel.focus_char_idx = 5
+
+    assert win._selection_matching_highlights() == [win.highlights[0]]
+    win._remove_matching_highlights()
+    assert [h["id"] for h in win.highlights] == [2, 3]
+    assert not sel.has_selection()
