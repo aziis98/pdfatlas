@@ -210,6 +210,16 @@ class MainWindow(Adw.ApplicationWindow):
         right_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_end=12)
         header.pack_end(right_box)
 
+        # Tag icon button for annotations (placed on the left of page_input)
+        self.annotations_btn = Gtk.MenuButton()
+        self.annotations_btn.set_icon_name("tag-symbolic")
+        self.annotations_btn.set_tooltip_text("Annotations & Highlights")
+        self.annotations_btn.set_visible(False)
+        self.annotations_btn.add_css_class("flat")
+        right_box.append(self.annotations_btn)
+
+        self._build_annotations_popover()
+
         self.page_input = Gtk.Entry()
         self.page_input.set_width_chars(4)
         self.page_input.set_max_width_chars(4)
@@ -454,6 +464,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             self.highlights = []
             self.canvas.set_highlights([])
+            self._update_annotations_button()
 
             self.render_cache.clear()
             self.minimap_cache.clear()
@@ -673,10 +684,100 @@ class MainWindow(Adw.ApplicationWindow):
 
                 GLib.idle_add(apply_saved_scroll)
 
+    def _build_annotations_popover(self):
+        self._row_to_hl_map: dict[Gtk.ListBoxRow, dict] = {}
+        self.annotations_popover = Gtk.Popover()
+        self.annotations_btn.set_popover(self.annotations_popover)
+
+        popover_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=10, margin_end=10, margin_top=10, margin_bottom=10)
+        # ~4:3 aspect ratio size request (360px width x 270px height)
+        popover_box.set_size_request(360, 270)
+
+        # Header Title
+        title_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.annotations_count_label = label(text="Annotations (0)", css_class="bold")
+        self.annotations_count_label.set_hexpand(True)
+        self.annotations_count_label.set_halign(Gtk.Align.START)
+        title_box.append(self.annotations_count_label)
+        popover_box.append(title_box)
+
+        popover_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # Scrollable Annotations List
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_hexpand(True)
+        scrolled.set_vexpand(True)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        self.annotations_listbox = Gtk.ListBox()
+        self.annotations_listbox.add_css_class("rich-list")
+        self.annotations_listbox.connect("row-activated", self._on_annotation_row_activated)
+        scrolled.set_child(self.annotations_listbox)
+        popover_box.append(scrolled)
+
+        self.annotations_popover.set_child(popover_box)
+
+    def _update_annotations_button(self):
+        count = len(self.highlights)
+        self.annotations_btn.set_visible(count > 0)
+        if hasattr(self, "annotations_count_label"):
+            self.annotations_count_label.set_text(f"Annotations ({count})")
+
+        if not hasattr(self, "annotations_listbox"):
+            return
+
+        self._row_to_hl_map.clear()
+        child = self.annotations_listbox.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self.annotations_listbox.remove(child)
+            child = nxt
+
+        for hl in self.highlights:
+            row = Gtk.ListBoxRow()
+            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_start=8, margin_end=8, margin_top=8, margin_bottom=8)
+
+            color_swatch = Gtk.Box()
+            color_swatch.set_size_request(14, 14)
+            color_swatch.set_valign(Gtk.Align.CENTER)
+            color_swatch.add_css_class("highlight-circle-swatch")
+            bg_color = hl.get("color", "#FFEE55")
+            provider = Gtk.CssProvider()
+            provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}")
+            color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            item_box.append(color_swatch)
+
+            vbox = box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            page_num = hl.get("page", 0) + 1
+            page_lbl = label(text=f"Page {page_num}", css_class="dim-label")
+            page_lbl.set_halign(Gtk.Align.START)
+            vbox.append(page_lbl)
+
+            txt = (hl.get("text", "") or "").strip() or "(Highlight)"
+            txt_lbl = label(text=txt)
+            txt_lbl.set_lines(2)
+            txt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            txt_lbl.set_halign(Gtk.Align.START)
+            txt_lbl.set_xalign(0.0)
+            vbox.append(txt_lbl)
+
+            item_box.append(vbox)
+            row.set_child(item_box)
+            self._row_to_hl_map[row] = hl
+            self.annotations_listbox.append(row)
+
+    def _on_annotation_row_activated(self, listbox, row: Gtk.ListBoxRow):
+        hl = self._row_to_hl_map.get(row)
+        if hl:
+            page_idx = hl.get("page", 0)
+            self.nav_controller.jump_to_page(page_idx)
+            self.annotations_popover.popdown()
+
     def _on_highlights_loaded(self, highlights: list[dict]):
         self.highlights = highlights
         self.canvas.set_highlights(highlights)
         self.canvas.queue_draw()
+        self._update_annotations_button()
 
         # If there's a deferred query from state restoration, execute it now
         if hasattr(self, "_deferred_state_query") and self._deferred_state_query:
@@ -1387,6 +1488,7 @@ class MainWindow(Adw.ApplicationWindow):
                     self.highlights.append(hl_obj)
                     self.canvas.set_highlights(self.highlights)
                     self.canvas.queue_draw()
+                    self._update_annotations_button()
                 return _on_saved
 
             self.db_service.save_highlight(
@@ -1423,6 +1525,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.canvas.set_highlights(self.highlights)
         self.canvas.queue_draw()
+        self._update_annotations_button()
         sel.clear_selection()
         self._update_selection_toolbar(False)
 

@@ -68,3 +68,25 @@ def test_double_click_word_selection():
     assert sel.anchor_char_idx == 0
     assert sel.focus_char_idx == 7
     assert sel.get_selected_text(0) == "Provided"
+
+
+def test_annotations_popover_visibility():
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+    app = Adw.Application(application_id="com.example.testannotations")
+    app.register(None)
+    from pdfatlas.ui.window import MainWindow
+
+    win = MainWindow(app)
+    assert not win.annotations_btn.get_visible()
+
+    win.highlights = [{"id": 1, "page": 0, "color": "#FFEE55", "text": "Test Highlight", "rects": []}]
+    win._update_annotations_button()
+    assert win.annotations_btn.get_visible()
+    assert "1" in win.annotations_count_label.get_text()
+
+    win.highlights = []
+    win._update_annotations_button()
+    assert not win.annotations_btn.get_visible()
