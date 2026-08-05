@@ -59,12 +59,13 @@ Pressing `M` opens a page thumbnail grid overlay:
 
 <img src="assets/screenshots/attention_text_selection.png" alt="Text Selection Toolbar" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
 
-### Text Selection & Copy
+### Text Selection & Highlighting
 
-Highlight text in any document to reveal the bottom context toolbar:
+Select text in any document to open the context toolbar:
 
-- **PDF Plain Text Copy (`Ctrl+Shift+C` / "Copy"):** Copies selected plain text from the PDF.
-- **LaTeX Source Copy (`Ctrl+C` / "Copy Source"):** For arXiv papers, PDF Atlas attempts to map character selections back to original LaTeX source code.
+- **Text Highlighting (`H`):** Create persistent color highlights saved globally per document SHA-256 hash.
+- **PDF Plain Text Copy (`Ctrl+Shift+C`):** Copy selected plain text from the PDF.
+- **LaTeX Source Copy (`Ctrl+C`):** For arXiv papers, map selections back to original LaTeX source code.
 
 <br clear="all" />
 
