@@ -68,6 +68,18 @@ Highlight text in any document to reveal the bottom context toolbar:
 
 <br clear="all" />
 
+<img src="assets/screenshots/attention_annotations_popover.png" alt="Annotations & Highlights Popover" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+
+### Annotations & Highlights Navigator
+
+Documents with highlights display a dedicated tag icon in the top headerbar:
+
+- **Grouped Page Navigator:** Displays a compact, vertical popover list grouping document highlights by page with color swatch indicators.
+- **Instant Precision Jump:** Clicking an annotation item automatically scrolls and centers the viewport vertically around that exact highlight.
+- **Coming Soon:** *Written notes & text comments attached to annotations.*
+
+<br clear="all" />
+
 
 ## Architecture
 

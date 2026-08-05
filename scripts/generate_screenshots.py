@@ -41,6 +41,36 @@ TASKS = [
             },
         },
     ),
+    (
+        "attention_annotations_popover.png",
+        ATTENTION_PDF,
+        {
+            "scroll_y": 800,
+            "annotations_popover": True,
+            "highlights": [
+                {
+                    "page": 0,
+                    "color": "#FFEE55",
+                    "text": "computation also forms the foundation of the Extended",
+                },
+                {
+                    "page": 0,
+                    "color": "#FF9933",
+                    "text": "symbol representations (x1, ..., xn) to a seq",
+                },
+                {
+                    "page": 1,
+                    "color": "#FFEE55",
+                    "text": "ce transduction models, we use learned embeddings to convert...",
+                },
+                {
+                    "page": 2,
+                    "color": "#FFEE55",
+                    "text": "M sentences and split tokens into subwords...",
+                },
+            ],
+        },
+    ),
 ]
 
 
