@@ -74,3 +74,33 @@ def test_arxiv_id_from_path(path_str: str, expected_id: str):
 )
 def test_arxiv_id_from_path_invalid(path_str: str):
     assert arxiv_id_from_path(path_str) is None
+
+
+def test_reconcile_moved_edits():
+    from pdfatlas.core.arxiv_mapper import ArxivDiffMapper, SequenceMatcher
+
+    mapper = ArxivDiffMapper()
+    mapper.pdf_words = ["Intro", "FooterBlock", "Body"]
+    mapper.tex_words = ["Intro", "Body", "FooterBlock"]
+
+    matcher = SequenceMatcher(None, mapper.pdf_words, mapper.tex_words)
+    mapper.diff_opcodes = matcher.get_opcodes()
+
+    for tag, i1, i2, j1, j2 in mapper.diff_opcodes:
+        if tag in ("equal", "replace"):
+            p_len = i2 - i1
+            t_len = j2 - j1
+            common_len = max(p_len, t_len)
+            for k in range(common_len):
+                cp = i1 + k if k < p_len else i2 - 1
+                ct = j1 + k if k < t_len else j2 - 1
+                mapper.pdf_to_tex_map[cp] = ct
+                mapper.tex_to_pdf_map[ct] = cp
+
+    mapper.mapped_pdf_indices = set(mapper.tex_to_pdf_map.values())
+    moved = mapper._reconcile_moved_edits(min_words=1, threshold=0.9)
+
+    assert len(moved) > 0
+    assert 1 in mapper.mapped_pdf_indices
+    assert mapper.pdf_to_tex_map[1] == 2
+    assert mapper.tex_to_pdf_map[2] == 1

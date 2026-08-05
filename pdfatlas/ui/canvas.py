@@ -91,6 +91,7 @@ class PDFCanvas(Gtk.Overlay):
         self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
         self._pending_drag_start: tuple[int, int] | None = None
         self._is_word_drag_mode: bool = False
+        self.win: Any = None
 
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0

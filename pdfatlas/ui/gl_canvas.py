@@ -142,14 +142,14 @@ class GLCanvas(Gtk.GLArea):
                                 hh = (ry1 - ry0) * scale
                                 r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val), mode="multiply")
 
-                if canvas.text_selection is not None and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection()):
+                if canvas.debug_mode and canvas.text_selection is not None and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection()):
                     win_obj = getattr(canvas, "win", None)
                     arxiv_mapper = getattr(win_obj, "arxiv_mapper", None) if win_obj else None
                     if arxiv_mapper and arxiv_mapper.is_ready and arxiv_mapper.word_metadata:
                         pi = canvas.text_selection.get_page_index(i)
                         co_x = crop_rect.x0 if crop_rect is not None else 0.0
                         co_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        light_green = (0.2, 0.9, 0.3, 0.15)
+                        dark_green = (0.05, 0.65, 0.25, 0.40)
                         mapped_set = getattr(arxiv_mapper, "mapped_pdf_indices", set(arxiv_mapper.tex_to_pdf_map.values()))
                         for w_idx, w_meta in enumerate(arxiv_mapper.word_metadata):
                             if w_meta[0] == i and w_idx in mapped_set:
@@ -165,7 +165,7 @@ class GLCanvas(Gtk.GLArea):
                                         sy = page_y0 + (wy0 - co_y) * scale
                                         sw = (wx1 - wx0) * scale
                                         sh = (wy1 - wy0) * scale
-                                        r.fill_rect(sx, sy, sw, sh, light_green)
+                                        r.fill_rect(sx, sy, sw, sh, dark_green)
 
                     sel_rects = canvas.text_selection.get_selection_rects(i)
                     if sel_rects:

@@ -289,6 +289,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Document View
         self.canvas = PDFCanvas()
+        self.canvas.win = self
         self.canvas.debug_mode = self.debug_mode
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_page_hovered = self._on_page_hovered

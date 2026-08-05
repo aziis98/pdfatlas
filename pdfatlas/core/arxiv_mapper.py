@@ -217,6 +217,7 @@ class ArxivDiffMapper:
         self.pdf_to_tex_map: dict[int, int] = {}
         self.tex_to_pdf_map: dict[int, int] = {}
         self.mapped_pdf_indices: set[int] = set()
+        self.moved_blocks: list[tuple[int, int, int, int, float]] = []
         self.is_ready: bool = False
 
     def process(
@@ -300,6 +301,7 @@ class ArxivDiffMapper:
         t_map = time.perf_counter() - t0
         t_total = time.perf_counter() - t_start
         self.mapped_pdf_indices = set(self.tex_to_pdf_map.values())
+        self.moved_blocks = self._reconcile_moved_edits()
         self.is_ready = True
 
         if progress_callback:
@@ -311,11 +313,62 @@ class ArxivDiffMapper:
             f"PDF text: {t_pdf_extract:.3f}s ({len(self.pdf_words)} words), "
             f"TeX body: {t_tex_extract:.3f}s ({len(self.tex_words)} words), "
             f"Word diff: {t_diff:.3f}s, "
-            f"Sourcemap build: {t_map:.3f}s | "
+            f"Sourcemap build: {t_map:.3f}s, "
+            f"Moved blocks: {len(self.moved_blocks)} | "
             f"Total: {t_total:.3f}s",
             file=sys.stderr,
             flush=True,
         )
+
+    def _reconcile_moved_edits(self, min_words: int = 1, threshold: float = 0.65) -> list[tuple[int, int, int, int, float]]:
+        """
+        Detects and reconciles moved edit blocks where PDF text chunks match TeX text chunks
+        that were reordered or positioned non-linearly in the document.
+        Returns a list of tuples: (pdf_start, pdf_end, tex_start, tex_end, similarity_score).
+        """
+        del_chunks = [(i1, i2) for tag, i1, i2, j1, j2 in self.diff_opcodes if tag in ("delete", "replace") and (i2 - i1) >= min_words]
+        ins_chunks = [(j1, j2) for tag, i1, i2, j1, j2 in self.diff_opcodes if tag in ("insert", "replace") and (j2 - j1) >= min_words]
+
+        moved_blocks: list[tuple[int, int, int, int, float]] = []
+        matched_ins = set()
+
+        for p1, p2 in del_chunks:
+            p_words = self.pdf_words[p1:p2]
+            best_match = None
+            best_score = 0.0
+            best_t_chunk = None
+
+            for idx, (t1, t2) in enumerate(ins_chunks):
+                if idx in matched_ins:
+                    continue
+                t_words = self.tex_words[t1:t2]
+                score = SequenceMatcher(None, p_words, t_words).ratio()
+                if score >= threshold and score > best_score:
+                    best_score = score
+                    best_match = (t1, t2)
+                    best_t_chunk = idx
+
+            if best_match is not None and best_t_chunk is not None:
+                t1, t2 = best_match
+                matched_ins.add(best_t_chunk)
+                moved_blocks.append((p1, p2, t1, t2, best_score))
+
+                # Reconcile word mappings for the matched moved block
+                sub_matcher = SequenceMatcher(None, p_words, self.tex_words[t1:t2])
+                for tag, sub_i1, sub_i2, sub_j1, sub_j2 in sub_matcher.get_opcodes():
+                    if tag in ("equal", "replace"):
+                        p_len = sub_i2 - sub_i1
+                        t_len = sub_j2 - sub_j1
+                        common_len = max(p_len, t_len)
+                        for k in range(common_len):
+                            cp = p1 + sub_i1 + k if k < p_len else p1 + sub_i2 - 1
+                            ct = t1 + sub_j1 + k if k < t_len else t1 + sub_j2 - 1
+                            if cp < len(self.pdf_words) and ct < len(self.tex_words):
+                                self.pdf_to_tex_map[cp] = ct
+                                self.tex_to_pdf_map[ct] = cp
+                                self.mapped_pdf_indices.add(cp)
+
+        return moved_blocks
 
     def find_pdf_word_range(self, page_index: int, start_char: int, end_char: int) -> tuple[int, int]:
         """Find the start and end PDF word indices for a given page character range."""
