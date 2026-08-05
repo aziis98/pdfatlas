@@ -318,13 +318,17 @@ class GLCanvas(Gtk.GLArea):
                         r.fill_rect(cx0, cy0, bt, ch, gc)
                         r.fill_rect(cx0 + cw - bt, cy0, bt, ch, gc)
 
-                    if canvas.text_selection.anchor_char_idx is not None:
+                    if (canvas.text_selection.anchor_page == i
+                            and canvas.text_selection.anchor_char_idx is not None
+                            and 0 <= canvas.text_selection.anchor_char_idx < len(pi.chars)):
                         ac = pi.chars[canvas.text_selection.anchor_char_idx]
                         ax = x_offset + ((ac.bbox[0] + ac.bbox[2]) / 2.0 - co_x) * scale - 4.0
                         ay = page_y0 + ((ac.bbox[1] + ac.bbox[3]) / 2.0 - co_y) * scale - 4.0
                         r.fill_rect(ax, ay, 8.0, 8.0, (1.0, 0.0, 0.0, 0.9))
 
-                    if canvas.text_selection.focus_char_idx is not None:
+                    if (canvas.text_selection.focus_page == i
+                            and canvas.text_selection.focus_char_idx is not None
+                            and 0 <= canvas.text_selection.focus_char_idx < len(pi.chars)):
                         fc = pi.chars[canvas.text_selection.focus_char_idx]
                         fx = x_offset + ((fc.bbox[0] + fc.bbox[2]) / 2.0 - co_x) * scale - 4.0
                         fy = page_y0 + ((fc.bbox[1] + fc.bbox[3]) / 2.0 - co_y) * scale - 4.0
