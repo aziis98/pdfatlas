@@ -90,3 +90,28 @@ def test_annotations_popover_visibility():
     win.highlights = []
     win._update_annotations_button()
     assert not win.annotations_btn.get_visible()
+
+
+def test_jump_to_annotation():
+    from unittest.mock import MagicMock
+    from pdfatlas.controllers.navigation import NavigationController
+
+    win = MagicMock()
+    win.doc_model = MagicMock()
+    win.canvas.page_layout = [(0.0, 500.0, 700.0, None), (720.0, 500.0, 700.0, None)]
+    win.canvas.page_gap = 20.0
+    win.vadjustment.get_page_size.return_value = 400.0
+    win.vadjustment.get_upper.return_value = 2000.0
+
+    pdf_page = MagicMock()
+    pdf_page.rect.height = 700.0
+    win.doc_model.get_page.return_value = pdf_page
+
+    nav = NavigationController(win)
+
+    hl = {"page": 1, "rects": [(100.0, 300.0, 200.0, 350.0)]}
+    nav.jump_to_annotation(hl)
+
+    # Page 1 offset = 720.0, center_pts = 325.0, scale = 1.0 -> y_pixels = 1045.0
+    # target_y = 1045.0 - (400.0 / 2.0) = 845.0
+    win.vadjustment.set_value.assert_called_with(845.0)

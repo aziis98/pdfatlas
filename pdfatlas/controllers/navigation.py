@@ -39,6 +39,42 @@ class NavigationController:
         self.win.page_input.set_text(str(page_index + 1))
         self.win.canvas.queue_draw_overlays("jump-to-page")
 
+    def jump_to_annotation(self, hl: dict):
+        """
+        Navigates the viewport to center vertically around the specified highlight annotation.
+        """
+        if not self.win.doc_model or not self.win.canvas.page_layout:
+            return
+
+        page_index = hl.get("page", 0)
+        if not (0 <= page_index < len(self.win.canvas.page_layout)):
+            return
+
+        rects = hl.get("rects", [])
+        if not rects:
+            self.jump_to_page(page_index)
+            return
+
+        page_y_offset, _dw, display_h, _crop_rect = self.win.canvas.page_layout[page_index]
+        pdf_page = self.win.doc_model.get_page(page_index)
+        pdf_page_h = pdf_page.rect.height if pdf_page else 1.0
+        scale_y = display_h / pdf_page_h if pdf_page_h > 0 else 1.0
+
+        min_y = min(r[1] for r in rects)
+        max_y = max(r[3] for r in rects)
+        annotation_center_pts = (min_y + max_y) / 2.0
+
+        annotation_y_pixels = page_y_offset + (annotation_center_pts * scale_y)
+        viewport_h = self.win.vadjustment.get_page_size()
+
+        target_y = max(0.0, annotation_y_pixels - (viewport_h / 2.0))
+        max_scroll = self.win.vadjustment.get_upper() - viewport_h
+        target_y = min(target_y, max(0.0, max_scroll))
+
+        self.win.vadjustment.set_value(target_y)
+        self.win.page_input.set_text(str(page_index + 1))
+        self.win.canvas.queue_draw_overlays("jump-to-annotation")
+
     def set_zoom_level(
         self,
         new_zoom: float,

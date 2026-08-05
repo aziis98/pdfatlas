@@ -215,7 +215,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.annotations_btn.set_icon_name("tag-symbolic")
         self.annotations_btn.set_tooltip_text("Annotations & Highlights")
         self.annotations_btn.set_visible(False)
-        self.annotations_btn.add_css_class("raised")
         right_box.append(self.annotations_btn)
 
         self._build_annotations_popover()
@@ -753,57 +752,42 @@ class MainWindow(Adw.ApplicationWindow):
             self.annotations_listbox.remove(child)
             child = nxt
 
-        groups: dict[int, list[dict]] = {}
         sorted_highlights = sorted(self.highlights, key=lambda h: (h.get("page", 0), h.get("char_start", 0)))
         for hl in sorted_highlights:
-            groups.setdefault(hl.get("page", 0), []).append(hl)
+            row = Gtk.ListBoxRow()
+            row.add_css_class("raised")
+            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
 
-        for p_idx, hl_list in groups.items():
-            n = len(hl_list)
-            for idx, hl in enumerate(hl_list):
-                row = Gtk.ListBoxRow()
-                item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=1, margin_bottom=1)
+            # Prominent color circle swatch (14px)
+            color_swatch = Gtk.Box()
+            color_swatch.set_size_request(14, 14)
+            color_swatch.set_valign(Gtk.Align.CENTER)
+            color_swatch.add_css_class("highlight-circle-swatch")
+            bg_color = hl.get("color", "#FFEE55")
+            provider = Gtk.CssProvider()
+            provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}")
+            color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            item_box.append(color_swatch)
 
-                # First/last item border radius rounding
-                is_first = (idx == 0)
-                is_last = (idx == n - 1)
-                rad_top = "8px" if is_first else "0px"
-                rad_bot = "8px" if is_last else "0px"
-                row_provider = Gtk.CssProvider()
-                row_provider.load_from_string(f"row {{ border-radius: {rad_top} {rad_top} {rad_bot} {rad_bot}; }}")
-                row.get_style_context().add_provider(row_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            # 1-line compact text snippet label
+            txt = (hl.get("text", "") or "").strip() or "(Highlight)"
+            txt_lbl = label(text=txt)
+            txt_lbl.set_single_line_mode(True)
+            txt_lbl.set_lines(1)
+            txt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            txt_lbl.set_halign(Gtk.Align.START)
+            txt_lbl.set_xalign(0.0)
+            txt_lbl.set_hexpand(True)
+            item_box.append(txt_lbl)
 
-                # Prominent color circle swatch (14px)
-                color_swatch = Gtk.Box()
-                color_swatch.set_size_request(14, 14)
-                color_swatch.set_valign(Gtk.Align.CENTER)
-                color_swatch.add_css_class("highlight-circle-swatch")
-                bg_color = hl.get("color", "#FFEE55")
-                provider = Gtk.CssProvider()
-                provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}")
-                color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-                item_box.append(color_swatch)
-
-                # 1-line compact text snippet label
-                txt = (hl.get("text", "") or "").strip() or "(Highlight)"
-                txt_lbl = label(text=txt)
-                txt_lbl.set_single_line_mode(True)
-                txt_lbl.set_lines(1)
-                txt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-                txt_lbl.set_halign(Gtk.Align.START)
-                txt_lbl.set_xalign(0.0)
-                txt_lbl.set_hexpand(True)
-                item_box.append(txt_lbl)
-
-                row.set_child(item_box)
-                self._row_to_hl_map[row] = hl
-                self.annotations_listbox.append(row)
+            row.set_child(item_box)
+            self._row_to_hl_map[row] = hl
+            self.annotations_listbox.append(row)
 
     def _on_annotation_row_activated(self, listbox, row: Gtk.ListBoxRow):
         hl = self._row_to_hl_map.get(row)
         if hl:
-            page_idx = hl.get("page", 0)
-            self.nav_controller.jump_to_page(page_idx)
+            self.nav_controller.jump_to_annotation(hl)
             self.annotations_popover.popdown()
 
     def _on_highlights_loaded(self, highlights: list[dict]):
