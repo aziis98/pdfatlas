@@ -11,6 +11,12 @@ if [ ! -d "$SUBMODULE_DIR" ]; then
     exit 1
 fi
 
+if [ ! -f "$SUBMODULE_DIR/PKGBUILD" ]; then
+    echo "==> Initializing AUR submodule..."
+    git submodule update --init --checkout installers/archlinux/pdfatlas-git
+fi
+
+
 cd "$REPO_ROOT"
 
 # Step 1: Prompt to push root repository at the start
