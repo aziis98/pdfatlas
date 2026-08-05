@@ -320,12 +320,16 @@ class ArxivDiffMapper:
             flush=True,
         )
 
-    def _reconcile_moved_edits(self, min_words: int = 1, threshold: float = 0.65) -> list[tuple[int, int, int, int, float]]:
+    def _reconcile_moved_edits(self, min_words: int = 1, threshold: float = 0.45) -> list[tuple[int, int, int, int, float]]:
         """
         Detects and reconciles moved edit blocks where PDF text chunks match TeX text chunks
-        that were reordered or positioned non-linearly in the document.
+        that were reordered or positioned non-linearly in the document (e.g. floats, tables).
         Returns a list of tuples: (pdf_start, pdf_end, tex_start, tex_end, similarity_score).
         """
+        def _norm_word(w: str) -> str:
+            w_clean = re.sub(r"\\[a-zA-Z]+|\\[^a-zA-Z]", "", w)
+            return re.sub(r"^\W+|\W+$", "", w_clean).lower()
+
         del_chunks = [(i1, i2) for tag, i1, i2, j1, j2 in self.diff_opcodes if tag in ("delete", "replace") and (i2 - i1) >= min_words]
         ins_chunks = [(j1, j2) for tag, i1, i2, j1, j2 in self.diff_opcodes if tag in ("insert", "replace") and (j2 - j1) >= min_words]
 
@@ -334,6 +338,11 @@ class ArxivDiffMapper:
 
         for p1, p2 in del_chunks:
             p_words = self.pdf_words[p1:p2]
+            p_norm = [_norm_word(w) for w in p_words]
+            p_norm = [w for w in p_norm if w]
+            if not p_norm:
+                continue
+
             best_match = None
             best_score = 0.0
             best_t_chunk = None
@@ -342,7 +351,12 @@ class ArxivDiffMapper:
                 if idx in matched_ins:
                     continue
                 t_words = self.tex_words[t1:t2]
-                score = SequenceMatcher(None, p_words, t_words).ratio()
+                t_norm = [_norm_word(w) for w in t_words]
+                t_norm = [w for w in t_norm if w]
+                if not t_norm:
+                    continue
+
+                score = SequenceMatcher(None, p_norm, t_norm).ratio()
                 if score >= threshold and score > best_score:
                     best_score = score
                     best_match = (t1, t2)

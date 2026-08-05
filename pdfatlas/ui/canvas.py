@@ -296,8 +296,7 @@ class PDFCanvas(Gtk.Overlay):
         self._pending_drag_start = None
         if self.text_selection is not None:
             if abs(offset_x) < 3 and abs(offset_y) < 3:
-                if not self._is_word_drag_mode:
-                    self.clear_selection()
+                self.clear_selection()
             else:
                 self.text_selection.end_selection()
                 if self.on_selection_changed:
@@ -449,6 +448,9 @@ class PDFCanvas(Gtk.Overlay):
                 page_idx, link = hit
                 if self.on_link_clicked:
                     self.on_link_clicked(page_idx, link)
+            else:
+                # Single click anywhere on the document clears selection
+                self.clear_selection()
 
         elif n_press == 2:
             page_idx = self._hit_test_page(x, y)
