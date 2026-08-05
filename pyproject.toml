@@ -26,6 +26,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["pdfatlas"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"assets" = "pdfatlas/assets"
+
 [dependency-groups]
 dev = [
     "pyright>=1.1.411",

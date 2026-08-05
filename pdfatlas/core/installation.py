@@ -7,11 +7,13 @@ import sys
 logger = logging.getLogger(__name__)
 
 
+from .resources import get_assets_dir
+
+
 def get_logo_path() -> str | None:
     """Return absolute path to assets/logo.png if it exists."""
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    logo_path = os.path.join(base_dir, "assets", "logo.png")
-    return logo_path if os.path.exists(logo_path) else None
+    logo_path = get_assets_dir() / "logo.png"
+    return str(logo_path) if logo_path.exists() else None
 
 
 def get_base_dir() -> str:
@@ -19,67 +21,79 @@ def get_base_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def is_app_installed() -> bool:
+def get_installation_mode_info() -> tuple[str, str]:
     """
-    Check if application desktop entry, shortcut, system binary, or app bundle is installed.
+    Determines installation mode and returns a tuple: (mode_name, reason_description).
+    Modes:
+      - "system-wide": Installed globally via system package manager (e.g. /usr/bin/pdfatlas)
+      - "user": Installed in user space (e.g. uv tool, pip --user, ~/.local/bin/pdfatlas)
+      - "development": Running directly from repository source or local virtualenv
     """
-    logger.debug("Checking application installation status...")
-
-    # Check if running directly from an installed system binary (e.g. /usr/bin/pdfatlas)
-    argv0 = sys.argv[0] if sys.argv else ""
-    if argv0:
-        base_name = os.path.basename(argv0)
-        logger.debug("Checking sys.argv[0]: '%s' (basename: '%s')", argv0, base_name)
-        if base_name in ("pdfatlas", "pdfatlas-git"):
-            logger.info("Detected app running from system binary name '%s'", base_name)
-            return True
-        if argv0.startswith(("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/", "/usr/lib/")):
-            logger.info("Detected app running from system path '%s'", argv0)
-            return True
-
+    argv0 = os.path.abspath(sys.argv[0]) if sys.argv else ""
     user_home = os.path.expanduser("~")
 
-    if sys.platform == "darwin":
-        user_app = os.path.join(user_home, "Applications", "PDF Atlas.app")
-        sys_app = "/Applications/PDF Atlas.app"
-        user_exists = os.path.exists(user_app)
-        sys_exists = os.path.exists(sys_app)
-        logger.debug("macOS app bundle check: user_app='%s' (exists=%s), sys_app='%s' (exists=%s)", user_app, user_exists, sys_app, sys_exists)
-        if user_exists or sys_exists:
-            logger.info("Detected macOS app bundle")
-            return True
-    elif sys.platform == "win32":
-        appdata = os.environ.get("APPDATA", os.path.join(user_home, "AppData", "Roaming"))
-        lnk_path = os.path.join(appdata, "Microsoft", "Windows", "Start Menu", "Programs", "PDF Atlas.lnk")
-        lnk_exists = os.path.exists(lnk_path)
-        logger.debug("Windows shortcut check: '%s' (exists=%s)", lnk_path, lnk_exists)
-        if lnk_exists:
-            logger.info("Detected Windows Start Menu shortcut")
-            return True
-    else:
-        desktop_candidates = [
-            os.path.join(user_home, ".local", "share", "applications", "com.aziis98.pdfatlas.desktop"),
-            "/usr/share/applications/com.aziis98.pdfatlas.desktop",
-            "/usr/local/share/applications/com.aziis98.pdfatlas.desktop",
-            "/var/lib/flatpak/exports/share/applications/com.aziis98.pdfatlas.desktop",
-            "/var/lib/snapd/desktop/applications/com.aziis98.pdfatlas.desktop",
-        ]
-        for p in desktop_candidates:
-            exists = os.path.exists(p)
-            logger.debug("Desktop file check: '%s' (exists=%s)", p, exists)
-            if exists:
-                logger.info("Detected desktop file at '%s'", p)
-                return True
+    # Check 1: System-wide binary paths
+    if argv0.startswith(("/usr/bin/", "/usr/local/bin/", "/opt/", "/var/lib/", "/snap/")):
+        return ("system-wide", f"Executable is located in system binary path '{argv0}'")
 
-    logger.info("Application is not detected as installed")
-    return False
+    # Check 2: User-space binary paths (uv tool, pip --user, ~/.local/bin)
+    if argv0.startswith(os.path.join(user_home, ".local")) or argv0.startswith(os.path.join(user_home, ".cargo")):
+        if ".venv" in argv0:
+            return ("development", f"Executable is in local repository virtualenv '{argv0}'")
+        return ("user", f"Executable is located in user local tool directory '{argv0}'")
+
+    # Check 3: Desktop launchers
+    user_desktop = os.path.join(user_home, ".local", "share", "applications", "com.aziis98.pdfatlas.desktop")
+    if os.path.exists(user_desktop):
+        return ("user", f"User desktop launcher exists at '{user_desktop}'")
+
+    sys_desktops = ["/usr/share/applications/com.aziis98.pdfatlas.desktop", "/usr/local/share/applications/com.aziis98.pdfatlas.desktop"]
+    for p in sys_desktops:
+        if os.path.exists(p):
+            return ("system-wide", f"System desktop launcher exists at '{p}'")
+
+    if ".venv" in argv0 or argv0.endswith("main.py"):
+        return ("development", f"Running directly from source/virtualenv '{argv0}'")
+
+    base_name = os.path.basename(argv0)
+    if base_name in ("pdfatlas", "pdfatlas-git"):
+        return ("user", f"Running from installed binary name '{argv0}'")
+
+    return ("development", f"Running in development mode from '{argv0}'")
 
 
+def is_desktop_launcher_installed() -> bool:
+    """
+    Check if .desktop application entry exists in user or system applications directory.
+    """
+    user_home = os.path.expanduser("~")
+    desktop_candidates = [
+        os.path.join(user_home, ".local", "share", "applications", "com.aziis98.pdfatlas.desktop"),
+        "/usr/share/applications/com.aziis98.pdfatlas.desktop",
+        "/usr/local/share/applications/com.aziis98.pdfatlas.desktop",
+        "/var/lib/flatpak/exports/share/applications/com.aziis98.pdfatlas.desktop",
+        "/var/lib/snapd/desktop/applications/com.aziis98.pdfatlas.desktop",
+    ]
+    return any(os.path.exists(p) for p in desktop_candidates)
+
+
+def is_app_installed() -> bool:
+    """
+    Check if application desktop entry launcher (.desktop) is installed.
+    """
+    mode, reason = get_installation_mode_info()
+    launcher_installed = is_desktop_launcher_installed()
+    logger.info("Installation check: mode='%s' (%s), launcher_installed=%s", mode, reason, launcher_installed)
+    return launcher_installed
 
 
 def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool:
     """Install .desktop entry and icon theme symlinks for Linux desktop environments."""
+    logger.info("Starting Linux desktop application launcher installation...")
+    print("[PDFAtlas] Installing desktop entry and icons to ~/.local/share/...", flush=True)
+
     if logo_path:
+        logger.info("Installing icon symlinks using logo at '%s'", logo_path)
         icon_names = ["com-aziis98-pdfatlas.png", "com.aziis98.pdfatlas.png"]
         sizes = ["512x512", "256x256", "128x128", "48x48"]
         for size in sizes:
@@ -92,16 +106,14 @@ def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool
                         if os.path.islink(target_symlink) and os.readlink(target_symlink) == logo_path:
                             continue
                         os.remove(target_symlink)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to remove old icon symlink '%s': %s", target_symlink, e)
                 try:
                     os.symlink(logo_path, target_symlink)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to create icon symlink '%s': %s", target_symlink, e)
 
-        # Also place pixmaps fallback symlink
         pixmaps_dir = os.path.join(user_home, ".local", "share", "pixmaps")
-
         os.makedirs(pixmaps_dir, exist_ok=True)
         for pixmap_name in ["com-aziis98-pdfatlas.png", "com.aziis98.pdfatlas.png"]:
             pixmap_target = os.path.join(pixmaps_dir, pixmap_name)
@@ -110,9 +122,17 @@ def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool
                     if os.path.exists(pixmap_target) or os.path.islink(pixmap_target):
                         os.remove(pixmap_target)
                     os.symlink(logo_path, pixmap_target)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to create pixmap symlink '%s': %s", pixmap_target, e)
 
+    # Determine Exec command for desktop entry
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0 and os.path.isabs(argv0) and os.path.exists(argv0) and not argv0.endswith(".py"):
+        exec_cmd = f"{argv0} %f"
+    elif shutil.which("pdfatlas"):
+        exec_cmd = f"{shutil.which('pdfatlas')} %f"
+    else:
+        exec_cmd = f"env PYTHONPATH={base_dir} {sys.executable} -m pdfatlas.main %f"
 
     desktop_dir = os.path.join(user_home, ".local", "share", "applications")
     os.makedirs(desktop_dir, exist_ok=True)
@@ -120,7 +140,7 @@ def _install_linux(base_dir: str, user_home: str, logo_path: str | None) -> bool
     desktop_contents = f"""[Desktop Entry]
 Name=PDF Atlas
 Comment=PDF Viewer with Portals & FTS5 Search
-Exec=env PYTHONPATH={base_dir} {sys.executable} -m pdfatlas.main %f
+Exec={exec_cmd}
 Path={base_dir}
 Icon=com-aziis98-pdfatlas
 Terminal=false
@@ -129,18 +149,9 @@ Categories=Office;Viewer;
 MimeType=application/pdf;
 StartupWMClass=com.aziis98.pdfatlas
 """
-    should_write = True
-    if os.path.exists(desktop_file):
-        try:
-            with open(desktop_file, "r", encoding="utf-8") as f:
-                if f.read() == desktop_contents:
-                    should_write = False
-        except Exception:
-            pass
-
-    if should_write:
-        with open(desktop_file, "w", encoding="utf-8") as f:
-            f.write(desktop_contents)
+    with open(desktop_file, "w", encoding="utf-8") as f:
+        f.write(desktop_contents)
+    logger.info("Wrote desktop launcher to '%s' (Exec='%s')", desktop_file, exec_cmd)
 
     if shutil.which("update-desktop-database"):
         subprocess.run(["update-desktop-database", desktop_dir], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -148,6 +159,7 @@ StartupWMClass=com.aziis98.pdfatlas
         hicolor_dir = os.path.join(user_home, ".local", "share", "icons", "hicolor")
         subprocess.run(["gtk-update-icon-cache", "-f", "-t", hicolor_dir], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    print(f"[PDFAtlas] Successfully installed desktop launcher to '{desktop_file}'", flush=True)
     return True
 
 
@@ -166,20 +178,17 @@ $Shortcut.Arguments = "-m pdfatlas.main"
 $Shortcut.WorkingDirectory = "{base_dir.replace('\\', '\\\\')}"
 $Shortcut.Description = "PDF Viewer with Portals & FTS5 Search"
 """
-    if logo_path and os.path.exists(logo_path):
-        ps_script += f'\n$Shortcut.IconLocation = "{logo_path.replace("\\", "\\\\")}"'
-
-    ps_script += "\n$Shortcut.Save()\n"
+    if logo_path:
+        ps_script += f'$Shortcut.IconLocation = "{logo_path.replace("\\", "\\\\")}"\n'
+    ps_script += "$Shortcut.Save()\n"
 
     try:
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        logger.info("Created Windows Start Menu shortcut at '%s'", lnk_path)
+        print(f"[PDFAtlas] Successfully installed Windows shortcut to '{lnk_path}'", flush=True)
         return True
-    except Exception:
+    except Exception as e:
+        logger.error("Failed to create Windows shortcut: %s", e)
         return False
 
 
@@ -253,15 +262,7 @@ exec "{sys.executable}" -m pdfatlas.main "$@"
 
 
 def is_system_installed() -> bool:
-    """Check if application is installed system-wide via package manager or system binary."""
-    argv0 = sys.argv[0] if sys.argv else ""
-    if argv0:
-        base_name = os.path.basename(argv0)
-        if base_name in ("pdfatlas", "pdfatlas-git"):
-            return True
-        if argv0.startswith(("/usr/bin/", "/usr/local/bin/", "/opt/homebrew/", "/usr/lib/")):
-            return True
-
+    """Check if application desktop entry is installed system-wide via package manager."""
     system_desktop_candidates = [
         "/usr/share/applications/com.aziis98.pdfatlas.desktop",
         "/usr/local/share/applications/com.aziis98.pdfatlas.desktop",
@@ -277,11 +278,15 @@ def ensure_app_installed(force: bool = False) -> bool:
     Ensures application desktop entries, shortcuts, or app bundles are installed.
     Returns True if installation succeeded or was already up to date.
     """
-    if is_system_installed():
-        logger.info("System-wide installation detected. Skipping local user folder copying.")
+    mode, reason = get_installation_mode_info()
+    logger.info("ensure_app_installed called: mode='%s' (%s), force=%s", mode, reason, force)
+
+    if not force and is_system_installed():
+        logger.info("System-wide installation detected. Skipping user desktop launcher creation.")
         return True
 
-    if not force and is_app_installed():
+    if not force and is_desktop_launcher_installed():
+        logger.info("Desktop launcher already installed. Skipping.")
         return True
 
     base_dir = get_base_dir()
@@ -295,6 +300,8 @@ def ensure_app_installed(force: bool = False) -> bool:
             return _install_windows(base_dir, user_home, logo_path)
         else:
             return _install_linux(base_dir, user_home, logo_path)
-    except Exception:
+    except Exception as e:
+        logger.error("Failed to install desktop application launcher: %s", e, exc_info=True)
+        print(f"[PDFAtlas] Desktop launcher installation failed: {e}", flush=True)
         return False
 

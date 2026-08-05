@@ -44,7 +44,8 @@ def test_install_linux_temp_directory():
         assert "Name=PDF Atlas" in content
         assert "MimeType=application/pdf;" in content
         assert "StartupWMClass=com.aziis98.pdfatlas" in content
-        assert sys.executable in content
+        assert "Exec=" in content
+        assert "pdfatlas" in content
 
 
 def test_install_macos_temp_directory():

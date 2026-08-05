@@ -30,7 +30,8 @@ class IconThemeManager:
             return
         theme = Gtk.IconTheme.get_for_display(display)
 
-        assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets"))
+        from ...core.resources import get_assets_dir
+        assets_dir = str(get_assets_dir())
         if os.path.exists(assets_dir):
             theme.add_search_path(assets_dir)
 

@@ -1,9 +1,9 @@
-from pathlib import Path
-
 import numpy as np
 from OpenGL import GL as gl
 
-_SHADER_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "shaders"
+from ..core.resources import get_assets_dir
+
+_SHADER_DIR = get_assets_dir() / "shaders"
 
 
 class QuadRenderer:

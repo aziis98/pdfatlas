@@ -32,6 +32,10 @@ class PDFViewerApplication(Adw.Application):
         self.debug: bool = False
 
     def do_activate(self):
+        from .core.installation import get_installation_mode_info
+        mode, reason = get_installation_mode_info()
+        print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
+
         # Create and present the main application window
         state = getattr(self, "state", None)
         screenshot = getattr(self, "screenshot", None)
