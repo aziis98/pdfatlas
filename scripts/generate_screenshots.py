@@ -45,7 +45,8 @@ TASKS = [
         "attention_annotations_popover.png",
         ATTENTION_PDF,
         {
-            "scroll_y": 800,
+            "zoom": 1.4,
+            "scroll_y": 1450,
             "annotations_popover": True,
             "highlights": [
                 {
