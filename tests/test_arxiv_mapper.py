@@ -104,3 +104,43 @@ def test_reconcile_moved_edits():
     assert 1 in mapper.mapped_pdf_indices
     assert mapper.pdf_to_tex_map[1] == 2
     assert mapper.tex_to_pdf_map[2] == 1
+
+
+def test_reconcile_moved_table_float_edits():
+    from pdfatlas.core.arxiv_mapper import ArxivDiffMapper, SequenceMatcher
+
+    mapper = ArxivDiffMapper()
+    # PDF has Table 1 caption and text at top of page before Section 3.5
+    mapper.pdf_words = [
+        "Section", "3.4", "Overview",
+        "Table", "1:", "Maximum", "path", "lengths,", "per-layer", "complexity", "and", "minimum", "number", "of", "sequential", "operations",
+        "Section", "3.5", "Positional", "Encoding"
+    ]
+    # TeX has Table 1 float defined later with TeX macros (\begin{table}, \caption{...}, \hline, &)
+    mapper.tex_words = [
+        "Section", "3.4", "Overview",
+        "Section", "3.5", "Positional", "Encoding",
+        "\\begin{table}[t]", "\\caption{Maximum", "path", "lengths,", "per-layer", "complexity", "and", "minimum", "number", "of", "sequential", "operations}", "\\hline", "&"
+    ]
+
+    matcher = SequenceMatcher(None, mapper.pdf_words, mapper.tex_words)
+    mapper.diff_opcodes = matcher.get_opcodes()
+
+    for tag, i1, i2, j1, j2 in mapper.diff_opcodes:
+        if tag in ("equal", "replace"):
+            p_len = i2 - i1
+            t_len = j2 - j1
+            common_len = max(p_len, t_len)
+            for k in range(common_len):
+                cp = i1 + k if k < p_len else i2 - 1
+                ct = j1 + k if k < t_len else j2 - 1
+                mapper.pdf_to_tex_map[cp] = ct
+                mapper.tex_to_pdf_map[ct] = cp
+
+    mapper.mapped_pdf_indices = set(mapper.tex_to_pdf_map.values())
+    moved = mapper._reconcile_moved_edits(min_words=1, threshold=0.45)
+
+    assert len(moved) > 0
+    # PDF Table 1 word 'Maximum' (index 5) should be reconciled to TeX 'Maximum' (index 9)
+    assert 5 in mapper.mapped_pdf_indices
+    assert mapper.pdf_to_tex_map[5] == 8
