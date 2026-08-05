@@ -615,6 +615,24 @@ class MainWindow(Adw.ApplicationWindow):
 
                     GLib.idle_add(apply_deferred_state)
 
+                    if "highlights" in state:
+                        sample_hls = state["highlights"]
+                        for idx, h in enumerate(sample_hls):
+                            if "id" not in h:
+                                h["id"] = idx + 1
+                            if "rects" not in h:
+                                h["rects"] = []
+                        self.highlights = sample_hls
+                        self.canvas.set_highlights(sample_hls)
+                        self._update_annotations_button()
+
+                    if state.get("annotations_popover"):
+                        def open_popover():
+                            if self.annotations_btn.get_visible():
+                                self.annotations_popover.popup()
+                            return False
+                        GLib.timeout_add(400, open_popover)
+
                     # If page is specified, navigate to it after layout
                     if "page" in state:
                         target_page = int(state["page"]) - 1

@@ -11,8 +11,9 @@
 
 .annotation-list row {
     padding: 3px 6px;
-    min-height: 24px;
-    margin: 1px 0;
+    min-height: 26px;
+    margin: 2px 0;
+    border-radius: 8px;
 }
 .annotation-list row:hover {
     background-color: rgba(0, 0, 0, 0.05);
