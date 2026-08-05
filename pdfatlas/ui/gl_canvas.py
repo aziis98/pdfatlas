@@ -142,7 +142,20 @@ class GLCanvas(Gtk.GLArea):
                                 hh = (ry1 - ry0) * scale
                                 r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val), mode="multiply")
 
-                if canvas.debug_mode and canvas.text_selection is not None and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection()):
+                if canvas.text_selection is not None:
+                    sel_rects = canvas.text_selection.get_selection_rects(i)
+                    if sel_rects:
+                        co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                        co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                        for rx0, ry0, rx1, ry1 in sel_rects:
+                            sx = x_offset + (rx0 - co_x) * scale
+                            sy = page_y0 + (ry0 - co_y) * scale
+                            sw = (rx1 - rx0) * scale
+                            sh = (ry1 - ry0) * scale
+                            r.fill_rect(sx, sy, sw, sh, (0.07, 0.175, 0.35, 0.35))
+
+                if (canvas.debug_mode and canvas.text_selection is not None
+                        and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection())):
                     win_obj = getattr(canvas, "win", None)
                     arxiv_mapper = getattr(win_obj, "arxiv_mapper", None) if win_obj else None
                     if arxiv_mapper and arxiv_mapper.is_ready and arxiv_mapper.word_metadata:
@@ -166,17 +179,6 @@ class GLCanvas(Gtk.GLArea):
                                         sw = (wx1 - wx0) * scale
                                         sh = (wy1 - wy0) * scale
                                         r.fill_rect(sx, sy, sw, sh, dark_green)
-
-                    sel_rects = canvas.text_selection.get_selection_rects(i)
-                    if sel_rects:
-                        co_x = crop_rect.x0 if crop_rect is not None else 0.0
-                        co_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        for rx0, ry0, rx1, ry1 in sel_rects:
-                            sx = x_offset + (rx0 - co_x) * scale
-                            sy = page_y0 + (ry0 - co_y) * scale
-                            sw = (rx1 - rx0) * scale
-                            sh = (ry1 - ry0) * scale
-                            r.fill_rect(sx, sy, sw, sh, (0.07, 0.175, 0.35, 0.35))
 
                 if canvas.debug_mode and canvas.debug_arxiv_data is not None and canvas.debug_arxiv_data.get("page_index") == i:
                     d_data = canvas.debug_arxiv_data
