@@ -46,7 +46,7 @@ TASKS = [
         ATTENTION_PDF,
         {
             "zoom": 2.14,
-            "scroll_y": 1450,
+            "scroll_y": 2750,
             "annotations_popover": True,
             "highlights": [
                 {
