@@ -9,6 +9,15 @@
     border-radius: 9999px;
 }
 
+.annotation-list row {
+    padding: 3px 6px;
+    min-height: 24px;
+    margin: 1px 0;
+}
+.annotation-list row:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
 .zoom-floating-box {
     background-color: rgba(255, 255, 255, 0.9);
     border: 1px solid rgba(0, 0, 0, 0.15);

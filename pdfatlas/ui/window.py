@@ -710,7 +710,7 @@ class MainWindow(Adw.ApplicationWindow):
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self.annotations_listbox = Gtk.ListBox()
-        self.annotations_listbox.add_css_class("rich-list")
+        self.annotations_listbox.add_css_class("annotation-list")
         self.annotations_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self.annotations_listbox.set_header_func(self._update_annotations_header)
         self.annotations_listbox.connect("row-activated", self._on_annotation_row_activated)
@@ -727,7 +727,7 @@ class MainWindow(Adw.ApplicationWindow):
         before_page_idx = before_hl.get("page", 0) if before_hl else None
 
         if before is None or page_idx != before_page_idx:
-            hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=5, margin_bottom=1)
+            hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=4, margin_bottom=1)
             lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
             lbl.add_css_class("caption")
             lbl.add_css_class("bold")
@@ -762,7 +762,7 @@ class MainWindow(Adw.ApplicationWindow):
             n = len(hl_list)
             for idx, hl in enumerate(hl_list):
                 row = Gtk.ListBoxRow()
-                item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
+                item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=1, margin_bottom=1)
 
                 # First/last item border radius rounding
                 is_first = (idx == 0)
