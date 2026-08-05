@@ -689,12 +689,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.annotations_popover = Gtk.Popover()
         self.annotations_btn.set_popover(self.annotations_popover)
 
-        popover_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=8, margin_end=8, margin_top=8, margin_bottom=8)
-        # ~4:3 aspect ratio size request (360px width x 270px height)
-        popover_box.set_size_request(360, 270)
+        popover_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=6, margin_end=6, margin_top=6, margin_bottom=6)
+        # Vertical 3:4 (portrait ~4:3) size request (280px width x 370px height)
+        popover_box.set_size_request(280, 370)
 
         # Header Title
-        title_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=4, margin_top=2)
+        title_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=4, margin_top=2, margin_bottom=2)
         self.annotations_count_label = label(text="Annotations (0)", css_class="bold")
         self.annotations_count_label.set_hexpand(True)
         self.annotations_count_label.set_halign(Gtk.Align.START)
@@ -726,7 +726,7 @@ class MainWindow(Adw.ApplicationWindow):
         before_page_idx = before_hl.get("page", 0) if before_hl else None
 
         if before is None or page_idx != before_page_idx:
-            hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=6, margin_top=8, margin_bottom=2)
+            hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=6, margin_bottom=2)
             lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
             lbl.add_css_class("caption")
             lbl.add_css_class("bold")
@@ -755,20 +755,20 @@ class MainWindow(Adw.ApplicationWindow):
         sorted_highlights = sorted(self.highlights, key=lambda h: (h.get("page", 0), h.get("char_start", 0)))
         for hl in sorted_highlights:
             row = Gtk.ListBoxRow()
-            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=6, margin_end=6, margin_top=6, margin_bottom=6)
+            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=4, margin_bottom=4)
 
-            # Minimal color circle swatch
+            # Prominent color circle swatch (14px)
             color_swatch = Gtk.Box()
-            color_swatch.set_size_request(10, 10)
+            color_swatch.set_size_request(14, 14)
             color_swatch.set_valign(Gtk.Align.CENTER)
             color_swatch.add_css_class("highlight-circle-swatch")
             bg_color = hl.get("color", "#FFEE55")
             provider = Gtk.CssProvider()
-            provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 10px; min-height: 10px; }}")
+            provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}")
             color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             item_box.append(color_swatch)
 
-            # Minimal text snippet label
+            # Compact text snippet label
             txt = (hl.get("text", "") or "").strip() or "(Highlight)"
             txt_lbl = label(text=txt)
             txt_lbl.set_lines(2)
