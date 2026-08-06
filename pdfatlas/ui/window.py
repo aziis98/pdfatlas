@@ -41,28 +41,28 @@ from .cairo_utils import hsl_to_hex
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
 PALETTE_COLORS = [
-    # HSL tuples: (hue, saturation %, lightness %) — vivid, non-pastel tones
+    # HSL tuples: (hue, saturation %, lightness %) — pale, pastel tones
     # Row 1: Warm
-    (50, 95, 68),    # yellow
-    (38, 95, 66),    # amber
-    (26, 92, 64),    # orange
-    (14, 90, 64),    # coral
-    (4, 86, 66),     # red
-    (348, 82, 70),   # rose
+    (50, 85, 78),    # yellow
+    (38, 85, 76),    # amber
+    (26, 80, 74),    # orange
+    (14, 78, 74),    # coral
+    (4, 74, 76),     # red
+    (348, 70, 80),   # rose
     # Row 2: Pink / Purple / Blue
-    (326, 80, 70),   # pink
-    (300, 74, 68),   # magenta
-    (272, 72, 66),   # purple
-    (252, 76, 68),   # violet
-    (232, 82, 68),   # blue
-    (210, 85, 66),   # azure
+    (326, 68, 80),   # pink
+    (300, 62, 78),   # magenta
+    (272, 60, 76),   # purple
+    (252, 64, 78),   # violet
+    (232, 70, 78),   # blue
+    (210, 73, 76),   # azure
     # Row 3: Cyan / Green / Neutral
-    (188, 86, 64),   # cyan
-    (168, 74, 62),   # teal
-    (142, 70, 60),   # green
-    (110, 76, 62),   # lime
-    (80, 78, 62),    # yellow-green
-    (55, 65, 60),    # olive
+    (188, 74, 74),   # cyan
+    (168, 62, 72),   # teal
+    (142, 58, 70),   # green
+    (110, 64, 72),   # lime
+    (80, 66, 72),    # yellow-green
+    (55, 53, 70),    # olive
 ]
 
 PALETTE_COLS = 6
