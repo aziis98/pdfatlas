@@ -517,6 +517,7 @@ class PDFCanvas(Gtk.Overlay):
         self.render_worker = render_worker
         self.crop_analyzer = crop_analyzer
         self.settings = settings
+        self.in_flight.clear()
         if self.text_selection:
             self.clear_selection()
         self.text_selection = TextSelection(doc_model) if doc_model else None

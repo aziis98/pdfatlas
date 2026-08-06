@@ -22,56 +22,38 @@ class CropAnalyzer:
         self.scanned = [False] * self.page_count
         # Computed final crop rects for each page
         self.crop_rects: list[fitz.Rect | None] = [None] * self.page_count
-        self._doc = None
 
-    def scan_page(self, page_index: int) -> fitz.Rect | None:
+    @staticmethod
+    def analyze_pixmap(
+        width: int, height: int, channels: int, samples, scale: float = ANALYSIS_SCALE
+    ) -> fitz.Rect | None:
         """
-        Renders the page at low resolution and detects the content bounding box.
-        Saves the result in self.raw_bboxes.
+        Pure-numpy content bounding box detection over raw RGB samples rendered
+        at ``scale`` (pixels per point). Returns a fitz.Rect in page points, or
+        None if the page is blank.
         """
-        if self.scanned[page_index]:
-            return self.raw_bboxes[page_index]
-
-        # Use private document instance for thread safety during background scan
-        if self._doc is None:
-            self._doc = fitz.open(self.doc_model.filepath)
-
-        page = self._doc[page_index]
-        # Render page at 0.2x scale, without alpha (since we want white background)
-        mat = fitz.Matrix(self.ANALYSIS_SCALE, self.ANALYSIS_SCALE)
-        pix = page.get_pixmap(matrix=mat, alpha=False)
-
-        width = pix.width
-        height = pix.height
-        n = pix.n  # Number of components (usually 3 for RGB)
-
-        # Fast numpy scanning
-        arr = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape((height, width, n))
+        arr = np.frombuffer(samples, dtype=np.uint8).reshape((height, width, channels))
         # True where pixel is not white (threshold 240)
         non_white = (arr[:, :, 0] <= 240) | (arr[:, :, 1] <= 240) | (arr[:, :, 2] <= 240)
 
         rows = np.any(non_white, axis=1)
         cols = np.any(non_white, axis=0)
 
-        if np.any(rows) and np.any(cols):
-            min_row = int(np.where(rows)[0][0])
-            max_row = int(np.where(rows)[0][-1])
-            min_col = int(np.where(cols)[0][0])
-            max_col = int(np.where(cols)[0][-1])
+        if not (np.any(rows) and np.any(cols)):
+            return None
 
-            # Convert back to points (divide by ANALYSIS_SCALE)
-            raw_box = fitz.Rect(
-                min_col / self.ANALYSIS_SCALE,
-                min_row / self.ANALYSIS_SCALE,
-                (max_col + 1) / self.ANALYSIS_SCALE,
-                (max_row + 1) / self.ANALYSIS_SCALE,
-            )
-            self.raw_bboxes[page_index] = raw_box
-        else:
-            self.raw_bboxes[page_index] = None
+        min_row = int(np.where(rows)[0][0])
+        max_row = int(np.where(rows)[0][-1])
+        min_col = int(np.where(cols)[0][0])
+        max_col = int(np.where(cols)[0][-1])
 
-        self.scanned[page_index] = True
-        return self.raw_bboxes[page_index]
+        # Convert back to points (divide by the render scale)
+        return fitz.Rect(
+            min_col / scale,
+            min_row / scale,
+            (max_col + 1) / scale,
+            (max_row + 1) / scale,
+        )
 
     def compute_crop_rects(self, settings: CropSettings):
         """
@@ -166,9 +148,3 @@ class CropAnalyzer:
                 new_crop_rects[i] = rect_to_check.intersect(page_rect)
 
         self.crop_rects = new_crop_rects
-
-    def close(self):
-        """Close the private fitz document instance if opened."""
-        if self._doc is not None:
-            self._doc.close()
-            self._doc = None

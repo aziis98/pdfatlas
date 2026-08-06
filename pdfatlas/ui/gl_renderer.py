@@ -125,14 +125,14 @@ class QuadRenderer:
 
         w = surface.get_width()
         h = surface.get_height()
-        data = surface.get_data()
+        data = np.frombuffer(surface.get_data(), dtype=np.uint8)
 
         tex_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
 
         gl.glTexImage2D(
             gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, w, h, 0,
-            gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, data.tobytes(),
+            gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, data,
         )
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)

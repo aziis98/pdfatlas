@@ -451,15 +451,13 @@ class MainWindow(Adw.ApplicationWindow):
             if self.doc_model:
                 self.doc_model.close()
 
-            if self.crop_analyzer:
-                self.crop_analyzer.close()
-
             # Save state for previous document
             if hasattr(self, "db_service") and self.db_service:
                 self._save_current_doc_state()
 
             self.doc_model = DocumentModel(filepath)
             self.crop_analyzer = CropAnalyzer(self.doc_model)
+            self.render_worker.set_document(filepath)
 
             # Try extracting PDF metadata title for local files if display name is just basename/generic
             if source.display_name in (os.path.basename(filepath), "paper.pdf") or source.display_name.startswith("arXiv:"):
@@ -1186,6 +1184,12 @@ class MainWindow(Adw.ApplicationWindow):
     def toggle_crop(self):
         self.settings.enabled = not self.settings.enabled
         self._on_crop_settings_updated()
+        if self.settings.enabled:
+            self._scan_crop_if_needed()
+
+    def _scan_crop_if_needed(self):
+        if self.settings.enabled and self.crop_analyzer and not all(self.crop_analyzer.scanned):
+            self._start_crop_analysis()
 
     def toggle_gapless(self):
         self.settings.page_gaps = not self.settings.page_gaps
@@ -1195,6 +1199,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_crop_btn_toggled(self, btn):
         self.settings.enabled = btn.get_active()
         self._on_crop_settings_updated()
+        if self.settings.enabled:
+            self._scan_crop_if_needed()
 
     def _on_settings_btn_clicked(self, btn):
         SettingsWindow(
@@ -1234,10 +1240,12 @@ class MainWindow(Adw.ApplicationWindow):
     # --- Crop Re-analysis ---
 
     def _on_reanalyze(self):
-        self._start_crop_analysis()
+        self._start_crop_analysis(force=True)
 
-    def _start_crop_analysis(self):
+    def _start_crop_analysis(self, force: bool = False):
         if not self.doc_model or not self.crop_analyzer:
+            return
+        if not force and not self.settings.enabled:
             return
 
         page_count = self.doc_model.page_count
@@ -1247,27 +1255,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.crop_scanned_count = 0
         self._show_progress("crop_analysis", "Scanning page margins for auto-crop...", 0.0)
 
-        # Run crop analysis in a separate background thread so it doesn't block RenderWorker renders
-        crop_thread = threading.Thread(target=self._crop_analysis_worker, daemon=True)
-        crop_thread.start()
-
-    def _crop_analysis_worker(self):
-        if not self.doc_model or not self.crop_analyzer:
-            return
-        page_count = self.doc_model.page_count
+        # Route per-page scans through the renderer child process so the low-res
+        # rasterization cannot stall the UI thread.
         for i in range(page_count):
-            if not self.doc_model or not self.crop_analyzer:
-                return
-            try:
-                self.crop_analyzer.scan_page(i)
-                GLib.idle_add(self._on_crop_page_scanned, i)
-            except Exception as e:
-                print(f"Error scanning page {i} for crop analysis: {e}")
-
-        # Compute crop rectangles once scanning completes
-        if self.doc_model and self.crop_analyzer:
-            self.crop_analyzer.compute_crop_rects(self.settings)
-            GLib.idle_add(self._on_crop_analysis_complete)
+            self.render_worker.queue_crop_job(
+                self.doc_model,
+                self.crop_analyzer,
+                i,
+                self.settings,
+                self._on_crop_page_scanned,
+                self._on_crop_analysis_complete,
+            )
 
     def _on_crop_page_scanned(self, page_index):
         self.crop_scanned_count += 1
@@ -1358,12 +1356,11 @@ class MainWindow(Adw.ApplicationWindow):
         # Save state and shutdown executors and close connections cleanly
         self._save_current_doc_state()
         self.executor.shutdown(wait=False, cancel_futures=True)
+        self.render_worker.shutdown()
         if self.index_conn:
             self.index_conn.close()
             self.index_conn = None
 
-        if self.crop_analyzer:
-            self.crop_analyzer.close()
         if self.doc_model:
             self.doc_model.close()
         super().close()
