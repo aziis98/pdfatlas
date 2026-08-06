@@ -5,9 +5,21 @@ def layout_scale(zoom: float, dpi_scale_factor: float) -> float:
     return zoom * dpi_scale_factor
 
 
+def content_width(layout: list[tuple], viewport_w: float) -> float:
+    """
+    Width of the scrollable content box in device pixels.
+
+    The GTK scroll container stretches to the viewport width when every page
+    fits, otherwise it takes the widest page's width. Pages are centered within
+    this box, so their left edge is `(content_width - dw) / 2`.
+    """
+    max_dw = max((dw for _, dw, _, _ in layout), default=0.0)
+    return max(viewport_w, max_dw)
+
+
 def page_rect_at(layout: list[tuple], page_index: int, viewport_w: float) -> tuple[float, float, float, float]:
     y_offset, dw, dh, _crop_rect = layout[page_index]
-    page_x0 = (viewport_w - dw) / 2.0
+    page_x0 = (content_width(layout, viewport_w) - dw) / 2.0
     return (page_x0, y_offset, dw, dh)
 
 
@@ -24,7 +36,7 @@ def screen_to_pdf(
     if page_index < 0 or page_index >= len(layout):
         return None
     y_offset, dw, _dh, crop_rect = layout[page_index]
-    page_x0 = (viewport_w - dw) / 2.0
+    page_x0 = (content_width(layout, viewport_w) - dw) / 2.0
 
     rel_x = (x + scroll_x) - page_x0
     rel_y = (y + scroll_y) - y_offset
@@ -53,7 +65,7 @@ def pdf_rect_to_screen(
     if page_index < 0 or page_index >= len(layout):
         return None
     y_offset, dw, _dh, _cr = layout[page_index]
-    page_x0 = (viewport_w - dw) / 2.0
+    page_x0 = (content_width(layout, viewport_w) - dw) / 2.0
 
     crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
     crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
@@ -89,6 +101,7 @@ def link_screen_rect(
     viewport_w: float,
     scroll_y: float,
     pdf_rect: Any,
+    scroll_x: float = 0.0,
 ) -> tuple[float, float, float, float] | None:
     if not layout or page_index < 0 or page_index >= len(layout):
         return None
@@ -97,13 +110,13 @@ def link_screen_rect(
         return None
 
     y_offset, dw, _dh, crop_rect = layout[page_index]
-    page_x0 = (viewport_w - dw) / 2.0
+    page_x0 = (content_width(layout, viewport_w) - dw) / 2.0
     page_y0 = y_offset - scroll_y
 
     crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
     crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
 
-    sx = page_x0 + (from_rect.x0 - crop_off_x) * scale
+    sx = page_x0 + (from_rect.x0 - crop_off_x) * scale - scroll_x
     sy = page_y0 + (from_rect.y0 - crop_off_y) * scale
     sw = (from_rect.x1 - from_rect.x0) * scale
     sh = (from_rect.y1 - from_rect.y0) * scale

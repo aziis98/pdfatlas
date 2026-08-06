@@ -344,9 +344,10 @@ class PDFCanvas(Gtk.Overlay):
 
         canvas_x = x + scroll_x
         canvas_y = y + scroll_y
+        box_w = max(viewport_w, max((dw for _, dw, _, _ in self.page_layout), default=0.0))
 
         for i, (y_offset, dw, dh, crop_rect) in enumerate(self.page_layout):
-            page_x0 = (viewport_w - dw) / 2.0
+            page_x0 = (box_w - dw) / 2.0
             page_x1 = page_x0 + dw
             page_y0 = y_offset
             page_y1 = y_offset + dh
@@ -381,8 +382,9 @@ class PDFCanvas(Gtk.Overlay):
             else float(self.get_width())
         )
         scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
+        scroll_x = self.hadjustment.get_value() if self.hadjustment else 0.0
 
-        return link_screen_rect(self.page_layout, page_index, scale, viewport_w, scroll_y, link)
+        return link_screen_rect(self.page_layout, page_index, scale, viewport_w, scroll_y, link, scroll_x)
 
     def queue_draw_overlays(self, reason=""):
         self.gl_canvas.queue_draw()

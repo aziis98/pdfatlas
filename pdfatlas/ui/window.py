@@ -378,7 +378,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.pinch_center_x = center_x
             self.canvas.pinch_center_y = center_y
             # gesture coords are viewport-relative; convert to document coords for anchoring
-            self.set_zoom_level(new_zoom, center_x=center_x, center_y=center_y + self.vadjustment.get_value())
+            self.set_zoom_level(new_zoom, center_x=center_x + self.hadjustment.get_value(),
+                                center_y=center_y + self.vadjustment.get_value())
         else:
             self.set_zoom_level(new_zoom)
 
@@ -404,7 +405,8 @@ class MainWindow(Adw.ApplicationWindow):
             px = getattr(self, "pointer_x", 0.0)
             py = getattr(self, "pointer_y", 0.0)
             # pointer coords are viewport-relative; convert to document coords for anchoring
-            self.set_zoom_level(self.zoom * factor, center_x=px, center_y=py + self.vadjustment.get_value())
+            self.set_zoom_level(self.zoom * factor, center_x=px + self.hadjustment.get_value(),
+                                center_y=py + self.vadjustment.get_value())
             return True
         return False
 

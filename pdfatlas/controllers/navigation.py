@@ -135,6 +135,16 @@ class NavigationController:
         content_y = max(0.0, center_y - fixed_gaps)
         ratio = new_zoom / old_zoom
 
+        # Horizontal anchor (content-space x): cursor position or viewport center.
+        # Pages are centered within a content box that is as wide as the widest
+        # page (or the viewport when everything fits).
+        val_h = self.win.hadjustment.get_value()
+        viewport_w_h = self.win.hadjustment.get_page_size()
+        if viewport_w_h <= 1.0:
+            viewport_w_h = 800.0
+        center_x = anchor_x if anchor_x is not None else (val_h + (viewport_w_h / 2.0))
+        box_w_old = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
+
         self.win.zoom = new_zoom
         if hasattr(self.win, "zoom_label") and self.win.zoom_label is not None:
             self.win.zoom_label.set_label(f"{int(new_zoom * 100)}%")
@@ -154,6 +164,25 @@ class NavigationController:
         target_v = clamp(lower, new_val_v, max_y)
 
         self.win.vadjustment.set_value(target_v)
+
+        # Keep the horizontal anchor at the same screen position: the page stays
+        # centered when zooming at its middle, and the point under the cursor
+        # stays put otherwise. When everything fits, scroll_x collapses to 0.
+        box_w_new = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
+        if box_w_old > 0.0:
+            new_center_x = (box_w_new / 2.0) + (center_x - (box_w_old / 2.0)) * ratio
+        else:
+            new_center_x = box_w_new / 2.0
+        old_screen_x = center_x - val_h
+        new_val_h = new_center_x - old_screen_x
+
+        h_upper = max(box_w_new, viewport_w_h)
+        max_x = max(0.0, h_upper - viewport_w_h)
+        target_h = clamp(0.0, new_val_h, max_x)
+
+        self.win.hadjustment.set_upper(h_upper)
+        self.win.hadjustment.set_value(target_h)
+
         self.win._on_scroll_page_changed(self.win.vadjustment)
         self.win.canvas._update_visibility()
         self.win._queue_canvas_redraw()
