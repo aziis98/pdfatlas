@@ -112,6 +112,16 @@ This document records durable technical findings, architectural decisions, mathe
   2. Extracted OpenGL shader loading, program linking, and quad drawing into [`pdfatlas/ui/gl_renderer.py`](pdfatlas/ui/gl_renderer.py) with vertex/fragment shaders in `assets/shaders/`.
   3. Created declarative widget builders (`box`, `button`, `label`, `search_entry`, `scrolled_window`, `spacer`) in [`pdfatlas/ui/gui.py`](pdfatlas/ui/gui.py) and Cairo helpers in [`pdfatlas/ui/cairo_utils.py`](pdfatlas/ui/cairo_utils.py) to streamline GTK container assembly.
 
+### 1.15. Multi-Window Tab Detach: Single-Process `Adw.TabView` Model
+- **Finding:** `Adw.TabView` (libadwaita ≥ 1.0) natively implements all browser-style tab drag-and-drop plumbing within a single process — no custom `Gtk.DragSource`/`Gtk.DropTarget` code required:
+  1. **Reordering** tabs inside a window.
+  2. **Cross-window transfer:** dragging a tab onto another window's `Adw.TabBar` moves the page between `Adw.TabView`s via `adw_tab_view_transfer_page(page, other_view, position)` (the `Adw.TabPage` object is reused).
+  3. **Detach-to-new-window:** dropping a tab on the desktop emits the `Adw.TabView::create-window` signal. The handler only needs to create a new window, present it, and **return its `Adw.TabView`**; the page is transferred into it automatically. It also handles re-inserting the page if the drop is cancelled.
+- **Window lifecycle:** connect `page-detached` and close the window when `view.get_n_pages() == 0` (guard against `dispose` to avoid closing during teardown). Tab close buttons use the `close-page` signal whose default handler closes non-pinned pages.
+- **Headerbar integration:** `Adw.TabBar` can be set as the `Adw.HeaderBar` `title_widget` (GNOME Web/Text-Editor pattern), placing the tabs inside the headerbar itself; `autohide=False` keeps the tab bar visible with a single tab.
+- **Multi-process rejected:** a multi-window tab model spread across processes requires cross-process DnD (X11 selection / Wayland data device) plus a transport (D-Bus) to move document state between processes, for zero user-visible benefit. Single-process with one `Adw.TabView` per window is the idiomatic, robust choice.
+- **Application:** reference prototype in [`scripts/multiwindow_tabs_prototype.py`](scripts/multiwindow_tabs_prototype.py) (`uv run scripts/multiwindow_tabs_prototype.py`).
+
 ---
 
 ## 2. Rejected Approaches
@@ -128,4 +138,5 @@ This document records durable technical findings, architectural decisions, mathe
 | **Sorting `rawdict` chars for Text Selection** | PDF fonts lack explicit space characters and rawdict sorting interleaved characters across adjacent columns in two-column papers. | Use PyMuPDF's native `page.get_text("words")` engine which preserves reading order and spaces natively. |
 | **Clamping `page_x0` with `max(0.0, ...)`** | When zoomed in >200%, page width exceeds window width. Clamping `page_x0` to 0.0 shifted hit-testing horizontally by ~168 PDF points. | Use unclamped `page_x0 = (viewport_w - dw) / 2.0` with `viewport_w = hadjustment.get_page_size()`. |
 | **Viewport-centered horizontal offsets (`page_x0 = (viewport_w - dw) / 2`)** | Worked only while `scroll_x` never moved. Once the page overflowed the viewport the GTK content box is `box_w = max_dw` wide (page at content `x = 0`), so the viewport-centered formula misaligned GPU quads, hit-testing, links, and selection overlays from the GTK page box, and horizontal scrolling was asymmetric (scroll pinned at 0, page "kept being centered"). | Content-box-centered `page_x0 = (box_w - dw) / 2` via `content_width(layout, viewport_w)`, with `hadjustment` centered / cursor-anchored in `set_zoom_level`. |
+| **Multi-process multi-window tab detach** | Requires cross-process DnD (X11 selection / Wayland data device) and a D-Bus transport to migrate document state between processes; libadwaita offers no support; fragile and no user-visible benefit. | Single-process, one `Adw.TabView` per window — reordering, cross-window transfer, and desktop-detach (`::create-window`) are all built in. |
 
