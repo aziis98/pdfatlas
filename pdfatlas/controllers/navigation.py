@@ -185,7 +185,7 @@ class NavigationController:
                 max_page_w = rect.width
 
         if max_page_w > 0:
-            target_zoom = (viewport_w - 24.0) / (max_page_w * self.win.canvas.dpi_scale_factor)
+            target_zoom = viewport_w / (max_page_w * self.win.canvas.dpi_scale_factor)
             self.set_zoom_level(target_zoom)
 
     def zoom_fit_page(self):
