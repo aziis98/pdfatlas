@@ -5,7 +5,8 @@ if TYPE_CHECKING:
     from .window import MainWindow
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gtk, Gdk
 
 
 class ShortcutsController:
@@ -20,6 +21,7 @@ class ShortcutsController:
         self.win.add_controller(self.shortcut_controller)
 
         self._setup_shortcuts()
+        self._setup_nav_key_capture()
 
     def _setup_shortcuts(self):
         # File operations
@@ -48,13 +50,9 @@ class ShortcutsController:
         self._add_nav_shortcut("f", self.win.zoom_fit_page)
         self._add_nav_shortcut("g", self.win.toggle_gapless)
 
-        # Scrolling - Page and Arrow keys
-        self._add_shortcut("Page_Up", lambda: self.win.scroll_page(forward=False))
-        self._add_shortcut("Page_Down", lambda: self.win.scroll_page(forward=True))
-        self._add_shortcut("Up", lambda: self.win.scroll_step(forward=False))
-        self._add_shortcut("Down", lambda: self.win.scroll_step(forward=True))
-        self._add_shortcut("Left", lambda: self.win.scroll_page(forward=False))
-        self._add_shortcut("Right", lambda: self.win.scroll_page(forward=True))
+        # Scrolling - Arrow / Page keys are handled at the capture phase in
+        # `_setup_nav_key_capture` because GTK consumes them for focus navigation
+        # before the shortcut controller sees them.
 
         # Scrolling - Vim Keys (h & l: viewport height; j & k: step scroll)
         self._add_nav_shortcut("h", lambda: self.win.scroll_page(forward=False))
@@ -88,3 +86,37 @@ class ShortcutsController:
         action = Gtk.CallbackAction.new(_handler)
         shortcut = Gtk.Shortcut.new(trigger, action)
         self.shortcut_controller.add_shortcut(shortcut)
+
+    def _setup_nav_key_capture(self):
+        """
+        Arrow and page keys are consumed by GTK's default focus navigation before
+        the GLOBAL shortcut controller gets a chance to handle them (which is why
+        pressing Up moves focus to the search entry instead of scrolling). Intercept
+        them at the capture phase so they scroll the document unless an entry field
+        has focus, in which case they keep their normal editing behavior.
+        """
+        controller = Gtk.EventControllerKey.new()
+        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        controller.connect("key-pressed", self._on_nav_key_pressed)
+        self.win.add_controller(controller)
+
+    def _on_nav_key_pressed(self, controller, keyval, keycode, state):
+        if self.win._is_entry_focused():
+            return False
+
+        if keyval == Gdk.KEY_Up:
+            self.win.scroll_step(forward=False)
+        elif keyval == Gdk.KEY_Down:
+            self.win.scroll_step(forward=True)
+        elif keyval == Gdk.KEY_Left:
+            self.win.scroll_page(forward=False)
+        elif keyval == Gdk.KEY_Right:
+            self.win.scroll_page(forward=True)
+        elif keyval in (Gdk.KEY_Page_Up, Gdk.KEY_KP_Page_Up):
+            self.win.scroll_page(forward=False)
+        elif keyval in (Gdk.KEY_Page_Down, Gdk.KEY_KP_Page_Down):
+            self.win.scroll_page(forward=True)
+        else:
+            return False
+
+        return True
