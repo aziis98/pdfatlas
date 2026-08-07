@@ -1,5 +1,0 @@
-[submodule "installers/archlinux/pdfatlas-git"]
-	path = installers/archlinux/pdfatlas-git
-	url = https://aur.archlinux.org/pdfatlas-git.git
-	update = none
-

@@ -11,10 +11,3 @@ wheels/
 
 # Local temporary folders
 *.local*
-
-# Arch Linux installer build artifacts
-installers/archlinux/pdfatlas-git/src/
-installers/archlinux/pdfatlas-git/pkg/
-installers/archlinux/pdfatlas-git/pdfatlas/
-installers/archlinux/pdfatlas-git/*.tar.zst
-installers/archlinux/pdfatlas-git/*.whl
