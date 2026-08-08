@@ -56,7 +56,7 @@ class GLCanvas(Gtk.GLArea):
         if not self._renderer:
             return 0
         return sum(
-            tex.get_width() * tex.get_height() * 4
+            tex.width * tex.height * tex.channels
             for tex in self._renderer.textures.keys()
         )
 
@@ -107,9 +107,9 @@ class GLCanvas(Gtk.GLArea):
             if canvas.cache is None:
                 continue
 
-            surface = canvas.cache.get(i, canvas.zoom, scale_factor, crop_rect)
+            surface = canvas.cache.get(i, canvas.render_zoom(), scale_factor, crop_rect)
             if surface is None:
-                surface = canvas.cache.get_best(i, canvas.zoom, scale_factor, crop_rect)
+                surface = canvas.cache.get_best(i, canvas.render_zoom(), scale_factor, crop_rect)
 
             if surface is not None:
                 active_surfaces.add(surface)

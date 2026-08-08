@@ -9,7 +9,7 @@ from gi.repository import Gdk, Gtk
 from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
 from ..core.document import DocumentModel
-from ..core.layout import layout_scale, screen_to_pdf, page_at_point, link_screen_rect, anchor_before, anchor_after
+from ..core.layout import layout_scale, texture_zoom, MAX_TEXTURE_ZOOM, screen_to_pdf, page_at_point, link_screen_rect, anchor_before, anchor_after
 from ..core.text_selection import TextSelection
 from .gl_canvas import GLCanvas
 
@@ -635,12 +635,19 @@ class PDFCanvas(Gtk.Overlay):
 
         self._update_visibility()
 
+    def render_zoom(self) -> float:
+        """Zoom passed to the render worker so texture resolution honors the
+        ``max_texture_zoom`` setting (``None`` = Infinity, no cap)."""
+        max_zoom = getattr(self.settings, "max_texture_zoom", MAX_TEXTURE_ZOOM)
+        return texture_zoom(self.zoom, self.dpi_scale_factor, max_zoom)
+
     def _request_render(self, page_index: int, zoom_key: float, scale_factor: int, crop_key, priority: int = 0):
         if not self.cache or not self.render_worker:
             return
         container = self.containers[page_index]
         job_key = (page_index, zoom_key, scale_factor, crop_key)
-        if job_key not in self.in_flight and self.cache.get(page_index, self.zoom, scale_factor, container.crop_rect) is None:
+        render_zoom = self.render_zoom()
+        if job_key not in self.in_flight and self.cache.get(page_index, render_zoom, scale_factor, container.crop_rect) is None:
             self.in_flight.add(job_key)
 
             def make_cb(p_idx, zk, sf, ck):
@@ -650,7 +657,7 @@ class PDFCanvas(Gtk.Overlay):
                 priority=priority,
                 doc_model=self.doc_model,
                 page_index=page_index,
-                zoom=layout_scale(self.zoom, self.dpi_scale_factor),
+                zoom=render_zoom,
                 scale_factor=scale_factor,
                 crop_rect=container.crop_rect,
                 is_minimap=False,

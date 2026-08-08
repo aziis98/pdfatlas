@@ -1221,6 +1221,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_settings_changed(self):
         self._on_crop_settings_updated()
+        # Re-clamp current zoom if the min/max zoom limits changed
+        if hasattr(self, "zoom"):
+            min_zoom = getattr(self.settings, "min_zoom", 0.25)
+            max_zoom = getattr(self.settings, "max_zoom", 50.0)
+            if self.zoom < min_zoom or self.zoom > max_zoom:
+                self.set_zoom_level(self.zoom)
         # Re-run search if a query is active to apply layout changes (list vs grid) in real-time
         if hasattr(self, "_last_query") and self._last_query:
             self.run_search(self._last_query)

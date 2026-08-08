@@ -3,26 +3,33 @@ import threading
 
 import cairo
 
+from .texture import PageTexture
+
+#: A cached entry is either a cairo.ImageSurface (minimap / portal paths, whose
+#: backing BGRA numpy buffer is retained via ``buffer``) or a PageTexture (GL
+#: canvas path, which owns its raw RGB samples directly).
+CacheValue = tuple[cairo.ImageSurface | PageTexture, object | None]
+
 
 class PageCache:
     """
-    Unified LRU Cache storing full rendered PDF page surfaces.
+    Unified LRU Cache storing full rendered PDF page pixels.
     Key: (page_index, round(scale, 2), crop_key)
       - page_index: int
       - scale: float (resolution scale = zoom * scale_factor)
       - crop_key: tuple of float (x0, y0, x1, y1) or None
-    Value: tuple (cairo.ImageSurface, data_buffer)
+    Value: CacheValue (cairo.ImageSurface | PageTexture, data_buffer)
     """
 
     def __init__(self, max_size: int = 50):
         self.max_size = max_size
-        self.cache: OrderedDict[tuple, tuple[cairo.ImageSurface, object]] = OrderedDict()
+        self.cache: OrderedDict[tuple, CacheValue] = OrderedDict()
         self._lock = threading.Lock()
 
     def _make_key(self, page_index: int, scale: float, crop_key: tuple | None = None) -> tuple:
         return (page_index, round(scale, 2), crop_key)
 
-    def get(self, page_index: int, scale: float, crop_key: tuple | None = None) -> cairo.ImageSurface | None:
+    def get(self, page_index: int, scale: float, crop_key: tuple | None = None) -> cairo.ImageSurface | PageTexture | None:
         key = self._make_key(page_index, scale, crop_key)
         with self._lock:
             if key in self.cache:
@@ -32,33 +39,33 @@ class PageCache:
 
     def get_best(
         self, page_index: int, scale: float, crop_key: tuple | None = None
-    ) -> cairo.ImageSurface | None:
+    ) -> cairo.ImageSurface | PageTexture | None:
         """Return the closest-zoom cached surface for this page+crop, or None."""
         exact = self.get(page_index, scale, crop_key)
         if exact is not None:
             return exact
-        best_surface = None
+        best_entry: CacheValue | None = None
         best_diff = float("inf")
-        for (p, s, ck), (surface, _buf) in self.cache.items():
+        for (p, s, ck), entry in self.cache.items():
             if p == page_index and ck == crop_key:
                 diff = abs(s - scale)
                 if diff < best_diff:
                     best_diff = diff
-                    best_surface = surface
-        if best_surface is not None:
-            for key, (surface, _buf) in list(self.cache.items()):
-                if surface is best_surface:
+                    best_entry = entry
+        if best_entry is not None:
+            for key, entry in list(self.cache.items()):
+                if entry is best_entry:
                     self.cache.move_to_end(key)
                     break
-        return best_surface
+        return best_entry[0] if best_entry is not None else None
 
     def set(
         self,
         page_index: int,
         scale: float,
         crop_key: tuple | None,
-        surface: cairo.ImageSurface,
-        data_buffer: object,
+        surface: cairo.ImageSurface | PageTexture,
+        data_buffer: object | None,
     ):
         key = self._make_key(page_index, scale, crop_key)
         with self._lock:
@@ -68,51 +75,19 @@ class PageCache:
             if len(self.cache) > self.max_size:
                 self.cache.popitem(last=False)
 
-    def get_sub_surface(
-        self, page_index: int, scale: float, clip_y0: float, clip_y1: float
-    ) -> cairo.ImageSurface | None:
-        """
-        Derives a sub-surface snippet from a cached base page surface at requested scale.
-        """
-        base_surface = self.get(page_index, scale)
-        if base_surface is None:
-            # Look for any base page surface for this page if scale matches closely
-            with self._lock:
-                for (p_idx, s_val, c_key), (surf, _buf) in reversed(self.cache.items()):
-                    if p_idx == page_index and c_key is None:
-                        base_surface = surf
-                        scale = s_val
-                        break
-
-        if base_surface is None:
-            return None
-
-        surf_w = base_surface.get_width()
-        surf_h = base_surface.get_height()
-        if surf_w <= 0 or surf_h <= 0:
-            return None
-
-        # Convert document point clip_y0/clip_y1 to pixel y-offsets
-        py0 = max(0, int(clip_y0 * scale))
-        py1 = min(surf_h, int(clip_y1 * scale))
-        clip_h = max(1, py1 - py0)
-
-        sub_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, surf_w, clip_h)
-        ctx = cairo.Context(sub_surface)
-        ctx.set_source_surface(base_surface, 0, -py0)
-        ctx.paint()
-        return sub_surface
-
     def total_entries(self) -> int:
         with self._lock:
             return len(self.cache)
 
     def total_bytes(self) -> int:
-        """Sum of all cached Cairo image surface pixel memory in bytes."""
+        """Sum of all cached pixel memory in bytes (4 B/px for cairo, channels B/px for PageTexture)."""
         with self._lock:
             total = 0
-            for (_key, (surface, _buf)) in self.cache.items():
-                total += surface.get_width() * surface.get_height() * 4
+            for (surface, _buf) in self.cache.values():
+                if isinstance(surface, PageTexture):
+                    total += surface.byte_size
+                else:
+                    total += surface.get_width() * surface.get_height() * 4
             return total
 
     def clear(self):
@@ -122,7 +97,7 @@ class PageCache:
 
 # Backward-compatibility wrappers mapping to PageCache via composition
 class RenderCache:
-    """Legacy alias wrapping PageCache for canvas rendering."""
+    """Cache for the GL canvas: stores PageTexture raw RGB pixels."""
 
     def __init__(self, max_size: int = 20):
         self._page_cache = PageCache(max_size=max_size)
@@ -136,9 +111,10 @@ class RenderCache:
 
     def get(
         self, page_index: int, zoom: float, scale_factor: int, crop_rect
-    ) -> cairo.ImageSurface | None:
+    ) -> PageTexture | None:
         scale = zoom * scale_factor
-        return self._page_cache.get(page_index, scale, self._normalize_crop_key(crop_rect))
+        value = self._page_cache.get(page_index, scale, self._normalize_crop_key(crop_rect))
+        return value if isinstance(value, PageTexture) else None
 
     def set(
         self,
@@ -146,22 +122,18 @@ class RenderCache:
         zoom: float,
         scale_factor: int,
         crop_rect,
-        surface: cairo.ImageSurface,
-        data_buffer: object,
+        surface: PageTexture,
+        data_buffer: object | None,
     ):
         scale = zoom * scale_factor
         self._page_cache.set(page_index, scale, self._normalize_crop_key(crop_rect), surface, data_buffer)
 
     def get_best(
         self, page_index: int, zoom: float, scale_factor: int, crop_rect
-    ) -> cairo.ImageSurface | None:
+    ) -> PageTexture | None:
         scale = zoom * scale_factor
-        return self._page_cache.get_best(page_index, scale, self._normalize_crop_key(crop_rect))
-
-    def get_sub_surface(
-        self, page_index: int, scale: float, clip_y0: float, clip_y1: float
-    ) -> cairo.ImageSurface | None:
-        return self._page_cache.get_sub_surface(page_index, scale, clip_y0, clip_y1)
+        value = self._page_cache.get_best(page_index, scale, self._normalize_crop_key(crop_rect))
+        return value if isinstance(value, PageTexture) else None
 
     def total_entries(self) -> int:
         return self._page_cache.total_entries()
@@ -174,13 +146,14 @@ class RenderCache:
 
 
 class MiniMapCache:
-    """Legacy alias wrapping PageCache for minimap thumbnails."""
+    """Legacy alias wrapping PageCache for minimap thumbnails (cairo surfaces)."""
 
     def __init__(self, max_size: int = 1000):
         self._page_cache = PageCache(max_size=max_size)
 
     def get(self, page_index: int) -> cairo.ImageSurface | None:
-        return self._page_cache.get(page_index, scale=0.2)
+        value = self._page_cache.get(page_index, scale=0.2)
+        return value if isinstance(value, cairo.ImageSurface) else None
 
     def set(self, page_index: int, surface: cairo.ImageSurface, data_buffer: object):
         self._page_cache.set(page_index, scale=0.2, crop_key=None, surface=surface, data_buffer=data_buffer)
@@ -197,7 +170,8 @@ class LinkPortalCache:
 
     def get(self, page_index: int, target_y: float, target_w: int, target_h: int) -> cairo.ImageSurface | None:
         crop_key = (round(target_y, 1), target_w, target_h)
-        return self._page_cache.get(page_index, scale=1.0, crop_key=crop_key)
+        value = self._page_cache.get(page_index, scale=1.0, crop_key=crop_key)
+        return value if isinstance(value, cairo.ImageSurface) else None
 
     def set(
         self,

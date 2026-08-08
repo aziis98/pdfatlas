@@ -59,9 +59,10 @@ pdfatlas/
 │   │   ├── installation.py # Linux desktop launcher installation
 │   │   ├── layout.py        # Viewport geometry and layout coordinate transforms
 │   │   ├── pdf_source.py    # Local file, URL, and arXiv PDF source model
-│   │   ├── renderer.py      # Asynchronous background render worker pool
+│   │   ├── renderer.py      # Async background render worker (raw RGB → PageTexture / cairo)
 │   │   ├── settings.py      # App settings model & state persistence
-│   │   └── text_selection.py# Text selection state tracker
+│   │   ├── text_selection.py# Text selection state tracker
+│   │   └── texture.py       # PageTexture: raw RGB page pixels for GL upload
 │   └── ui/                  # GTK4 / Libadwaita UI components
 │       ├── arxiv_dialog.py  # arXiv search and paper fetch modal
 │       ├── cairo_utils.py   # Cairo surface painting and shape utilities

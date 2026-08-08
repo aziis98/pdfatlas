@@ -13,6 +13,6 @@ void main() {
         FragColor = u_color;
     } else {
         vec4 tex = texture(u_texture, TexCoord);
-        FragColor = vec4(tex.b, tex.g, tex.r, tex.a);
+        FragColor = vec4(tex.rgb, 1.0);
     }
 }

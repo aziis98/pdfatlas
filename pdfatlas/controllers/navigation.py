@@ -95,7 +95,9 @@ class NavigationController:
             return
 
         old_zoom = self.win.zoom
-        new_zoom = max(0.25, min(50.0, new_zoom))
+        min_zoom = getattr(self.win.settings, "min_zoom", 0.25)
+        max_zoom = getattr(self.win.settings, "max_zoom", 50.0)
+        new_zoom = max(min_zoom, min(max_zoom, new_zoom))
 
         # Cap zoom: at max, only ~25% of page width visible in viewport
         viewport_w = float(self.win.canvas.viewport_width())

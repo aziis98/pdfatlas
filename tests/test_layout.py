@@ -7,6 +7,7 @@ from pdfatlas.core.layout import (
     page_rect_at,
     pdf_rect_to_screen,
     screen_to_pdf,
+    texture_zoom,
 )
 
 
@@ -28,6 +29,32 @@ class MockPdfRect:
 
 def test_layout_scale():
     assert layout_scale(1.5, 2.0) == 3.0
+
+
+def test_texture_zoom_below_cap():
+    assert texture_zoom(1.0, 1.0) == 1.0
+    assert texture_zoom(2.0, 1.5) == 3.0
+
+
+def test_texture_zoom_at_cap():
+    assert texture_zoom(3.0, 1.0) == 3.0
+
+
+def test_texture_zoom_above_cap():
+    # Zoom beyond 300% is clamped so the texture never renders larger.
+    assert texture_zoom(5.0, 1.0) == 3.0
+    assert texture_zoom(50.0, 2.0) == 6.0
+
+
+def test_texture_zoom_custom_cap():
+    assert texture_zoom(4.0, 1.0, max_zoom=2.0) == 2.0
+    assert texture_zoom(1.0, 1.0, max_zoom=2.0) == 1.0
+
+
+def test_texture_zoom_infinity():
+    # None disables the cap entirely: texture renders at true zoom.
+    assert texture_zoom(10.0, 1.0, max_zoom=None) == 10.0
+    assert texture_zoom(5.0, 2.0, max_zoom=None) == 10.0
 
 
 def test_page_rect_at_overflow():
@@ -138,3 +165,45 @@ def test_anchors():
 
     val = anchor_after(layout, anchor, zoom=1.0, dpi_scale_factor=1.0, scroll_upper=2000.0, scroll_page_size=400.0)
     assert val == 0.0
+
+
+def test_zoom_level_clamped_by_settings_limits():
+    from unittest.mock import MagicMock
+
+    from pdfatlas.controllers.navigation import NavigationController
+    from pdfatlas.core.settings import CropSettings
+
+    win = MagicMock()
+    win.settings = CropSettings(min_zoom=0.5, max_zoom=2.0)
+    win.zoom = 1.0
+    win.doc_model = MagicMock()
+    win.doc_model.page_count = 1
+    win.doc_model.page_rect.return_value = MagicMock(width=600.0, height=700.0)
+    win.canvas = MagicMock()
+    win.canvas.page_layout = [(0.0, 600.0, 700.0, None)]
+    win.canvas.viewport_width.return_value = 1200.0
+    win.canvas.dpi_scale_factor = 1.0
+    win.canvas.page_gap = 0.0
+    win.vadjustment.get_value.return_value = 0.0
+    win.vadjustment.get_page_size.return_value = 700.0
+    win.vadjustment.get_lower.return_value = 0.0
+    win.vadjustment.get_upper.return_value = 700.0
+    win.hadjustment.get_value.return_value = 0.0
+    win.hadjustment.get_page_size.return_value = 1200.0
+    win.get_current_page_index.return_value = 0
+
+    nav = NavigationController(win)
+
+    # Above settings.max_zoom -> clamped to 2.0
+    nav.set_zoom_level(10.0)
+    assert win.zoom == 2.0
+
+    # Below settings.min_zoom -> clamped to 0.5
+    win.zoom = 2.0
+    nav.set_zoom_level(0.01)
+    assert win.zoom == 0.5
+
+    # Within limits -> unchanged
+    win.zoom = 0.5
+    nav.set_zoom_level(1.25)
+    assert win.zoom == 1.25

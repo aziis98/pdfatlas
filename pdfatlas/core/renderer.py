@@ -13,6 +13,7 @@ from gi.repository import GLib
 
 from .render_child import ChildRequest, ErrorResult, RenderResult, child_main
 from .settings import CropSettings
+from .texture import PageTexture
 
 
 class RenderWorker:
@@ -405,16 +406,17 @@ class RenderWorker:
     def _deliver_render(self, msg: RenderResult, entry: dict):
         w = msg["width"]
         h = msg["height"]
-        bgra = self._bgra_buffer(msg["samples"], w, h)
-        surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_RGB24, w, h, w * 4)
-        surface.set_device_scale(entry["scale_factor"], entry["scale_factor"])
 
         if not self._is_stale(entry):
             if entry["is_minimap"]:
+                bgra = self._bgra_buffer(msg["samples"], w, h)
+                surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_RGB24, w, h, w * 4)
+                surface.set_device_scale(entry["scale_factor"], entry["scale_factor"])
                 entry["target_cache"].set(entry["page_index"], surface, bgra)
             else:
+                texture = PageTexture(w, h, msg["channels"], msg["samples"])
                 entry["target_cache"].set(
-                    entry["page_index"], entry["zoom"], entry["scale_factor"], entry["crop_key"], surface, bgra
+                    entry["page_index"], entry["zoom"], entry["scale_factor"], entry["crop_key"], texture, None
                 )
 
         elapsed_ms = (time.perf_counter() - entry["dispatched_at"]) * 1000.0

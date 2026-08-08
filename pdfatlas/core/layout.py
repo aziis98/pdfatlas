@@ -5,6 +5,22 @@ def layout_scale(zoom: float, dpi_scale_factor: float) -> float:
     return zoom * dpi_scale_factor
 
 
+#: Page textures never render beyond 300% zoom by default; the GPU upscales beyond it.
+MAX_TEXTURE_ZOOM = 3.0
+
+
+def texture_zoom(
+    zoom: float, dpi_scale_factor: float, max_zoom: float | None = MAX_TEXTURE_ZOOM
+) -> float:
+    """Zoom value passed to the render worker so texture resolution caps at
+    ``max_zoom`` (default 300%). Beyond it the GL canvas upscales the capped
+    texture to the full-size quad instead of rendering a larger one.
+    ``max_zoom=None`` disables the cap entirely (texture renders at true zoom)."""
+    if max_zoom is None:
+        return layout_scale(zoom, dpi_scale_factor)
+    return layout_scale(min(zoom, max_zoom), dpi_scale_factor)
+
+
 def content_width(layout: list[tuple], viewport_w: float) -> float:
     """
     Width of the scrollable content box in device pixels.

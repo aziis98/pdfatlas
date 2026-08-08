@@ -13,3 +13,6 @@ class CropSettings:
     sparse_strategy: str = "use_uniform"  # "skip", "use_uniform", "crop_anyway"
     page_gaps: bool = True
     search_layout: str = "grid"  # "list" or "grid"
+    max_texture_zoom: float | None = 3.0  # None = Infinity (no texture-zoom cap)
+    min_zoom: float = 0.25
+    max_zoom: float = 50.0
