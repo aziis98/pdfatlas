@@ -37,13 +37,13 @@ def test_texture_zoom_below_cap():
 
 
 def test_texture_zoom_at_cap():
-    assert texture_zoom(3.0, 1.0) == 3.0
+    assert texture_zoom(2.5, 1.0) == 2.5
 
 
 def test_texture_zoom_above_cap():
-    # Zoom beyond 300% is clamped so the texture never renders larger.
-    assert texture_zoom(5.0, 1.0) == 3.0
-    assert texture_zoom(50.0, 2.0) == 6.0
+    # Zoom beyond 250% is clamped so the texture never renders larger.
+    assert texture_zoom(5.0, 1.0) == 2.5
+    assert texture_zoom(50.0, 2.0) == 5.0
 
 
 def test_texture_zoom_custom_cap():
