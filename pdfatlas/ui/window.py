@@ -1208,7 +1208,7 @@ class MainWindow(Adw.ApplicationWindow):
             settings=self.settings,
             on_changed=self._on_settings_changed,
             on_reanalyze=self._on_reanalyze,
-        ).present()
+        ).present(self)
 
     def _on_about_action_activated(self, action=None, param=None):
         Adw.AboutDialog(
