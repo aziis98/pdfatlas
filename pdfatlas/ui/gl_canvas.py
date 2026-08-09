@@ -9,8 +9,10 @@ from OpenGL import GL as gl
 
 from .cairo_utils import hex_to_rgba
 from .gl_renderer import QuadRenderer
+from .texture_uploader import TextureUploader
 
 if TYPE_CHECKING:
+    from ..core.texture import PageTexture
     from .canvas import PDFCanvas
 
 
@@ -24,6 +26,8 @@ class GLCanvas(Gtk.GLArea):
         super().__init__()
         self.layout_provider: PDFCanvas = canvas_layout_provider
         self._renderer: QuadRenderer | None = None
+        self._uploader: TextureUploader | None = None
+        self._last_uploaded: dict[tuple, "PageTexture"] = {}
 
         self.set_required_version(3, 3)
         self.set_has_depth_buffer(False)
@@ -42,22 +46,28 @@ class GLCanvas(Gtk.GLArea):
         try:
             self._renderer = QuadRenderer()
             self._renderer.initialize()
+            self._uploader = TextureUploader()
+            self._uploader.set_redraw_notify(self.queue_draw)
+            self._uploader.initialize(self)
         except Exception as e:
             print(f"[GLCanvas] Failed to initialize OpenGL pipeline: {e}")
             self.set_error(GLib.Error.new_literal(GLib.quark_from_string("opengl"), str(e), 1))
 
     def _on_unrealize(self, area):
         self.make_current()
+        if self._uploader:
+            self._uploader.shutdown()
+            self._uploader = None
         if self._renderer:
             self._renderer.cleanup()
             self._renderer = None
 
     def texture_bytes(self) -> int:
-        if not self._renderer:
+        if self._uploader is None:
             return 0
         return sum(
             tex.width * tex.height * tex.channels
-            for tex in self._renderer.textures.keys()
+            for tex in self._uploader.textures()
         )
 
     def _draw_rect(self, r: QuadRenderer, x: float, y: float, w: float, h: float,
@@ -88,7 +98,7 @@ class GLCanvas(Gtk.GLArea):
         scale = canvas.zoom * canvas.dpi_scale_factor
 
         r.begin(viewport_w, viewport_h, x_min, y_min, gl_scale)
-        active_surfaces = set()
+        keep_surfaces = set()
 
         page_count = len(canvas.page_layout)
         box_w = max(viewport_w, max((dw for _, dw, _, _ in canvas.page_layout), default=0.0))
@@ -112,9 +122,32 @@ class GLCanvas(Gtk.GLArea):
                 surface = canvas.cache.get_best(i, canvas.render_zoom(), scale_factor, crop_rect)
 
             if surface is not None:
-                active_surfaces.add(surface)
-                tex_id = r.upload_surface(surface)
-                r.textured(tex_id, x_offset, page_y0, dw, dh)
+                keep_surfaces.add(surface)
+                page_key = (
+                    i,
+                    (crop_rect.x0, crop_rect.y0, crop_rect.x1, crop_rect.y1)
+                    if crop_rect is not None
+                    else None,
+                )
+                tex_id = None
+                used_fallback = False
+                if self._uploader is not None:
+                    tex_id = self._uploader.tex_id_for(surface)
+                    if tex_id is None:
+                        self._uploader.request_upload(surface)
+                        prev = self._last_uploaded.get(page_key)
+                        if prev is not None and prev is not surface:
+                            prev_id = self._uploader.tex_id_for(prev)
+                            if prev_id is not None:
+                                keep_surfaces.add(prev)
+                                tex_id = prev_id
+                                used_fallback = True
+                if tex_id is not None:
+                    r.textured(tex_id, x_offset, page_y0, dw, dh)
+                    if not used_fallback:
+                        self._last_uploaded[page_key] = surface
+                else:
+                    r.fill_rect(x_offset, page_y0, dw, dh, (0.95, 0.95, 0.95, 1.0))
 
                 hl_block = getattr(canvas, "highlighted_block", None)
                 if hl_block is not None:
@@ -385,10 +418,10 @@ class GLCanvas(Gtk.GLArea):
             else:
                 r.fill_rect(x_offset, page_y0, dw, dh, (0.95, 0.95, 0.95, 1.0))
 
-        evicted = [s for s in r.textures if s not in active_surfaces]
-        for s in evicted:
-            tex_id = r.textures.pop(s)
-            gl.glDeleteTextures([tex_id])
+        if self._uploader is not None:
+            self._uploader.evict_not_active(keep_surfaces)
+            uploaded = set(self._uploader.textures())
+            self._last_uploaded = {k: v for k, v in self._last_uploaded.items() if v in uploaded}
 
         r.end()
         gl.glUseProgram(0)
