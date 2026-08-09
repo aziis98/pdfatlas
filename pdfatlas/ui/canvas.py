@@ -1,10 +1,12 @@
 
 import gi
+from collections import deque
 from typing import Any, Callable
+import time
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
@@ -12,6 +14,16 @@ from ..core.document import DocumentModel
 from ..core.layout import layout_scale, texture_zoom, MAX_TEXTURE_ZOOM, screen_to_pdf, page_at_point, link_screen_rect, anchor_before, anchor_after
 from ..core.text_selection import TextSelection
 from .gl_canvas import GLCanvas
+
+#: Milliseconds of silence after the last scroll event before the viewport is
+#: considered settled and full-resolution renders are requested.
+SCROLL_SETTLE_MS = 150
+#: A full-resolution page render slower than this (ms) marks the document as
+#: "slow" so subsequent scrolling previews rasterize pages at low resolution.
+SLOW_RENDER_MS = 16.0
+#: Texture zoom used for scrolling previews of slow documents (1/16 the pixels
+#: of a 1:1 render, GPU-upscaled while the page is moving).
+SCROLL_RENDER_ZOOM = 0.25
 
 
 def highlight_at_point(
@@ -120,6 +132,17 @@ class PDFCanvas(Gtk.Overlay):
         self.is_pinching = False
         self.pinch_center_x: float = 0.0
         self.pinch_center_y: float = 0.0
+
+        # Scroll-aware progressive rendering state: while scrolling a slow
+        # document (renders > SLOW_RENDER_MS) pages are rasterized at
+        # SCROLL_RENDER_ZOOM so the low-res preview arrives before the page
+        # settles, then re-rendered at full resolution after SCROLL_SETTLE_MS.
+        self.is_scrolling = False
+        self._scroll_settle_id: int | None = None
+        self._scroll_use_low_res = False
+        self._slow_renders = False
+        self._render_times: deque[float] = deque(maxlen=4)
+        self._render_started: dict[tuple, float] = {}
 
         # Base layer: OpenGL hardware-accelerated background
         self.gl_canvas = GLCanvas(canvas_layout_provider=self)
@@ -518,6 +541,7 @@ class PDFCanvas(Gtk.Overlay):
         self.crop_analyzer = crop_analyzer
         self.settings = settings
         self.in_flight.clear()
+        self._render_started.clear()
         if self.text_selection:
             self.clear_selection()
         self.text_selection = TextSelection(doc_model) if doc_model else None
@@ -534,12 +558,42 @@ class PDFCanvas(Gtk.Overlay):
         self.update_layout()
 
     def _on_scroll(self, adj):
+        if not self.is_scrolling:
+            self._scroll_use_low_res = self._slow_renders
+        self.is_scrolling = True
+        self._arm_scroll_settle()
         self._update_visibility()
         self.gl_canvas.queue_draw()
+
+    def _arm_scroll_settle(self):
+        if self._scroll_settle_id is not None:
+            GLib.source_remove(self._scroll_settle_id)
+        self._scroll_settle_id = GLib.timeout_add(SCROLL_SETTLE_MS, self._on_scroll_settled)
+
+    def _on_scroll_settled(self):
+        self._scroll_settle_id = None
+        self.is_scrolling = False
+        self._update_visibility()
+        self.gl_canvas.queue_draw()
+        return False  # GLib.SOURCE_REMOVE
+
+    def _effective_render_zoom(self) -> float:
+        """Texture zoom for the next queued render job.
+
+        While scrolling a slow document, pages are rasterized at
+        ``SCROLL_RENDER_ZOOM`` (a low-res preview the GPU upscales while the
+        page is in motion) and re-rendered at full resolution once scrolling
+        settles. Fast documents always render at the full texture zoom.
+        """
+        full = self.render_zoom()
+        if self.is_scrolling and self._scroll_use_low_res:
+            return min(SCROLL_RENDER_ZOOM, full)
+        return full
 
     def set_zoom(self, zoom: float):
         self.zoom = zoom
         self.in_flight.clear()
+        self._render_started.clear()
         if self.render_worker:
             self.render_worker.clear_canvas_render_jobs()
         if self.hovered_link is not None:
@@ -552,6 +606,7 @@ class PDFCanvas(Gtk.Overlay):
     def on_crop_changed(self):
         anchor = self._anchor_layout_point()
         self.in_flight.clear()
+        self._render_started.clear()
         if self.render_worker:
             self.render_worker.clear_canvas_render_jobs()
         if self.cache:
@@ -645,13 +700,14 @@ class PDFCanvas(Gtk.Overlay):
         if not self.cache or not self.render_worker:
             return
         container = self.containers[page_index]
-        job_key = (page_index, zoom_key, scale_factor, crop_key)
-        render_zoom = self.render_zoom()
+        render_zoom = self._effective_render_zoom()
+        job_key = (page_index, zoom_key, render_zoom, scale_factor, crop_key)
         if job_key not in self.in_flight and self.cache.get(page_index, render_zoom, scale_factor, container.crop_rect) is None:
             self.in_flight.add(job_key)
+            self._render_started[job_key] = time.perf_counter()
 
-            def make_cb(p_idx, zk, sf, ck):
-                return lambda: self._on_render_complete(p_idx, zk, sf, ck)
+            def make_cb(p_idx, zk, rz, sf, ck):
+                return lambda: self._on_render_complete(p_idx, zk, rz, sf, ck)
 
             self.render_worker.queue_render_job(
                 priority=priority,
@@ -662,7 +718,7 @@ class PDFCanvas(Gtk.Overlay):
                 crop_rect=container.crop_rect,
                 is_minimap=False,
                 target_cache=self.cache,
-                redraw_callback=make_cb(page_index, zoom_key, scale_factor, crop_key),
+                redraw_callback=make_cb(page_index, zoom_key, render_zoom, scale_factor, crop_key),
                 screen_physical_dpi=self.screen_physical_dpi,
             )
 
@@ -710,7 +766,17 @@ class PDFCanvas(Gtk.Overlay):
             for idx, priority in self._prefetch_targets(first_visible, last_visible):
                 self._request_render(idx, zoom_key, scale_factor, self._crop_key(idx), priority=priority)
 
-    def _on_render_complete(self, page_index, zoom_key, scale_factor, crop_key):
-        self.in_flight.discard((page_index, zoom_key, scale_factor, crop_key))
+    def _on_render_complete(self, page_index, zoom_key, render_zoom, scale_factor, crop_key):
+        key = (page_index, zoom_key, render_zoom, scale_factor, crop_key)
+        self.in_flight.discard(key)
+        started = self._render_started.pop(key, None)
+        if started is not None and render_zoom > SCROLL_RENDER_ZOOM:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            if elapsed_ms < 5000.0:
+                self._render_times.append(elapsed_ms)
+                self._slow_renders = any(m > SLOW_RENDER_MS for m in self._render_times)
+        # Re-scan so a full-res job skipped while a low-res job was still in
+        # flight gets queued now that the low-res placeholder has landed.
+        self._update_visibility()
         # Always redraw — GL drawing code uses get_best to pick the best available surface
         self.gl_canvas.queue_draw()
