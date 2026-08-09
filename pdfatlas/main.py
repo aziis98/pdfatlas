@@ -30,6 +30,7 @@ class PDFViewerApplication(Adw.Application):
         self.screenshot: str | None = None
         self.follow_link: int | None = None
         self.debug: bool = False
+        self.render_mode: str = "mp"
 
     def do_activate(self):
         from .core.installation import get_installation_mode_info
@@ -48,6 +49,7 @@ class PDFViewerApplication(Adw.Application):
             screenshot_path=screenshot,
             follow_link=follow_link,
             debug_mode=debug_mode,
+            render_mode=self.render_mode,
         )
         win.present()
 
@@ -101,6 +103,12 @@ def main():
     parser.add_argument("--screenshot", default=None, help="Path to save window screenshot after 2 seconds")
     parser.add_argument("--follow-link", type=int, default=None, help="Index of N-th link in document to follow on open")
     parser.add_argument("--debug", action="store_true", help="Enable debug overlay for page layout values")
+    parser.add_argument(
+        "--render-mode",
+        choices=["mt", "mp"],
+        default="mp",
+        help="Rasterization backend: 'mp' = multiprocessing child process (default), 'mt' = multithreaded",
+    )
     parser.add_argument("--headless", action="store_true", help="Run inside a virtual display using xvfb-run if available")
 
     args = parser.parse_args(sys.argv[1:])
@@ -118,6 +126,7 @@ def main():
     app.screenshot = args.screenshot
     app.follow_link = args.follow_link
     app.debug = args.debug
+    app.render_mode = args.render_mode
 
     sys.exit(app.run([sys.argv[0]]))
 

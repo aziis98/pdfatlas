@@ -23,7 +23,7 @@ from ..core.document import DocumentModel
 from ..core.index import DatabaseService, get_db_for_pdf, load_doc_state
 from ..core.installation import ensure_app_installed, is_app_installed
 
-from ..core.renderer import RenderWorker
+from ..core.renderer import create_render_worker
 from ..core.settings import CropSettings
 from ..core.pdf_source import PdfSource, RecentFilesManager
 from .arxiv_dialog import ArxivDialog
@@ -83,7 +83,7 @@ class MainWindow(Adw.ApplicationWindow):
       - Click-to-navigate search portal coordinates mapping.
     """
 
-    def __init__(self, app, state=None, screenshot_path=None, follow_link=None, debug_mode=False):
+    def __init__(self, app, state=None, screenshot_path=None, follow_link=None, debug_mode=False, render_mode="mp"):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
@@ -111,7 +111,8 @@ class MainWindow(Adw.ApplicationWindow):
         # LRU Caches and background thread pool for canvas rendering
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
-        self.render_worker = RenderWorker()
+        self.render_worker = create_render_worker(render_mode)
+        print(f"[PDFAtlas] render backend: {render_mode}", flush=True)
 
         # Thread pool for search indexing & result portal rendering
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")

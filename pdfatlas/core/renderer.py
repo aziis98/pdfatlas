@@ -16,6 +16,15 @@ from .settings import CropSettings
 from .texture import PageTexture
 
 
+def bgra_from_rgb(data, w: int, h: int) -> np.ndarray:
+    """Builds a contiguous, writable BGRA buffer from raw RGB bytes (single allocation)."""
+    arr = np.frombuffer(data, dtype=np.uint8).reshape((h, w, 3))
+    bgra = np.empty((h, w, 4), dtype=np.uint8)
+    bgra[:, :, :3] = arr[:, :, ::-1]
+    bgra[:, :, 3] = 255
+    return bgra
+
+
 class RenderWorker:
     """
     Background rendering coordinator.
@@ -387,15 +396,6 @@ class RenderWorker:
 
     # --- Result delivery ---
 
-    @staticmethod
-    def _bgra_buffer(data, w: int, h: int) -> np.ndarray:
-        """Builds a contiguous, writable BGRA buffer from raw RGB bytes (single allocation)."""
-        arr = np.frombuffer(data, dtype=np.uint8).reshape((h, w, 3))
-        bgra = np.empty((h, w, 4), dtype=np.uint8)
-        bgra[:, :, :3] = arr[:, :, ::-1]
-        bgra[:, :, 3] = 255
-        return bgra
-
     def _is_stale(self, entry: dict) -> bool:
         if entry["filepath"] != self._active_filepath:
             return True
@@ -409,7 +409,7 @@ class RenderWorker:
 
         if not self._is_stale(entry):
             if entry["is_minimap"]:
-                bgra = self._bgra_buffer(msg["samples"], w, h)
+                bgra = bgra_from_rgb(msg["samples"], w, h)
                 surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_RGB24, w, h, w * 4)
                 surface.set_device_scale(entry["scale_factor"], entry["scale_factor"])
                 entry["target_cache"].set(entry["page_index"], surface, bgra)
@@ -431,7 +431,7 @@ class RenderWorker:
     def _deliver_portal(self, msg: RenderResult, entry: dict):
         w = msg["width"]
         h = msg["height"]
-        bgra = self._bgra_buffer(msg["samples"], w, h)
+        bgra = bgra_from_rgb(msg["samples"], w, h)
         surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_ARGB32, w, h, w * 4)
         surface.set_device_scale(entry["scale_factor"], entry["scale_factor"])
         from ..ui.portal import apply_card_decorations
@@ -496,3 +496,23 @@ class RenderWorker:
         for entry in dead:
             self._abandon(entry)
         self._respawn_child("unexpected death")
+
+
+def create_render_worker(mode: str):
+    """Instantiate a background render backend.
+
+    ``mode`` selects the rasterization backend:
+      - ``"mp"``: multiprocessing — rasterization runs in a dedicated spawn
+        child process (``render_child.py``) so PyMuPDF's GIL bursts can never
+        stall the UI thread. This is the default and recommended backend.
+      - ``"mt"``: multithreaded — a single daemon thread calls PyMuPDF
+        directly against the shared ``DocumentModel``. Kept for benchmarking
+        and comparison; see RESEARCH.md 1.16.
+    """
+    if mode == "mp":
+        return RenderWorker()
+    if mode == "mt":
+        from .renderer_mt import RenderWorkerMT
+
+        return RenderWorkerMT()
+    raise ValueError(f"Unknown render mode: {mode!r} (expected 'mt' or 'mp')")
