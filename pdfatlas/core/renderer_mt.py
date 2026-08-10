@@ -1,12 +1,13 @@
 """
 Multithreaded background render backend (``--render-mode mt``).
 
-Rasterization runs on a single daemon thread inside the parent process,
-calling PyMuPDF directly against the shared ``DocumentModel``. This is the
-original backend that shipped before child-process rasterization; PyMuPDF
-re-acquires the GIL in bursts during image decode/scaling, so long scans can
-stall the GTK main thread (see RESEARCH.md 1.16). Kept as a swappable
-alternative to the multiprocessing backend for benchmarking and comparison.
+Rasterization runs on ``num_workers`` daemon threads inside the parent process.
+PyMuPDF ``fitz.Document`` objects are not thread-safe to share, so each worker
+thread lazily opens its own ``fitz.Document`` from the filepath, mirroring how
+each ``mp`` child owns an independent copy. PyMuPDF re-acquires the GIL in
+bursts during image decode/scaling, so long scans can still stall the GTK main
+thread (see RESEARCH.md 1.16). Kept as a swappable alternative to the
+multiprocessing backend for benchmarking and comparison.
 
 The public API mirrors ``renderer.RenderWorker`` (the ``mp`` backend):
   queue_render_job / queue_crop_job / queue_portal_job /
@@ -38,7 +39,7 @@ class RenderWorkerMT:
     """
     Background rendering thread coordinator.
 
-    Uses a priority queue to process:
+    Uses a priority queue shared by all worker threads to process:
       Priority 0: Visible canvas pages
       Priority 1: Canvas pages ±1
       Priority 2: Canvas pages ±2 / portal previews
@@ -46,15 +47,21 @@ class RenderWorkerMT:
       Priority 4: Crop analysis scans
     """
 
-    def __init__(self):
+    def __init__(self, num_workers: int = 2):
         self.queue = queue.PriorityQueue()
         self.counter = 0
         self.lock = threading.Lock()
         self._generation = 0
         self._active_filepath = None
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        self._thread_local = threading.local()
+
+        self.num_workers = max(1, num_workers)
+        self._threads = []
+        for _ in range(self.num_workers):
+            t = threading.Thread(target=self._run, daemon=True)
+            t.start()
+            self._threads.append(t)
 
     # --- Public API (same signatures as the mp RenderWorker) ---
 
@@ -170,9 +177,20 @@ class RenderWorkerMT:
         if self._stop.is_set():
             return
         self._stop.set()
-        self._thread.join(timeout=2.0)
+        for t in self._threads:
+            t.join(timeout=2.0)
 
-    # --- Worker thread ---
+    # --- Worker threads ---
+
+    def _thread_doc(self, filepath: str) -> fitz.Document:
+        """Each worker thread opens its own fitz.Document (lazily cached per
+        filepath) because PyMuPDF documents are not safe to share across threads."""
+        cached = getattr(self._thread_local, "doc", None)
+        if cached is None or getattr(self._thread_local, "filepath", None) != filepath:
+            cached = fitz.open(filepath)
+            self._thread_local.doc = cached
+            self._thread_local.filepath = filepath
+        return cached
 
     def _run(self):
         while not self._stop.is_set():
@@ -209,7 +227,8 @@ class RenderWorkerMT:
         ) = args
         stale = self._is_stale(doc_model) or (not is_minimap and gen != self._generation)
 
-        page = doc_model.get_page(page_index)
+        doc = self._thread_doc(doc_model.filepath)
+        page = doc[page_index]
         mat = fitz.Matrix(zoom * scale_factor, zoom * scale_factor)
         start_time = time.perf_counter()
         pix = page.get_pixmap(matrix=mat, clip=crop_rect, alpha=False)
@@ -242,18 +261,21 @@ class RenderWorkerMT:
     def _do_crop(self, args):
         doc_model, crop_analyzer, page_index, settings, progress_callback, completion_callback = args
 
-        page = doc_model.get_page(page_index)
+        doc = self._thread_doc(doc_model.filepath)
+        page = doc[page_index]
         scale = crop_analyzer.ANALYSIS_SCALE
         pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         bbox = crop_analyzer.analyze_pixmap(pix.width, pix.height, pix.n, pix.samples, scale=scale)
 
         if self._is_stale(doc_model):
             return
-        crop_analyzer.raw_bboxes[page_index] = bbox
-        crop_analyzer.scanned[page_index] = True
+        with self.lock:
+            crop_analyzer.raw_bboxes[page_index] = bbox
+            crop_analyzer.scanned[page_index] = True
+            all_scanned = all(crop_analyzer.scanned)
         if progress_callback:
             GLib.idle_add(progress_callback, page_index)
-        if all(crop_analyzer.scanned):
+        if all_scanned:
             crop_analyzer.compute_crop_rects(settings)
             if completion_callback:
                 GLib.idle_add(completion_callback)
@@ -261,7 +283,8 @@ class RenderWorkerMT:
     def _do_portal(self, args):
         doc_model, page_index, target_y, target_w, target_h, scale_factor, target_cache, completion_callback = args
 
-        page = doc_model.get_page(page_index)
+        doc = self._thread_doc(doc_model.filepath)
+        page = doc[page_index]
         page_rect = page.rect
         matrix_x = target_w / page_rect.width if page_rect.width > 0 else 1.0
         matrix_y = matrix_x  # Enforce uniform 1:1 aspect ratio scaling

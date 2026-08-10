@@ -31,6 +31,7 @@ class PDFViewerApplication(Adw.Application):
         self.follow_link: int | None = None
         self.debug: bool = False
         self.render_mode: str = "mp"
+        self.render_workers: int = 2
 
     def do_activate(self):
         from .core.installation import get_installation_mode_info
@@ -50,6 +51,7 @@ class PDFViewerApplication(Adw.Application):
             follow_link=follow_link,
             debug_mode=debug_mode,
             render_mode=self.render_mode,
+            render_workers=self.render_workers,
         )
         win.present()
 
@@ -107,7 +109,13 @@ def main():
         "--render-mode",
         choices=["mt", "mp"],
         default="mp",
-        help="Rasterization backend: 'mp' = multiprocessing child process (default), 'mt' = multithreaded",
+        help="Rasterization backend: 'mp' = multiprocessing child processes (default), 'mt' = multithreaded",
+    )
+    parser.add_argument(
+        "--render-workers",
+        type=int,
+        default=2,
+        help="Number of parallel rasterization workers (default: 2)",
     )
     parser.add_argument("--headless", action="store_true", help="Run inside a virtual display using xvfb-run if available")
 
@@ -127,6 +135,7 @@ def main():
     app.follow_link = args.follow_link
     app.debug = args.debug
     app.render_mode = args.render_mode
+    app.render_workers = args.render_workers
 
     sys.exit(app.run([sys.argv[0]]))
 

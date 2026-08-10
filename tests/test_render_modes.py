@@ -1,5 +1,6 @@
 import time
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -68,3 +69,63 @@ def test_mt_renders_page_texture():
     assert texture.channels == 3
     assert texture.width > 0 and texture.height > 0
     assert texture.byte_size == texture.width * texture.height * texture.channels
+
+
+def _render_all_pages(mode: str, num_workers: int, page_count: int):
+    """Queues a render job per page and waits for all callbacks to fire."""
+    doc = DocumentModel(str(SAMPLE_PDF))
+    cache = RenderCache(page_count * 2)
+    worker = create_render_worker(mode, num_workers=num_workers)
+    worker.set_document(str(SAMPLE_PDF))
+
+    done = {"count": 0}
+
+    def redraw():
+        done["count"] += 1
+
+    for i in range(page_count):
+        worker.queue_render_job(0, doc, i, 1.0, 1, None, False, cache, redraw)
+
+    ctx = GLib.MainContext.default()
+    deadline = time.perf_counter() + 30.0
+    while done["count"] < page_count and time.perf_counter() < deadline:
+        ctx.iteration(False)
+
+    worker.shutdown()
+    doc.close()
+    return done["count"], cache
+
+
+@pytest.mark.parametrize("num_workers", [2, 4])
+def test_mp_parallel_renders_all_pages(num_workers):
+    if not SAMPLE_PDF.exists():
+        pytest.skip("sample PDF not available")
+    doc = DocumentModel(str(SAMPLE_PDF))
+    page_count = min(doc.page_count, 6)
+    doc.close()
+
+    count, cache = _render_all_pages("mp", num_workers, page_count)
+    assert count == page_count, f"{count}/{page_count} render callbacks fired"
+    for i in range(page_count):
+        assert isinstance(cache.get(i, 1.0, 1, None), PageTexture)
+
+
+@pytest.mark.parametrize("num_workers", [2, 4])
+def test_mt_parallel_renders_all_pages(num_workers):
+    if not SAMPLE_PDF.exists():
+        pytest.skip("sample PDF not available")
+    doc = DocumentModel(str(SAMPLE_PDF))
+    page_count = min(doc.page_count, 6)
+    doc.close()
+
+    count, cache = _render_all_pages("mt", num_workers, page_count)
+    assert count == page_count, f"{count}/{page_count} render callbacks fired"
+    for i in range(page_count):
+        assert isinstance(cache.get(i, 1.0, 1, None), PageTexture)
+
+
+def test_render_worker_spawns_requested_children():
+    worker = cast(RenderWorker, create_render_worker("mp", num_workers=3))
+    assert len(worker._children) == 3
+    assert all(c.is_alive() for c in worker._children)
+    worker.shutdown()

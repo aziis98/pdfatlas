@@ -29,11 +29,14 @@ class RenderWorker:
     """
     Background rendering coordinator.
 
-    All PyMuPDF rasterization runs in a dedicated child process (see
+    All PyMuPDF rasterization runs in dedicated child processes (see
     ``render_child``), so GIL bursts during image decode can never block the UI
-    thread. The parent keeps a priority queue, a dispatcher thread that forwards
-    jobs to the child, and a pump thread that rebuilds cairo surfaces from the
-    raw pixels returned by the child and stores them in the existing caches.
+    thread. A pool of ``num_workers`` children shares one ``(jobs, results)``
+    queue pair and work-steals page renders, parallelizing rasterization across
+    CPU cores. The parent keeps a priority queue, a dispatcher thread that
+    forwards jobs to the shared child input queue, and a pump thread that
+    rebuilds cairo surfaces from the raw pixels returned by any child and stores
+    them in the existing caches.
 
     The public API (``queue_render_job``, ``queue_crop_job``,
     ``queue_portal_job``, ``clear_canvas_render_jobs``) is unchanged so canvas,
@@ -47,7 +50,7 @@ class RenderWorker:
       Priority 4: Crop analysis scans
     """
 
-    def __init__(self):
+    def __init__(self, num_workers: int = 2):
         self.queue = queue.PriorityQueue()
         self.counter = 0
         self.lock = threading.Lock()
@@ -58,12 +61,12 @@ class RenderWorker:
         self._pending_lock = threading.Lock()
         self._stop = threading.Event()
 
+        self.num_workers = max(1, num_workers)
         self._mp_ctx = multiprocessing.get_context("spawn")
         self._jobs_q = self._mp_ctx.Queue(maxsize=8)
         self._results_q = self._mp_ctx.Queue(maxsize=2)
-        self._child = None
-        self._accepting = True
-        self._spawn_child()
+        self._children: list = []
+        self._spawn_all()
 
         self._dispatch_thread = threading.Thread(target=self._dispatch_loop, daemon=True)
         self._pump_thread = threading.Thread(target=self._pump_loop, daemon=True)
@@ -234,20 +237,23 @@ class RenderWorker:
             pass
 
     def shutdown(self):
-        """Stops the dispatcher/pump threads and terminates the child process."""
+        """Stops the dispatcher/pump threads and terminates the child processes."""
         if self._stop.is_set():
             return
         self._stop.set()
-        try:
-            self._jobs_q.put("shutdown", timeout=1.0)
-        except Exception:
-            pass
+        for _ in range(self.num_workers):
+            try:
+                self._jobs_q.put("shutdown", timeout=1.0)
+            except Exception:
+                pass
         self._dispatch_thread.join(timeout=1.0)
         self._pump_thread.join(timeout=1.0)
-        if self._child is not None and self._child.is_alive():
-            self._child.join(timeout=2.0)
-        if self._child is not None and self._child.is_alive():
-            self._child.terminate()
+        for child in self._children:
+            if child.is_alive():
+                child.join(timeout=2.0)
+        for child in self._children:
+            if child.is_alive():
+                child.terminate()
         try:
             self._jobs_q.close()
             self._results_q.close()
@@ -256,21 +262,29 @@ class RenderWorker:
 
     # --- Child process lifecycle ---
 
+    def _spawn_all(self):
+        self._children = []
+        for _ in range(self.num_workers):
+            self._spawn_child()
+
     def _spawn_child(self):
-        self._child = self._mp_ctx.Process(
+        child = self._mp_ctx.Process(
             target=child_main, args=(self._jobs_q, self._results_q), daemon=True
         )
-        self._child.start()
+        child.start()
+        self._children.append(child)
 
     def _respawn_child(self, reason: str):
         if self._stop.is_set():
             return
         with self.lock:
-            self._accepting = False
             self._respawn_count += 1
             if self._respawn_count > 3:
-                print(f"[RenderWorker] child process keeps dying ({reason}); giving up")
+                print(f"[RenderWorker] child processes keep dying ({reason}); giving up")
                 return
+            for child in self._children:
+                if child.is_alive():
+                    child.terminate()
             try:
                 self._jobs_q.close()
                 self._results_q.close()
@@ -278,14 +292,13 @@ class RenderWorker:
                 pass
             self._jobs_q = self._mp_ctx.Queue(maxsize=8)
             self._results_q = self._mp_ctx.Queue(maxsize=2)
-            self._spawn_child()
-            self._accepting = True
+            self._spawn_all()
             if self._active_filepath:
                 try:
                     self._jobs_q.put({"op": "open", "filepath": self._active_filepath})
                 except Exception:
                     pass
-        print(f"[RenderWorker] respawned child process ({reason})")
+        print(f"[RenderWorker] respawned child processes ({reason})")
 
     # --- Parent threads ---
 
@@ -341,16 +354,9 @@ class RenderWorker:
                 self.queue.task_done()
                 continue
 
-            with self.lock:
-                accepting = self._accepting
-                jobs_q = self._jobs_q
-            if not accepting:
-                with self._pending_lock:
-                    self._pending.pop(seq, None)
-                self._abandon(entry)
-                self.queue.task_done()
-                continue
             try:
+                with self.lock:
+                    jobs_q = self._jobs_q
                 jobs_q.put(req, timeout=1.0)
             except Exception:
                 with self._pending_lock:
@@ -488,7 +494,11 @@ class RenderWorker:
         self._abandon(entry)
 
     def _check_child_alive(self):
-        if self._stop.is_set() or self._child is None or self._child.is_alive():
+        if self._stop.is_set():
+            return
+        with self.lock:
+            children = list(self._children)
+        if all(c.is_alive() for c in children):
             return
         with self._pending_lock:
             dead = list(self._pending.values())
@@ -498,21 +508,21 @@ class RenderWorker:
         self._respawn_child("unexpected death")
 
 
-def create_render_worker(mode: str):
+def create_render_worker(mode: str, num_workers: int = 2):
     """Instantiate a background render backend.
 
     ``mode`` selects the rasterization backend:
-      - ``"mp"``: multiprocessing — rasterization runs in a dedicated spawn
-        child process (``render_child.py``) so PyMuPDF's GIL bursts can never
-        stall the UI thread. This is the default and recommended backend.
-      - ``"mt"``: multithreaded — a single daemon thread calls PyMuPDF
-        directly against the shared ``DocumentModel``. Kept for benchmarking
-        and comparison; see RESEARCH.md 1.16.
+      - ``"mp"``: multiprocessing — rasterization runs in a pool of ``num_workers``
+        spawn child processes (``render_child.py``) so PyMuPDF's GIL bursts can
+        never stall the UI thread. This is the default and recommended backend.
+      - ``"mt"``: multithreaded — ``num_workers`` daemon threads each own their
+        own ``fitz.Document`` and rasterize pages in parallel. Kept for
+        benchmarking and comparison; see RESEARCH.md 1.16.
     """
     if mode == "mp":
-        return RenderWorker()
+        return RenderWorker(num_workers=num_workers)
     if mode == "mt":
         from .renderer_mt import RenderWorkerMT
 
-        return RenderWorkerMT()
+        return RenderWorkerMT(num_workers=num_workers)
     raise ValueError(f"Unknown render mode: {mode!r} (expected 'mt' or 'mp')")
