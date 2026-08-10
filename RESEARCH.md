@@ -185,6 +185,20 @@ This document records durable technical findings, architectural decisions, mathe
 - **Framebuffer gotchas:** GTK 4's `Gtk.GLArea` does **not** always use framebuffer 0 as its draw target. Capture `glGetIntegerv(GL_FRAMEBUFFER_BINDING)` at the start of rendering and restore to it after unbinding the layer to avoid `GL_INVALID_FRAMEBUFFER_OPERATION` (1286). A vertical flip uniform (`u_flip_v`) is used during compositing to correct OpenGL bottom-left FBO texture origin mapping.
 - **Character-level rects clip:** highlights are stored as one bounding box per character (`get_selection_rects`), so rounding each individually produced a "pill" per glyph whose corners notched into the neighbours. `merge_highlight_runs` in [`pdfatlas/core/layout.py`](pdfatlas/core/layout.py) groups rects sharing a text line (`HL_LINE_TOLERANCE = 4`) and horizontally close (`HL_GAP_TOLERANCE = 8`) into one run before padding/rounding, so rounded corners only appear at the ends of each highlighted line.
 
+### 1.21. Embedded WebKit GTK4 Markdown & Math Renderer Component
+- **Finding:** Editable notes require rendering Markdown and LaTeX math equations ($\dots$) cleanly inside GTK4 / Libadwaita windows without main-thread UI hitching or compositor conflicts.
+- **Environment Requirement:** `WEBKIT_DISABLE_COMPOSITING_MODE=1` MUST be set at process launch (`os.environ`) before initializing GTK or WebKit (`gi.require_version("WebKit", "6.0")`) to prevent hardware accelerated compositor conflicts under GTK4 GLArea / OpenGL contexts.
+- **Centered Libadwaita Tabs:** `Adw.HeaderBar` title widget uses `Adw.ViewSwitcher` paired with `Adw.ViewStack`. The prototype component [`scripts/markdown_renderer.py`](scripts/markdown_renderer.py) provides three tabs:
+  1. **Source** (`document-edit-symbolic`): Monospace code editor (`Gtk.TextView` sharing `Gtk.TextBuffer`).
+  2. **Rendered** (`view-reveal-symbolic`): Single `WebKit.WebView` preview with `Marked.js` and `KaTeX` math rendering.
+  3. **Side by Side** (`view-dual-symbolic`): Horizontal `Gtk.Paned` containing a synchronized monospace editor on the left and a second `WebKit.WebView` on the right.
+- **GTK4 `Gtk.Paned` Layout Gotchas:**
+  - In GTK4, `set_shrink_start_child(True)` and `set_shrink_end_child(True)` MUST be enabled on `Gtk.Paned`. Setting `shrink_start_child(False)` locks the left editor child to 100% window width and collapses the webview child to 1px.
+  - Setting position before layout allocation defaults `Gtk.Paned` handle to 99.5% width. A repeating 50ms `GLib.timeout_add` sets `split_paned.set_position(total_w // 2)` once size allocation > 10px, dividing the split view into equal 50% panes.
+- **Window Sizing & User Resizing:**
+  - Switching to *Side by Side* doubles the window width if `target_w <= monitor_width` and the window is not maximized.
+  - Programmatically resizing mapped GTK4 windows requires calling `win.set_size_request(target_w, target_h)` directly so the GTK window manager updates the mapped window geometry without layout snapping.
+
 
 
 ---
