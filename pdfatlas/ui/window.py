@@ -345,6 +345,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.vadjustment = self.canvas.vadjustment
         self.hadjustment = self.canvas.hadjustment
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
+        self.hadjustment.connect("value-changed", self._on_horizontal_scroll_changed)
 
         self._setup_canvas_gestures()
 
@@ -704,16 +705,20 @@ class MainWindow(Adw.ApplicationWindow):
         self.entry.set_placeholder_text("Search document...")
         self.db_service.load_highlights(self._on_highlights_loaded)
 
-        # Restore saved zoom & scroll_y state from .db if no CLI state was specified
+        # Restore saved zoom & scroll_x/scroll_y state from .db if no CLI state was specified
         if not self.initial_state and conn is not None:
             saved_state = load_doc_state(conn)
             if "zoom" in saved_state:
                 self.set_zoom_level(saved_state["zoom"])
-            if "scroll_y" in saved_state:
-                scroll_y = saved_state["scroll_y"]
+            if "scroll_x" in saved_state or "scroll_y" in saved_state:
+                scroll_x = saved_state.get("scroll_x", 0.0)
+                scroll_y = saved_state.get("scroll_y", 0.0)
 
                 def apply_saved_scroll():
-                    self.vadjustment.set_value(scroll_y)
+                    if "scroll_x" in saved_state:
+                        self.hadjustment.set_value(scroll_x)
+                    if "scroll_y" in saved_state:
+                        self.vadjustment.set_value(scroll_y)
 
                 GLib.idle_add(apply_saved_scroll)
 
@@ -859,7 +864,11 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "db_service") and self.db_service:
             zoom = getattr(self, "zoom", 1.0)
             scroll_y = self.vadjustment.get_value() if hasattr(self, "vadjustment") else 0.0
-            self.db_service.save_state(zoom, scroll_y)
+            scroll_x = self.hadjustment.get_value() if hasattr(self, "hadjustment") else 0.0
+            self.db_service.save_state(zoom, scroll_y, scroll_x)
+
+    def _on_horizontal_scroll_changed(self, adj):
+        self._schedule_state_save()
 
 
     def _open_file_dialog(self):

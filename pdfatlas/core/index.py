@@ -181,8 +181,8 @@ def ensure_state_table(conn: sqlite3.Connection):
     conn.commit()
 
 
-def save_doc_state(conn: sqlite3.Connection, zoom: float, scroll_y: float):
-    """Save document view state (zoom, scroll_y) to the database."""
+def save_doc_state(conn: sqlite3.Connection, zoom: float, scroll_y: float, scroll_x: float):
+    """Save document view state (zoom, scroll_x, scroll_y) to the database."""
     try:
         ensure_state_table(conn)
         conn.execute(
@@ -192,6 +192,10 @@ def save_doc_state(conn: sqlite3.Connection, zoom: float, scroll_y: float):
         conn.execute(
             "INSERT INTO doc_state (key, value) VALUES ('scroll_y', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (str(scroll_y),),
+        )
+        conn.execute(
+            "INSERT INTO doc_state (key, value) VALUES ('scroll_x', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(scroll_x),),
         )
         conn.commit()
     except Exception as e:
@@ -362,13 +366,13 @@ class DatabaseService:
 
         GLib.idle_add(on_results, results, search_id)
 
-    def save_state(self, zoom: float, scroll_y: float):
-        """Save document view state (zoom, scroll_y) on the DB thread."""
-        self._executor.submit(self._bg_save_state, zoom, scroll_y)
+    def save_state(self, zoom: float, scroll_y: float, scroll_x: float):
+        """Save document view state (zoom, scroll_x, scroll_y) on the DB thread."""
+        self._executor.submit(self._bg_save_state, zoom, scroll_y, scroll_x)
 
-    def _bg_save_state(self, zoom: float, scroll_y: float):
+    def _bg_save_state(self, zoom: float, scroll_y: float, scroll_x: float):
         if self._conn:
-            save_doc_state(self._conn, zoom, scroll_y)
+            save_doc_state(self._conn, zoom, scroll_y, scroll_x)
 
     def save_highlight(
         self,
