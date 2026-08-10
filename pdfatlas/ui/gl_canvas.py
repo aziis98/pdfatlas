@@ -111,13 +111,13 @@ class GLCanvas(Gtk.GLArea):
         box_w = max(viewport_w, max((dw for _, dw, _, _ in canvas.page_layout), default=0.0))
         for i in range(page_count):
             y_offset, dw, dh, crop_rect = canvas.page_layout[i]
-            page_y0 = float(round(y_offset))
+            page_y0 = y_offset
             page_y1 = page_y0 + dh
 
             if page_y1 < y_min or page_y0 > y_max:
                 continue
 
-            x_offset = float(round((box_w - dw) / 2.0))
+            x_offset = (box_w - dw) / 2.0
 
             r.white_card(x_offset, page_y0, dw, dh)
 

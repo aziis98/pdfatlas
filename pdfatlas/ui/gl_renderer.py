@@ -119,7 +119,7 @@ class QuadRenderer:
 
         gl.glUseProgram(self.program)
         gl.glUniform2f(self.u_resolution, float(viewport_w), float(viewport_h))
-        gl.glUniform2f(self.u_offset, float(round(offset_x)), float(round(offset_y)))
+        gl.glUniform2f(self.u_offset, float(offset_x), float(offset_y))
         gl.glUniform1f(self.u_flip_v, 0.0)
 
         gl.glEnable(gl.GL_BLEND)
