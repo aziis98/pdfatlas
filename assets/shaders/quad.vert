@@ -3,6 +3,7 @@ layout (location = 0) in vec2 aPos;
 layout (location = 1) in vec2 aTexCoord;
 
 out vec2 TexCoord;
+out vec2 TexCoord2;
 
 uniform vec2 u_resolution;
 uniform vec2 u_offset;
@@ -18,4 +19,9 @@ void main() {
 
     gl_Position = vec4(ndc_pos, 0.0, 1.0);
     TexCoord = vec2(aTexCoord.x, mix(aTexCoord.y, 1.0 - aTexCoord.y, u_flip_v));
+
+    // FBO2 viewport UV: position in viewport logical px, normalized, y-flipped
+    // (FBO textures are bottom-up). Used by u_is_placeholder == 6 only.
+    vec2 vp_uv = pixel_pos / u_resolution;
+    TexCoord2 = vec2(vp_uv.x, 1.0 - vp_uv.y);
 }

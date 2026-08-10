@@ -106,6 +106,7 @@ class GLCanvas(Gtk.GLArea):
         r.begin(viewport_w, viewport_h, x_min, y_min, gl_scale)
         keep_surfaces = set()
         hl_screen_groups: list[tuple[tuple[float, float, float, float], list[tuple[float, float, float, float]]]] = []
+        page_tex_ids: dict[int, int] = {}
 
         page_count = len(canvas.page_layout)
         box_w = max(viewport_w, max((dw for _, dw, _, _ in canvas.page_layout), default=0.0))
@@ -150,6 +151,7 @@ class GLCanvas(Gtk.GLArea):
                                 tex_id = prev_id
                                 used_fallback = True
                 if tex_id is not None:
+                    page_tex_ids[i] = tex_id
                     r.textured(tex_id, x_offset, page_y0, dw, dh)
                     if not used_fallback:
                         self._last_uploaded[page_key] = surface
@@ -444,7 +446,10 @@ class GLCanvas(Gtk.GLArea):
                 for hx, hy, hw, hh in char_rects:
                     r.fill_round_rect(hx, hy, hw, hh, hcolor, hl_radius)
                 self._hl_layer.composite_highlight_to_layer2(r, viewport_w, viewport_h)
-            self._hl_layer.composite_to_page(r, viewport_w, viewport_h, gl_scale)
+            for i, tex_id in page_tex_ids.items():
+                y_off, dw, dh, _ = canvas.page_layout[i]
+                self._hl_layer.composite_page_to_screen(
+                    r, tex_id, (box_w - dw) / 2.0, y_off, dw, dh, viewport_w, viewport_h, gl_scale)
 
         r.end()
         gl.glUseProgram(0)

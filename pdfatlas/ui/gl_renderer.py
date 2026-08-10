@@ -15,6 +15,7 @@ class QuadRenderer:
         self.u_offset = -1
         self.u_page_pos = -1
         self.u_page_size = -1
+        self.u_texture_hl = -1
         self.u_is_placeholder = -1
         self.u_color = -1
         self.u_radius = -1
@@ -65,6 +66,7 @@ class QuadRenderer:
         self.u_offset = gl.glGetUniformLocation(self.program, "u_offset")
         self.u_page_pos = gl.glGetUniformLocation(self.program, "u_page_pos")
         self.u_page_size = gl.glGetUniformLocation(self.program, "u_page_size")
+        self.u_texture_hl = gl.glGetUniformLocation(self.program, "u_texture_hl")
         self.u_is_placeholder = gl.glGetUniformLocation(self.program, "u_is_placeholder")
         self.u_color = gl.glGetUniformLocation(self.program, "u_color")
         self.u_radius = gl.glGetUniformLocation(self.program, "u_radius")
@@ -120,6 +122,7 @@ class QuadRenderer:
         gl.glUseProgram(self.program)
         gl.glUniform2f(self.u_resolution, float(viewport_w), float(viewport_h))
         gl.glUniform2f(self.u_offset, float(offset_x), float(offset_y))
+        gl.glUniform1i(self.u_texture_hl, 1)   # u_texture stays on default unit 0
         gl.glUniform1f(self.u_flip_v, 0.0)
 
         gl.glEnable(gl.GL_BLEND)
@@ -182,7 +185,10 @@ class CompositingLayer:
     Pass 1: Character boxes for each highlight are drawn into FBO 1 at opacity 1.0.
     Pass 2: Highlights in FBO 1 are composited into FBO 2 at alpha 0.5, converting
             transparent background pixels to white (1,1,1,1).
-    Pass 3: FBO 2 texture is multiply-composited over the page frame on default_fbo.
+    Pass 3: For each visible page quad, the FBO 2 highlight layer is multiply-
+            composited over the page on default_fbo. The multiply color is applied
+            only where the page texel is grayscale (chroma selector); colored page
+            texels pass through unchanged.
     """
 
     def __init__(self):
@@ -253,19 +259,24 @@ class CompositingLayer:
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
         gl.glUniform1f(renderer.u_flip_v, 0.0)
 
-    def composite_to_page(self, renderer: QuadRenderer, viewport_w: float, viewport_h: float, gl_scale: int) -> None:
+    def composite_page_to_screen(self, renderer: QuadRenderer, page_tex_id: int,
+                                 x: float, y: float, w: float, h: float,
+                                 viewport_w: int, viewport_h: int, gl_scale: int) -> None:
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._default_fbo)
         gl.glViewport(0, 0, int(viewport_w * gl_scale), int(viewport_h * gl_scale))
 
+        gl.glActiveTexture(gl.GL_TEXTURE0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, page_tex_id)
+        gl.glActiveTexture(gl.GL_TEXTURE1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture2)
-        gl.glUniform1i(renderer.u_is_placeholder, 5)
-        gl.glUniform1f(renderer.u_flip_v, 1.0)
-        gl.glUniform2f(renderer.u_page_pos, renderer._offset_x, renderer._offset_y)
-        gl.glUniform2f(renderer.u_page_size, float(viewport_w), float(viewport_h))
+        gl.glUniform1i(renderer.u_is_placeholder, 6)
+        gl.glUniform1f(renderer.u_flip_v, 0.0)   # page texture is top-down (like r.textured)
+        gl.glUniform2f(renderer.u_page_pos, float(x), float(y))
+        gl.glUniform2f(renderer.u_page_size, float(w), float(h))
         gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
-        gl.glUniform1f(renderer.u_flip_v, 0.0)
+        gl.glActiveTexture(gl.GL_TEXTURE0)   # restore unit 0 so r.end() unbinds the right texture
 
     def cleanup(self) -> None:
         if self.texture1:
