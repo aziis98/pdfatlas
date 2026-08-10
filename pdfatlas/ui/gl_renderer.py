@@ -249,7 +249,7 @@ class CompositingLayer:
         gl.glUniform1f(renderer.u_flip_v, 1.0)
         gl.glUniform2f(renderer.u_page_pos, renderer._offset_x, renderer._offset_y)
         gl.glUniform2f(renderer.u_page_size, float(viewport_w), float(viewport_h))
-        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
+        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_COLOR)
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
         gl.glUniform1f(renderer.u_flip_v, 0.0)
 
