@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "pygobject>=3.56.3",
+#     "pygobject-stubs>=2.17.0",
+# ]
+# ///
 """
 markdown_renderer.py — Markdown Editor & Renderer Prototype Component for PDF Atlas.
 
 Features:
   - Disables WebKit compositing mode (WEBKIT_DISABLE_COMPOSITING_MODE=1) at launch.
-  - Centered "Source" and "Rendered" tabs in the Adw.HeaderBar.
+  - Centered "Source", "Rendered", and "Side by Side" tabs in the Adw.HeaderBar.
+  - Open File (Ctrl+O) and Save File (Ctrl+S) buttons in top-left HeaderBar.
   - Monospace code editor in the "Source" tab.
   - WebKit.WebView preview in the "Rendered" tab with Marked.js & KaTeX math rendering.
-  - Live preview updates with GTK dark/light theme support.
+  - Live preview updates at 32ms with GTK dark/light theme support.
+  - CLI argparse with optional file positional arg and --lorem-ipsum showcase flag.
 
 Usage:
   uv run scripts/markdown_renderer.py
-  uv run scripts/markdown_renderer.py [sample.md]
+  uv run scripts/markdown_renderer.py --lorem-ipsum
+  uv run scripts/markdown_renderer.py note.md
 """
 
+import argparse
 import os
 import sys
 
@@ -34,7 +45,7 @@ Welcome to the **PDF Atlas** Markdown note component prototype.
 ## Features
 - **Monospace Editor**: Write raw Markdown source with word wrapping.
 - **Live Preview**: Render Markdown and KaTeX math equations in real-time.
-- **Libadwaita Header Tabs**: Easily switch between *Source* and *Rendered* views.
+- **Libadwaita Header Tabs**: Easily switch between *Source*, *Rendered*, and *Side by Side* views.
 
 ## Math Equations
 Inline math: $E = mc^2$ or $\\nabla \\cdot \\mathbf{B} = 0$.
@@ -53,6 +64,53 @@ def calculate_area(radius: float) -> float:
 - [x] WebKit GTK4 integration
 - [x] Centered Adw.HeaderBar switcher
 - [x] Dark / Light theme support
+- [x] Open / Save file dialogs
+"""
+
+LOREM_IPSUM_SHOWCASE = """# Lorem Ipsum & Markdown Showcase
+
+> *"Neque porro quisquam est qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit..."*
+
+Welcome to the **Lorem Ipsum Showcase** demonstrating live Markdown formatting and LaTeX mathematical equations in PDF Atlas.
+
+## 1. Mathematical Physics & Calculus
+Inline equation: $f(x) = \\int_{-\\infty}^{x} \\frac{1}{\\sqrt{2\\pi}\\sigma} e^{-\\frac{(t-\\mu)^2}{2\\sigma^2}} dt$
+
+Display equation (Schrödinger Equation):
+$$i\\hbar\\frac{\\partial}{\\partial t}\\Psi(\\mathbf{r},t) = \\left[ -\\frac{\\hbar^2}{2m}\\nabla^2 + V(\\mathbf{r},t) \\right]\\Psi(\\mathbf{r},t)$$
+
+Maxwell's Equations in Differential Form:
+$$\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}, \\quad \\nabla \\cdot \\mathbf{B} = 0$$
+
+## 2. Formatting & Lists
+- **Bold Typography**, *Italicized Emphasis*, `Monospace Code Identifiers`
+- [x] High-performance WebKit GTK4 renderer
+- [x] Live KaTeX LaTeX equation parsing
+- [x] Split side-by-side synchronized editing
+- [x] Monitor-aware window scaling
+
+## 3. Code Implementation
+```python
+def fibonacci(n: int) -> list[int]:
+    \"\"\"Generate Fibonacci sequence up to n terms.\"\"\"
+    a, b = 0, 1
+    result: list[int] = []
+    for _ in range(n):
+        result.append(a)
+        a, b = b, a + b
+    return result
+
+# Print first 10 terms
+print(fibonacci(10))
+```
+
+## 4. Benchmark Performance Matrix
+
+| Component | Library | Update Latency | Feature Support |
+| :--- | :--- | :--- | :--- |
+| **Parser** | Marked.js | < 5 ms | GFM, Tables, Tasks |
+| **Math Engine** | KaTeX | < 15 ms | TeX Math, Symbols |
+| **Split Container** | Gtk.Paned | 60 FPS | Double-pane 50/50 |
 """
 
 HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
@@ -65,7 +123,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
   <!-- Marked.js for Markdown parsing -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <!-- KaTeX for LaTeX Math rendering -->
+  <!-- KaTeX for TeX Math rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
@@ -74,84 +132,46 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     :root {
       color-scheme: light dark;
       --bg-color: #ffffff;
-      --text-color: #24292f;
+      --text-color: #24292e;
       --code-bg: #f6f8fa;
-      --border-color: #d0d7de;
-      --link-color: #0969da;
-      --blockquote-color: #57606a;
+      --border-color: #e1e4e8;
+      --link-color: #0366d6;
     }
+
     @media (prefers-color-scheme: dark) {
       :root {
         --bg-color: #1e1e1e;
-        --text-color: #e6edf3;
-        --code-bg: #2d333b;
-        --border-color: #444c56;
-        --link-color: #2f81f7;
-        --blockquote-color: #768390;
+        --text-color: #d4d4d4;
+        --code-bg: #2d2d2d;
+        --border-color: #3c3c3c;
+        --link-color: #58a6ff;
       }
     }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 0;
-      padding: 24px 28px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
       background-color: var(--bg-color);
       color: var(--text-color);
-      line-height: 1.6;
-      font-size: 15px;
+      padding: 24px 32px;
+      margin: 0;
       word-wrap: break-word;
     }
+
     h1, h2, h3, h4, h5, h6 {
-      margin-top: 20px;
-      margin-bottom: 12px;
+      margin-top: 24px;
+      margin-bottom: 16px;
       font-weight: 600;
       line-height: 1.25;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 0.3em;
     }
-    h1 { font-size: 1.8em; border-bottom: 1px solid var(--border-color); padding-bottom: 0.3em; }
-    h2 { font-size: 1.4em; border-bottom: 1px solid var(--border-color); padding-bottom: 0.3em; }
-    h3 { font-size: 1.2em; }
-    p { margin-top: 0; margin-bottom: 16px; }
-    code {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 85%;
-      background-color: var(--code-bg);
-      padding: 0.2em 0.4em;
-      border-radius: 6px;
-    }
-    pre {
-      background-color: var(--code-bg);
-      padding: 16px;
-      overflow: auto;
-      border-radius: 8px;
-      line-height: 1.45;
-    }
-    pre code {
-      background-color: transparent;
-      padding: 0;
-      font-size: 13px;
-    }
-    blockquote {
-      margin: 0 0 16px 0;
-      padding: 0 1em;
-      color: var(--blockquote-color);
-      border-left: 0.25em solid var(--border-color);
-    }
-    ul, ol {
-      padding-left: 2em;
-      margin-top: 0;
-      margin-bottom: 16px;
-    }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin-bottom: 16px;
-    }
-    table th, table td {
-      padding: 6px 13px;
-      border: 1px solid var(--border-color);
-    }
-    table tr:nth-child(2n) {
-      background-color: var(--code-bg);
-    }
+
+    h1 { font-size: 2em; }
+    h2 { font-size: 1.5em; }
+    h3 { font-size: 1.25em; }
+
     a {
       color: var(--link-color);
       text-decoration: none;
@@ -159,37 +179,80 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     a:hover {
       text-decoration: underline;
     }
-    hr {
-      height: 0.25em;
-      padding: 0;
-      margin: 24px 0;
-      background-color: var(--border-color);
-      border: 0;
+
+    code {
+      font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 85%;
+      background-color: var(--code-bg);
+      padding: 0.2em 0.4em;
+      border-radius: 6px;
     }
+
+    pre {
+      background-color: var(--code-bg);
+      padding: 16px;
+      overflow: auto;
+      font-size: 85%;
+      line-height: 1.45;
+      border-radius: 6px;
+    }
+
+    pre code {
+      background-color: transparent;
+      padding: 0;
+    }
+
+    blockquote {
+      margin: 0;
+      padding: 0 1em;
+      color: #6a737d;
+      border-left: 0.25em solid var(--border-color);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 16px;
+      margin-bottom: 16px;
+    }
+
+    table th, table td {
+      padding: 6px 13px;
+      border: 1px solid var(--border-color);
+    }
+
+    table tr:nth-child(2n) {
+      background-color: var(--code-bg);
+    }
+
     .katex-display {
-      margin: 1em 0;
       overflow-x: auto;
       overflow-y: hidden;
+      padding: 8px 0;
     }
   </style>
 </head>
 <body>
   <div id="content"></div>
+
   <script>
     function updateContent(markdownText) {
-      const target = document.getElementById("content");
-      if (typeof marked !== "undefined" && typeof marked.parse === "function") {
-        target.innerHTML = marked.parse(markdownText);
+      const container = document.getElementById("content");
+      if (!container) return;
+
+      if (typeof marked !== 'undefined') {
+        container.innerHTML = marked.parse(markdownText);
       } else {
-        target.innerText = markdownText;
+        container.textContent = markdownText;
       }
-      if (typeof renderMathInElement === "function") {
-        renderMathInElement(target, {
+
+      if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(container, {
           delimiters: [
-            {left: "$$", right: "$$", display: true},
-            {left: "$", right: "$", display: false},
-            {left: "\\(", right: "\\)", display: false},
-            {left: "\\[", right: "\\]", display: true}
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false},
+            {left: '\\\\(', right: '\\\\)', display: false},
+            {left: '\\\\[', right: '\\\\]', display: true}
           ],
           throwOnError: false
         });
@@ -202,20 +265,32 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
 
 class MarkdownRendererComponent(Gtk.Box):
-    """Reusable GTK4 / Libadwaita Markdown component with centered tabs."""
+    """Reusable GTK4 / Libadwaita Markdown component with centered tabs & file I/O."""
 
     __gtype_name__ = "MarkdownRendererComponent"
 
-    def __init__(self, initial_text: str = ""):
+    def __init__(self, initial_text: str = "", initial_filepath: str | None = None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._update_timer_id: int = 0
         self._web_single_loaded: bool = False
         self._web_split_loaded: bool = False
         self._is_doubled: bool = False
         self._saved_single_width: int = 0
+        self._current_filepath: str | None = initial_filepath
 
         # HeaderBar with centered ViewSwitcher
         self.header_bar = Adw.HeaderBar()
+
+        # Top-Left Open and Save File Buttons
+        self.open_btn = Gtk.Button(icon_name="document-open-symbolic")
+        self.open_btn.set_tooltip_text("Open File (Ctrl+O)")
+        self.open_btn.connect("clicked", self._on_open_clicked)
+        self.header_bar.pack_start(self.open_btn)
+
+        self.save_btn = Gtk.Button(icon_name="document-save-symbolic")
+        self.save_btn.set_tooltip_text("Save File (Ctrl+S)")
+        self.save_btn.connect("clicked", self._on_save_clicked)
+        self.header_bar.pack_start(self.save_btn)
 
         self.view_switcher = Adw.ViewSwitcher()
         self.view_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
@@ -307,6 +382,100 @@ class MarkdownRendererComponent(Gtk.Box):
         # Expand view stack inside box
         self.view_stack.set_vexpand(True)
         self.view_stack.set_hexpand(True)
+
+        # Setup Ctrl+O and Ctrl+S Keyboard Shortcuts
+        shortcut_controller = Gtk.ShortcutController()
+        shortcut_controller.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.parse_string("<Control>o"),
+                Gtk.CallbackAction.new(self._shortcut_open_cb),
+            )
+        )
+        shortcut_controller.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.parse_string("<Control>s"),
+                Gtk.CallbackAction.new(self._shortcut_save_cb),
+            )
+        )
+        self.add_controller(shortcut_controller)
+
+    def _shortcut_open_cb(self, _widget: Gtk.Widget, _args: GLib.Variant | None) -> bool:
+        self._on_open_clicked(self.open_btn)
+        return True
+
+    def _shortcut_save_cb(self, _widget: Gtk.Widget, _args: GLib.Variant | None) -> bool:
+        self._on_save_clicked(self.save_btn)
+        return True
+
+    def _on_open_clicked(self, _btn: Gtk.Button) -> None:
+        """Open a file dialog to choose and load a Markdown file."""
+        dialog = Gtk.FileDialog(title="Open Markdown File")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+
+        md_filter = Gtk.FileFilter()
+        md_filter.set_name("Markdown Files (*.md, *.markdown)")
+        md_filter.add_pattern("*.md")
+        md_filter.add_pattern("*.markdown")
+        filters.append(md_filter)
+
+        all_filter = Gtk.FileFilter()
+        all_filter.set_name("All Files (*)")
+        all_filter.add_pattern("*")
+        filters.append(all_filter)
+
+        dialog.set_filters(filters)
+        root_win = self.get_root()
+        win = root_win if isinstance(root_win, Gtk.Window) else None
+        dialog.open(win, None, self._on_open_dialog_finish)
+
+    def _on_open_dialog_finish(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        """Process chosen file from open dialog."""
+        try:
+            gfile = dialog.open_finish(result)
+            if gfile:
+                path = gfile.get_path()
+                if path:
+                    with open(path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    self._current_filepath = path
+                    self.buffer.set_text(content)
+                    print(f"Loaded note from {path}")
+        except Exception as err:
+            print(f"Open dialog cancelled or failed: {err}")
+
+    def _on_save_clicked(self, _btn: Gtk.Button) -> None:
+        """Save file directly or launch save dialog if untitled."""
+        if self._current_filepath:
+            self.save_to_path(self._current_filepath)
+        else:
+            self._save_as_dialog()
+
+    def _save_as_dialog(self) -> None:
+        """Launch Save As file dialog."""
+        dialog = Gtk.FileDialog(title="Save Markdown File")
+        dialog.set_initial_name("note.md")
+        root_win = self.get_root()
+        win = root_win if isinstance(root_win, Gtk.Window) else None
+        dialog.save(win, None, self._on_save_dialog_finish)
+
+    def _on_save_dialog_finish(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        """Process chosen path from save dialog."""
+        try:
+            gfile = dialog.save_finish(result)
+            if gfile:
+                path = gfile.get_path()
+                if path:
+                    self.save_to_path(path)
+        except Exception as err:
+            print(f"Save dialog cancelled or failed: {err}")
+
+    def save_to_path(self, path: str) -> None:
+        """Write current text buffer to specified file path."""
+        text = self.get_text()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        self._current_filepath = path
+        print(f"Saved note to {path}")
 
     def _on_buffer_changed(self, _buffer: Gtk.TextBuffer) -> None:
         """Debounce text buffer updates at 32ms for live rendering."""
@@ -412,35 +581,65 @@ class MarkdownRendererComponent(Gtk.Box):
 class MarkdownRendererWindow(Adw.ApplicationWindow):
     """Standalone window housing the MarkdownRendererComponent."""
 
-    def __init__(self, app: Adw.Application, filepath: str | None = None):
+    def __init__(
+        self,
+        app: Adw.Application,
+        filepath: str | None = None,
+        initial_text: str | None = None,
+    ):
         super().__init__(application=app, title="Markdown Note Editor")
         self.set_default_size(700, 500)
 
-        initial_text = DEFAULT_MARKDOWN_SAMPLE
-        if filepath and os.path.exists(filepath):
+        content_text = initial_text
+        if content_text is None and filepath and os.path.exists(filepath):
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
-                    initial_text = f.read()
+                    content_text = f.read()
             except Exception as err:
                 print(f"Error reading file {filepath}: {err}", file=sys.stderr)
 
-        self.component = MarkdownRendererComponent(initial_text=initial_text)
+        self.component = MarkdownRendererComponent(
+            initial_text=content_text or "",
+            initial_filepath=filepath,
+        )
         self.set_content(self.component)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Markdown Editor & Live Renderer Prototype Component for PDF Atlas."
+    )
+    parser.add_argument(
+        "file",
+        nargs="?",
+        default=None,
+        help="Optional path to a Markdown file to open.",
+    )
+    parser.add_argument(
+        "--lorem-ipsum",
+        action="store_true",
+        help="Populate editor with rich Lorem Ipsum showcase text (math, tables, lists).",
+    )
+    args = parser.parse_args(sys.argv[1:])
+
     app = Adw.Application(
         application_id="org.pdfatlas.MarkdownRendererPrototype",
-        flags=Gio.ApplicationFlags.FLAGS_NONE,
+        flags=Gio.ApplicationFlags.HANDLES_OPEN,
     )
 
     def on_activate(application: Adw.Application) -> None:
-        filepath = sys.argv[1] if len(sys.argv) > 1 else None
-        win = MarkdownRendererWindow(application, filepath=filepath)
+        initial_text = None
+        filepath = None
+        if args.lorem_ipsum:
+            initial_text = LOREM_IPSUM_SHOWCASE
+        elif args.file and os.path.exists(args.file):
+            filepath = args.file
+
+        win = MarkdownRendererWindow(application, filepath=filepath, initial_text=initial_text)
         win.present()
 
     app.connect("activate", on_activate)
-    app.run(sys.argv)
+    app.run([])
 
 
 if __name__ == "__main__":
