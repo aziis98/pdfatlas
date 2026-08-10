@@ -178,3 +178,39 @@ def anchor_after(
     lower = 0.0
     max_y = max(lower, scroll_upper - scroll_page_size)
     return max(lower, min(target_val, max_y))
+
+
+#: Vertical tolerance (PDF points) for grouping highlight rects onto the same line.
+HL_LINE_TOLERANCE = 4.0
+#: Horizontal gap (PDF points) below which adjacent rects on the same line merge.
+HL_GAP_TOLERANCE = 8.0
+
+
+def merge_highlight_runs(rects: list[tuple[float, float, float, float]]) -> list[tuple[float, float, float, float]]:
+    """Merge contiguous per-character highlight rects into line runs.
+
+    Highlights are stored as one bounding box per character, so drawing each
+    with its own rounded rect produces a "pill" per glyph whose corners clip
+    into the neighbouring glyphs. Grouping rects that share a text line and are
+    horizontally close into a single run keeps rounded corners only at the
+    outer ends of the highlighted line.
+    """
+    if not rects:
+        return []
+    runs: list[tuple[float, float, float, float]] = []
+    cur_x0, cur_y0, cur_x1, cur_y1 = rects[0]
+    for rx0, ry0, rx1, ry1 in rects[1:]:
+        cur_center_y = (cur_y0 + cur_y1) / 2.0
+        center_y = (ry0 + ry1) / 2.0
+        same_line = abs(center_y - cur_center_y) < HL_LINE_TOLERANCE
+        continuous = rx0 <= cur_x1 + HL_GAP_TOLERANCE
+        if same_line and continuous:
+            cur_x0 = min(cur_x0, rx0)
+            cur_y0 = min(cur_y0, ry0)
+            cur_x1 = max(cur_x1, rx1)
+            cur_y1 = max(cur_y1, ry1)
+        else:
+            runs.append((cur_x0, cur_y0, cur_x1, cur_y1))
+            cur_x0, cur_y0, cur_x1, cur_y1 = rx0, ry0, rx1, ry1
+    runs.append((cur_x0, cur_y0, cur_x1, cur_y1))
+    return runs

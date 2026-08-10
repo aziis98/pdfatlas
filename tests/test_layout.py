@@ -3,6 +3,7 @@ from pdfatlas.core.layout import (
     anchor_before,
     layout_scale,
     link_screen_rect,
+    merge_highlight_runs,
     page_at_point,
     page_rect_at,
     pdf_rect_to_screen,
@@ -207,3 +208,43 @@ def test_zoom_level_clamped_by_settings_limits():
     win.zoom = 0.5
     nav.set_zoom_level(1.25)
     assert win.zoom == 1.25
+
+
+def test_merge_highlight_runs_empty():
+    assert merge_highlight_runs([]) == []
+
+
+def test_merge_highlight_runs_contiguous_line():
+    # Per-character boxes on the same line merge into a single run.
+    rects = [
+        (10.0, 20.0, 30.0, 40.0),
+        (31.0, 20.0, 52.0, 40.0),
+        (53.0, 20.0, 74.0, 40.0),
+    ]
+    assert merge_highlight_runs(rects) == [(10.0, 20.0, 74.0, 40.0)]
+
+
+def test_merge_highlight_runs_word_gap():
+    # A space between words still merges (gap under tolerance), keeping the
+    # highlight continuous instead of a series of per-glyph pills.
+    rects = [
+        (10.0, 20.0, 30.0, 40.0),
+        (36.0, 20.0, 56.0, 40.0),
+    ]
+    assert merge_highlight_runs(rects) == [(10.0, 20.0, 56.0, 40.0)]
+
+
+def test_merge_highlight_runs_keeps_separate_lines():
+    # Rects on different lines must not merge.
+    line1 = [(10.0, 20.0, 30.0, 40.0), (31.0, 20.0, 52.0, 40.0)]
+    line2 = [(10.0, 60.0, 30.0, 80.0), (31.0, 60.0, 52.0, 80.0)]
+    assert merge_highlight_runs(line1 + line2) == [
+        (10.0, 20.0, 52.0, 40.0),
+        (10.0, 60.0, 52.0, 80.0),
+    ]
+
+
+def test_merge_highlight_runs_far_apart_stays_split():
+    # A large horizontal gap (distinct selection spans) is kept separate.
+    rects = [(10.0, 20.0, 30.0, 40.0), (200.0, 20.0, 230.0, 40.0)]
+    assert merge_highlight_runs(rects) == rects

@@ -8,7 +8,7 @@ from gi.repository import GLib, Gtk
 from OpenGL import GL as gl
 
 from .cairo_utils import hex_to_rgba
-from .gl_renderer import QuadRenderer
+from .gl_renderer import CompositingLayer, QuadRenderer
 from .texture_uploader import TextureUploader
 
 if TYPE_CHECKING:
@@ -28,6 +28,7 @@ class GLCanvas(Gtk.GLArea):
         self._renderer: QuadRenderer | None = None
         self._uploader: TextureUploader | None = None
         self._last_uploaded: dict[tuple, "PageTexture"] = {}
+        self._hl_layer: CompositingLayer | None = None
 
         self.set_required_version(3, 3)
         self.set_has_depth_buffer(False)
@@ -55,6 +56,9 @@ class GLCanvas(Gtk.GLArea):
 
     def _on_unrealize(self, area):
         self.make_current()
+        if self._hl_layer:
+            self._hl_layer.cleanup()
+            self._hl_layer = None
         if self._uploader:
             self._uploader.shutdown()
             self._uploader = None
@@ -91,6 +95,8 @@ class GLCanvas(Gtk.GLArea):
         page_size = canvas.vadjustment.get_page_size()
         y_max = y_min + page_size
 
+        default_fbo = gl.glGetIntegerv(gl.GL_FRAMEBUFFER_BINDING)
+
         scale_factor = canvas.get_scale_factor()
         viewport_w = self.get_allocated_width()
         viewport_h = self.get_allocated_height()
@@ -99,6 +105,7 @@ class GLCanvas(Gtk.GLArea):
 
         r.begin(viewport_w, viewport_h, x_min, y_min, gl_scale)
         keep_surfaces = set()
+        hl_screen_groups: list[tuple[tuple[float, float, float, float], list[tuple[float, float, float, float]]]] = []
 
         page_count = len(canvas.page_layout)
         box_w = max(viewport_w, max((dw for _, dw, _, _ in canvas.page_layout), default=0.0))
@@ -165,16 +172,19 @@ class GLCanvas(Gtk.GLArea):
                 if hasattr(canvas, "highlights") and canvas.highlights:
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
                     co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                    pad = 2.0
                     for hl in canvas.highlights:
                         if hl.get("page") == i:
-                            color_hex = hl.get("color", "#FFEE55")
-                            cr_val, cg_val, cb_val, ca_val = hex_to_rgba(color_hex, 1.0)
+                            cr_val, cg_val, cb_val, ca_val = hex_to_rgba(hl.get("color", "#FFEE55"), 1.0)
+                            rects_list: list[tuple[float, float, float, float]] = []
                             for rx0, ry0, rx1, ry1 in hl.get("rects", []):
-                                hx0 = x_offset + (rx0 - co_x) * scale
-                                hy0 = page_y0 + (ry0 + 2.0 - co_y) * scale
-                                hw = (rx1 - rx0) * scale
-                                hh = (ry1 - ry0) * scale
-                                r.fill_rect(hx0, hy0, hw, hh, (cr_val, cg_val, cb_val, ca_val), mode="multiply")
+                                hx0 = x_offset + (rx0 - pad - co_x) * scale
+                                hy0 = page_y0 + (ry0 - pad - co_y) * scale
+                                hw = (rx1 - rx0 + 2.0 * pad) * scale
+                                hh = (ry1 - ry0 + 2.0 * pad) * scale
+                                rects_list.append((hx0, hy0, hw, hh))
+                            if rects_list:
+                                hl_screen_groups.append(((cr_val, cg_val, cb_val, ca_val), rects_list))
 
                 if canvas.text_selection is not None:
                     sel_rects = canvas.text_selection.get_selection_rects(i)
@@ -422,6 +432,19 @@ class GLCanvas(Gtk.GLArea):
             self._uploader.evict_not_active(keep_surfaces)
             uploaded = set(self._uploader.textures())
             self._last_uploaded = {k: v for k, v in self._last_uploaded.items() if v in uploaded}
+
+        if hl_screen_groups:
+            if self._hl_layer is None:
+                self._hl_layer = CompositingLayer()
+            self._hl_layer.ensure_size(viewport_w, viewport_h, gl_scale)
+            self._hl_layer.prepare_compositing_layer(default_fbo)
+            hl_radius = 2.0 * scale
+            for hcolor, char_rects in hl_screen_groups:
+                self._hl_layer.bind_accumulation(default_fbo)
+                for hx, hy, hw, hh in char_rects:
+                    r.fill_round_rect(hx, hy, hw, hh, hcolor, hl_radius)
+                self._hl_layer.composite_highlight_to_layer2(r, viewport_w, viewport_h)
+            self._hl_layer.composite_to_page(r, viewport_w, viewport_h, gl_scale)
 
         r.end()
         gl.glUseProgram(0)
