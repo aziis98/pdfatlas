@@ -221,6 +221,7 @@ class NotesLayer:
     def __init__(self, win):
         self.win = win
         self._icons: dict[int, Gtk.Button] = {}
+        self._icon_menus: dict[int, Gtk.Popover] = {}
         self._editors: dict[int, "NoteEditorWindow"] = {}
         self._preview_webview: WebKit.WebView | None = None
         self._preview_popover: Gtk.Popover | None = None
@@ -325,6 +326,13 @@ class NotesLayer:
         motion.connect("leave", lambda ctrl: self._schedule_preview_hide())
         btn.add_controller(motion)
         btn.connect("clicked", lambda b: self._on_icon_clicked(note))
+        # Right-click: the note's own context menu (Delete note) instead of the
+        # page-level "Add note here" popover (the canvas gesture defers to
+        # NotesLayer.icon_at()).
+        rc = Gtk.GestureClick.new()
+        rc.set_button(3)
+        rc.connect("pressed", self._on_icon_context_press, note)
+        btn.add_controller(rc)
         self.win.canvas.containers[note["page"]].add_overlay(btn)
         self._icons[nid] = btn
         self._position_icon(note, btn)
@@ -342,6 +350,10 @@ class NotesLayer:
         btn.set_margin_top(int(my))
 
     def _remove_icon(self, nid: int):
+        menu = self._icon_menus.pop(nid, None)
+        if menu is not None:
+            menu.popdown()
+            menu.unparent()
         btn = self._icons.pop(nid, None)
         if btn is not None:
             btn.unparent()
@@ -363,6 +375,56 @@ class NotesLayer:
     def _on_icon_clicked(self, note: dict):
         self.hide_preview()
         self.open_editor(note)
+
+    def _on_icon_context_press(self, gesture, n_press, x, y, note: dict):
+        """Classic right-click context menu on a note icon: Delete note."""
+        nid = note["id"]
+        popover = self._icon_menus.get(nid)
+        if popover is None:
+            btn = self._icons.get(nid)
+            if btn is None:
+                return
+            popover = Gtk.Popover()
+            popover.set_parent(btn)
+            delete_btn = Gtk.Button(label="Delete note")
+            delete_btn.connect("clicked", lambda b: self._on_icon_menu_delete(nid))
+            popover.set_child(delete_btn)
+            self._icon_menus[nid] = popover
+        # Gdk.Rectangle() Boxed ctor args are silently ignored — set fields.
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        popover.set_pointing_to(rect)
+        popover.popup()
+
+    def _on_icon_menu_delete(self, nid: int):
+        popover = self._icon_menus.get(nid)
+        if popover is not None:
+            popover.popdown()
+        note = next((n for n in self.win.notes if n.get("id") == nid), None)
+        if note is not None:
+            self.delete_note(note)
+
+    def icon_at(self, x: float, y: float) -> bool:
+        """True if (x, y) — viewport coordinates, as delivered by the canvas
+        right-click gesture — is over a note icon. The canvas uses this to
+        defer its "Add note here" popover to the icon's own context menu."""
+        for nid, btn in self._icons.items():
+            if not btn.get_mapped():
+                continue
+            note = next((n for n in self.win.notes if n.get("id") == nid), None)
+            if note is None:
+                continue
+            rect = self._preview_anchor_rect(note)
+            if rect is None:
+                continue
+            cx = rect.x + rect.width / 2.0
+            cy = rect.y + rect.height / 2.0
+            if abs(x - cx) <= 20.0 and abs(y - cy) <= 20.0:
+                return True
+        return False
 
     def open_editor(self, note: dict):
         nid = note["id"]

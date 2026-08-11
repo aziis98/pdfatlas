@@ -251,6 +251,9 @@ class PDFCanvas(Gtk.Overlay):
 
     def _on_context_press(self, gesture, n_press, x, y):
         """Show the context menu at a page point on right-click."""
+        notes_layer = getattr(self, "notes_layer", None)
+        if notes_layer is not None and notes_layer.icon_at(x, y):
+            return  # over a note icon — its own Delete-note menu handles it
         page_idx = self._hit_test_page(x, y)
         if page_idx is None:
             return
