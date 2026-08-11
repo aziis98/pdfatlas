@@ -76,7 +76,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     body.compact {
       font-size: 13px;
       line-height: 1.45;
-      padding: 8px;
+      padding: 0 8px;
     }
     body.compact h1, body.compact h2, body.compact h3,
     body.compact h4, body.compact h5, body.compact h6 {
