@@ -296,6 +296,62 @@ def load_highlights_from_db(conn: sqlite3.Connection) -> list[dict]:
         return []
 
 
+def ensure_notes_table(conn: sqlite3.Connection) -> None:
+    """Ensure the notes table exists in the database."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            page        INTEGER NOT NULL,
+            x           REAL NOT NULL,
+            y           REAL NOT NULL,
+            markdown    TEXT NOT NULL,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_page ON notes(page);")
+    conn.commit()
+
+
+def save_note_to_db(conn: sqlite3.Connection, page: int, x: float, y: float, markdown: str) -> int:
+    """Save a new note to the database and return its row ID."""
+    ensure_notes_table(conn)
+    cursor = conn.execute(
+        "INSERT INTO notes (page, x, y, markdown) VALUES (?, ?, ?, ?)",
+        (page, x, y, markdown),
+    )
+    conn.commit()
+    return cursor.lastrowid or 0
+
+
+def update_note_to_db(conn: sqlite3.Connection, note_id: int, markdown: str) -> None:
+    """Update the markdown content of a note."""
+    ensure_notes_table(conn)
+    conn.execute("UPDATE notes SET markdown = ? WHERE id = ?", (markdown, note_id))
+    conn.commit()
+
+
+def delete_note_from_db(conn: sqlite3.Connection, note_id: int) -> None:
+    """Delete a note by ID from the database."""
+    ensure_notes_table(conn)
+    conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    conn.commit()
+
+
+def load_notes_from_db(conn: sqlite3.Connection) -> list[dict]:
+    """Load all notes for the document from the database."""
+    try:
+        ensure_notes_table(conn)
+        rows = conn.execute(
+            "SELECT id, page, x, y, markdown FROM notes ORDER BY page, id"
+        ).fetchall()
+        return [
+            {"id": row[0], "page": row[1], "x": float(row[2]), "y": float(row[3]), "markdown": row[4]}
+            for row in rows
+        ]
+    except Exception as e:
+        print(f"[Index] Error loading notes: {e}", flush=True)
+        return []
+
+
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 import gi
@@ -417,6 +473,55 @@ class DatabaseService:
         if self._conn:
             hl = load_highlights_from_db(self._conn)
             GLib.idle_add(on_complete, hl)
+        else:
+            GLib.idle_add(on_complete, [])
+
+    def save_note(
+        self,
+        page: int,
+        x: float,
+        y: float,
+        markdown: str,
+        on_complete: Callable[[int], None] | None = None,
+    ):
+        self._executor.submit(self._bg_save_note, page, x, y, markdown, on_complete)
+
+    def _bg_save_note(
+        self,
+        page: int,
+        x: float,
+        y: float,
+        markdown: str,
+        on_complete: Callable[[int], None] | None = None,
+    ):
+        if self._conn:
+            nid = save_note_to_db(self._conn, page, x, y, markdown)
+            if on_complete:
+                GLib.idle_add(on_complete, nid)
+
+    def update_note(self, note_id: int, markdown: str):
+        """Update a note's markdown content (fire-and-forget)."""
+        self._executor.submit(self._bg_update_note, note_id, markdown)
+
+    def _bg_update_note(self, note_id: int, markdown: str):
+        if self._conn:
+            update_note_to_db(self._conn, note_id, markdown)
+
+    def delete_note(self, note_id: int):
+        """Delete a note by ID (fire-and-forget)."""
+        self._executor.submit(self._bg_delete_note, note_id)
+
+    def _bg_delete_note(self, note_id: int):
+        if self._conn:
+            delete_note_from_db(self._conn, note_id)
+
+    def load_notes(self, on_complete: Callable[[list[dict]], None]):
+        self._executor.submit(self._bg_load_notes, on_complete)
+
+    def _bg_load_notes(self, on_complete: Callable[[list[dict]], None]):
+        if self._conn:
+            notes = load_notes_from_db(self._conn)
+            GLib.idle_add(on_complete, notes)
         else:
             GLib.idle_add(on_complete, [])
 

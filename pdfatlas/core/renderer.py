@@ -1,6 +1,8 @@
 import multiprocessing
+import os
 import queue
 import sys
+import tempfile
 import threading
 import time
 
@@ -66,6 +68,13 @@ class RenderWorker:
         self._jobs_q = self._mp_ctx.Queue(maxsize=8)
         self._results_q = self._mp_ctx.Queue(maxsize=2)
         self._children: list = []
+        # Spawn children re-import ``main.py`` as ``__mp_main__``; the child
+        # redirects its stderr there into this log so crashes during the
+        # spawn/import chain are diagnosable instead of "unexpected death".
+        os.environ.setdefault(
+            "PDFATLAS_CHILD_STDERR_LOG",
+            os.path.join(tempfile.gettempdir(), "pdfatlas-render-children.log"),
+        )
         self._spawn_all()
 
         self._dispatch_thread = threading.Thread(target=self._dispatch_loop, daemon=True)
@@ -280,7 +289,12 @@ class RenderWorker:
         with self.lock:
             self._respawn_count += 1
             if self._respawn_count > 3:
-                print(f"[RenderWorker] child processes keep dying ({reason}); giving up")
+                log_hint = os.environ.get("PDFATLAS_CHILD_STDERR_LOG", "")
+                print(
+                    f"[RenderWorker] child processes keep dying ({reason}); giving up"
+                    + (f". Child stderr log: {log_hint}" if log_hint else ""),
+                    flush=True,
+                )
                 return
             for child in self._children:
                 if child.is_alive():

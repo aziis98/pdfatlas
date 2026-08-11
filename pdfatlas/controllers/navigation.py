@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from ..core.layout import layout_scale
+
 if TYPE_CHECKING:
     from ..ui.window import MainWindow
 
@@ -74,6 +76,29 @@ class NavigationController:
         self.win.vadjustment.set_value(target_y)
         self.win.page_input.set_text(str(page_index + 1))
         self.win.canvas.queue_draw_overlays("jump-to-annotation")
+
+    def jump_to_note(self, note: dict):
+        """
+        Navigates the viewport to center vertically around the specified note.
+        """
+        if not self.win.doc_model or not self.win.canvas.page_layout:
+            return
+
+        page_index = note.get("page", 0)
+        if not (0 <= page_index < len(self.win.canvas.page_layout)):
+            return
+
+        y_offset, _dw, _dh, crop_rect = self.win.canvas.page_layout[page_index]
+        scale = layout_scale(self.win.zoom, self.win.canvas.dpi_scale_factor)
+        crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+        viewport_h = self.win.vadjustment.get_page_size()
+
+        target_y = y_offset + (note["y"] - crop_off_y) * scale - (viewport_h / 2.0)
+        target_y = max(0.0, min(target_y, max(0.0, self.win.vadjustment.get_upper() - viewport_h)))
+
+        self.win.vadjustment.set_value(target_y)
+        self.win.page_input.set_text(str(page_index + 1))
+        self.win.canvas.queue_draw_overlays("jump-to-note")
 
     def set_zoom_level(
         self,

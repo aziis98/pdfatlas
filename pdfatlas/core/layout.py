@@ -93,6 +93,21 @@ def pdf_rect_to_screen(
     return (sx, sy, sw, sh)
 
 
+def pdf_point_to_page_margin(
+    scale: float, pdf_x: float, pdf_y: float, crop_rect: Any,
+    page_w: float, page_h: float, icon_size: float = 24.0,
+) -> tuple[float, float]:
+    """Margin (mx, my) from the top-left of a page container that places an
+    icon centered on a PDF point, clamped inside the page box."""
+    crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
+    crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+    mx = (pdf_x - crop_off_x) * scale - icon_size / 2.0
+    my = (pdf_y - crop_off_y) * scale - icon_size / 2.0
+    mx = max(0.0, min(mx, max(0.0, page_w - icon_size)))
+    my = max(0.0, min(my, max(0.0, page_h - icon_size)))
+    return (mx, my)
+
+
 def page_at_point(
     layout: list[tuple],
     page_gap: float,

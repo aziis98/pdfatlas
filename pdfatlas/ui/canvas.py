@@ -44,15 +44,16 @@ def highlight_at_point(
     return None
 
 
-class PageContainer(Gtk.Box):
+class PageContainer(Gtk.Overlay):
     """
     A lightweight layout container representing a single PDF page.
     Maintains a fixed size and position within the vertical canvas so the
     OpenGL background layer can align page textures to the GTK scroll layout.
+    Note icons are added as overlay children positioned via margins.
     """
 
     def __init__(self, page_index):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        super().__init__()
         self.page_index = page_index
         self.y_offset = 0.0
         self.w = 0.0
@@ -113,6 +114,8 @@ class PDFCanvas(Gtk.Overlay):
         # Interactive link state
         self.hovered_link: tuple[int, dict] | None = None
         self.on_link_clicked: Any = None
+        self.on_note_create: Any = None
+        self.notes_layer: Any = None
         self.on_link_hovered: Any = None
         self.on_page_hovered: Any = None
         self.on_selection_changed: Callable[[bool], None] | None = None
@@ -124,9 +127,23 @@ class PDFCanvas(Gtk.Overlay):
         self._is_word_drag_mode: bool = False
         self.win: Any = None
 
+        # Reusable right-click context menu anchored to the canvas. Coordinates
+        # from the scrolled-window gesture are in canvas space (the scrolled
+        # window fills the overlay). The note callback is stored at press time.
+        # Created lazily on first right-click: parenting a popover before the
+        # canvas is realized can leave its grab state wedged (GTK4).
+        self._context_note_callback: Any = None
+        self._context_popover: Gtk.Popover | None = None
+        self._context_button: Gtk.Button | None = None
+
         # Display DPI scale settings
         self.dpi_scale_factor = 1.0
         self.screen_physical_dpi = 192.0
+
+        # Deferred visibility scan: runs until the viewport is allocated so the
+        # first page renders without requiring a scroll/zoom interaction.
+        self._visibility_scan_id: int | None = None
+        self._visibility_scan_retries = 0
 
         # Pinch-to-zoom state
         self.is_pinching = False
@@ -170,6 +187,7 @@ class PDFCanvas(Gtk.Overlay):
 
         self._setup_scroll_input_controllers()
         self._setup_link_controllers()
+        self._setup_context_menu()
 
     def set_highlights(self, highlights: list[dict]):
         self.highlights = highlights
@@ -223,6 +241,54 @@ class PDFCanvas(Gtk.Overlay):
         click_gesture.set_button(1)
         click_gesture.connect("pressed", self._on_click)
         self.add_controller(click_gesture)
+
+    def _setup_context_menu(self):
+        """Attach a right-click (button 3) context menu to the page area."""
+        gesture = Gtk.GestureClick.new()
+        gesture.set_button(3)
+        gesture.connect("pressed", self._on_context_press)
+        self.scrolled_window.add_controller(gesture)
+
+    def _on_context_press(self, gesture, n_press, x, y):
+        """Show the context menu at a page point on right-click."""
+        page_idx = self._hit_test_page(x, y)
+        if page_idx is None:
+            return
+        pt = self._screen_to_pdf_point(x, y, page_idx)
+        if pt is None:
+            return
+        # Lazy creation: the canvas is realized by the time a right-click
+        # arrives, so parenting the popover then is safe (creating it in
+        # __init__ pre-realize could wedge its modal grab).
+        if self._context_popover is None:
+            popover = Gtk.Popover()
+            popover.set_parent(self)
+            button = Gtk.Button(label="Add note here")
+            button.connect("clicked", self._on_context_clicked)
+            popover.set_child(button)
+            self._context_popover = popover
+            self._context_button = button
+        self._context_note_callback = None
+        if self.on_note_create is not None:
+            self._context_note_callback = lambda: self.on_note_create(page_idx, pt[0], pt[1])
+        # NOTE: Gdk.Rectangle() is a Boxed struct — positional ctor args are
+        # silently ignored (deprecated), leaving a (0,0,0,0) rect that anchors
+        # the popover at the parent's top-left. Set fields explicitly.
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        self._context_popover.set_pointing_to(rect)
+        self._context_popover.popup()
+
+    def _on_context_clicked(self, button):
+        popover = self._context_popover
+        if popover is not None:
+            popover.popdown()
+        cb = self._context_note_callback
+        if cb is not None:
+            cb()
 
     def _screen_to_pdf_point(self, x: float, y: float, page_index: int) -> tuple[float, float] | None:
         scale = layout_scale(self.zoom, self.dpi_scale_factor)
@@ -688,7 +754,36 @@ class PDFCanvas(Gtk.Overlay):
         if self.vadjustment:
             self.vadjustment.set_upper(current_y)
 
+        notes_layer = getattr(self, "notes_layer", None)
+        if notes_layer is not None:
+            notes_layer.on_layout_changed()
+
         self._update_visibility()
+        self._schedule_visibility_scan()
+
+    def _schedule_visibility_scan(self):
+        """Ensure a visibility scan runs once the viewport has been allocated.
+
+        ``update_layout`` typically runs before the window is realized, when the
+        vertical adjustment's page size is still 0, so the initial scan finds no
+        visible page. Without a later scroll/zoom event the first page would stay
+        unrendered until the user interacts; this polls until the viewport is
+        sized (bounded), then re-runs the scan.
+        """
+        if self._visibility_scan_id is not None:
+            return
+        self._visibility_scan_id = GLib.timeout_add(50, self._visibility_scan_timeout)
+
+    def _visibility_scan_timeout(self):
+        self._visibility_scan_id = None
+        if self.vadjustment is None or self.vadjustment.get_page_size() <= 1.0:
+            self._visibility_scan_retries += 1
+            if self._visibility_scan_retries < 200:  # ~10s ceiling; scrolling also triggers
+                self._visibility_scan_id = GLib.timeout_add(50, self._visibility_scan_timeout)
+            return GLib.SOURCE_REMOVE
+        self._visibility_scan_retries = 0
+        self._update_visibility()
+        return GLib.SOURCE_REMOVE
 
     def render_zoom(self) -> float:
         """Zoom passed to the render worker so texture resolution honors the

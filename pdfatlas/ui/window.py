@@ -31,6 +31,7 @@ from .canvas import PDFCanvas
 
 from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
+from .notes import NotesLayer
 from .services import IconThemeManager, ScreenshotService
 from .settings import SettingsWindow
 from .shortcuts import ShortcutsController
@@ -125,6 +126,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Highlights state
         self.highlights: list[dict] = []
+        self.notes: list[dict] = []
         self.active_highlight_color: str = "#FFF49C"
 
         # UI Zoom state
@@ -327,6 +329,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.link_preview_manager = LinkPreviewManager(self)
         self.canvas.on_link_hovered = self.link_preview_manager.on_link_hovered
 
+        self.notes_layer = NotesLayer(self)
+        self.canvas.on_note_create = self._on_canvas_note_create
+        self.canvas.notes_layer = self.notes_layer
+
         self.canvas.add_overlay(self.zoom_floating_box)
         self.canvas.add_overlay(self.link_preview_box)
         self.canvas.add_overlay(self.link_preview_manager.portal_card)
@@ -348,6 +354,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.hadjustment.connect("value-changed", self._on_horizontal_scroll_changed)
 
         self._setup_canvas_gestures()
+
+    def _on_canvas_note_create(self, page: int, x: float, y: float):
+        self.notes_layer.create_note(page, x, y)
 
     def _setup_canvas_gestures(self):
         motion_controller = Gtk.EventControllerMotion.new()
@@ -482,6 +491,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.set_highlights([])
             self._update_annotations_button()
 
+            self.notes = []
+            self.notes_layer.clear()
+            self._update_annotations_button()
+
             self.render_cache.clear()
             self.minimap_cache.clear()
             self.pinned.clear()
@@ -524,6 +537,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.set_document(
                 self.doc_model, self.render_cache, self.render_worker, self.crop_analyzer, self.settings
             )
+
+            self.notes_layer.prepare()
 
             self.set_title(f"PDF Viewer — {source.display_name}")
             self.filename_label.set_label(source.display_name)
@@ -643,6 +658,16 @@ class MainWindow(Adw.ApplicationWindow):
                         self.canvas.set_highlights(sample_hls)
                         self._update_annotations_button()
 
+                    if "notes" in state:
+                        sample_notes = state["notes"]
+                        for idx, n in enumerate(sample_notes):
+                            if "id" not in n:
+                                n["id"] = idx + 1
+                            if "markdown" not in n:
+                                n["markdown"] = ""
+                        self.notes = sample_notes
+                        self.notes_layer.set_notes(sample_notes)
+
                     if state.get("annotations_popover"):
                         def open_popover():
                             if self.annotations_btn.get_visible():
@@ -704,6 +729,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.entry.set_sensitive(True)
         self.entry.set_placeholder_text("Search document...")
         self.db_service.load_highlights(self._on_highlights_loaded)
+        self.db_service.load_notes(self._on_notes_loaded)
 
         # Restore saved zoom & scroll_x/scroll_y state from .db if no CLI state was specified
         if not self.initial_state and conn is not None:
@@ -754,7 +780,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.annotations_popover.set_child(popover_box)
 
     def _update_annotations_button(self):
-        count = len(self.highlights)
+        count = len(self.highlights) + len(self.notes)
         self.annotations_btn.set_visible(count > 0)
         if hasattr(self, "annotations_count_label"):
             self.annotations_count_label.set_text(f"Annotations ({count})")
@@ -770,6 +796,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         sorted_highlights = sorted(self.highlights, key=lambda h: (h.get("page", 0), h.get("char_start", 0)))
         last_page: int | None = None
+        seen_pages: set[int] = set()
         for hl in sorted_highlights:
             page_idx = hl.get("page", 0)
             if page_idx != last_page:
@@ -780,6 +807,7 @@ class MainWindow(Adw.ApplicationWindow):
                 lbl.set_halign(Gtk.Align.START)
                 hdr_box.append(lbl)
                 self.annotations_list.append(hdr_box)
+                seen_pages.add(page_idx)
                 last_page = page_idx
 
             item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
@@ -824,8 +852,65 @@ class MainWindow(Adw.ApplicationWindow):
 
             self.annotations_list.append(linked_box)
 
+        last_page = None
+        for note in sorted(self.notes, key=lambda n: n.get("page", 0)):
+            page_idx = note.get("page", 0)
+            if page_idx != last_page and page_idx not in seen_pages:
+                hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=4, margin_bottom=1)
+                lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
+                lbl.add_css_class("caption")
+                lbl.add_css_class("bold")
+                lbl.set_halign(Gtk.Align.START)
+                hdr_box.append(lbl)
+                self.annotations_list.append(hdr_box)
+                seen_pages.add(page_idx)
+            last_page = page_idx
+
+            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
+
+            # Small note icon (decorative; the row itself jumps to the note)
+            icon_btn = Gtk.Button(icon_name="mail-attachment-symbolic")
+            icon_btn.add_css_class("flat")
+            icon_btn.set_size_request(24, 24)
+            icon_btn.set_sensitive(False)
+            item_box.append(icon_btn)
+
+            # 1-line compact snippet of the first non-empty markdown line
+            md_text = note.get("markdown", "") or ""
+            first_line = next((ln.strip() for ln in md_text.splitlines() if ln.strip()), "") or "(Note)"
+            txt_lbl = label(text=first_line)
+            txt_lbl.set_single_line_mode(True)
+            txt_lbl.set_lines(1)
+            txt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            txt_lbl.set_halign(Gtk.Align.START)
+            txt_lbl.set_xalign(0.0)
+            txt_lbl.set_hexpand(True)
+            item_box.append(txt_lbl)
+
+            linked_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            linked_box.add_css_class("linked")
+            linked_box.set_hexpand(True)
+
+            main_btn = Gtk.Button()
+            main_btn.set_hexpand(True)
+            main_btn.set_child(item_box)
+            main_btn.set_tooltip_text("Go to note")
+            main_btn.connect("clicked", lambda b, n=note: self._activate_note(n))
+            linked_box.append(main_btn)
+
+            btn_delete = Gtk.Button(icon_name="user-trash-symbolic")
+            btn_delete.set_tooltip_text("Delete note")
+            btn_delete.connect("clicked", lambda b, n=note: self.notes_layer.delete_note(n))
+            linked_box.append(btn_delete)
+
+            self.annotations_list.append(linked_box)
+
     def _activate_annotation(self, hl: dict):
         self.nav_controller.jump_to_annotation(hl)
+        self.annotations_popover.popdown()
+
+    def _activate_note(self, note: dict):
+        self.nav_controller.jump_to_note(note)
         self.annotations_popover.popdown()
 
     def _delete_annotation(self, hl: dict):
@@ -849,6 +934,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.entry.set_text(query)
             self.run_search(query)
 
+    def _on_notes_loaded(self, notes: list[dict]):
+        self.notes = notes
+        self.notes_layer.set_notes(notes)
+        self._update_annotations_button()
+
     def _schedule_state_save(self):
         if hasattr(self, "_state_save_timer_id") and self._state_save_timer_id is not None:
             GLib.source_remove(self._state_save_timer_id)
@@ -868,6 +958,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.db_service.save_state(zoom, scroll_y, scroll_x)
 
     def _on_horizontal_scroll_changed(self, adj):
+        self.notes_layer.hide_preview()
         self._schedule_state_save()
 
 
@@ -1370,6 +1461,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Save state and shutdown executors and close connections cleanly
         self._save_current_doc_state()
+        self.notes_layer.close()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.render_worker.shutdown()
         if self.index_conn:
@@ -1836,6 +1928,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._on_crop_settings_updated()
 
     def _on_scroll_page_changed(self, adj):
+        self.notes_layer.hide_preview()
         self._schedule_state_save()
         if not self.doc_model or not self.canvas.page_layout:
             return
