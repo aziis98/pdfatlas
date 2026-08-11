@@ -794,11 +794,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.annotations_list.remove(child)
             child = nxt
 
-        sorted_highlights = sorted(self.highlights, key=lambda h: (h.get("page", 0), h.get("char_start", 0)))
+        # One flat list grouped by page, highlights and notes interleaved:
+        # notes use the same row layout as highlights, with the note icon in
+        # place of the color circle swatch.
+        items: list[tuple[int, int, float, dict, str]] = []
+        for hl in self.highlights:
+            items.append((hl.get("page", 0), 0, hl.get("char_start", 0), hl, "highlight"))
+        for note in self.notes:
+            items.append((note.get("page", 0), 1, note.get("y", 0.0), note, "note"))
+        items.sort(key=lambda it: (it[0], it[1], it[2]))
+
         last_page: int | None = None
-        seen_pages: set[int] = set()
-        for hl in sorted_highlights:
-            page_idx = hl.get("page", 0)
+        for page_idx, _rank, _pos, item, kind in items:
             if page_idx != last_page:
                 hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=4, margin_bottom=1)
                 lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
@@ -807,24 +814,31 @@ class MainWindow(Adw.ApplicationWindow):
                 lbl.set_halign(Gtk.Align.START)
                 hdr_box.append(lbl)
                 self.annotations_list.append(hdr_box)
-                seen_pages.add(page_idx)
                 last_page = page_idx
 
             item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
 
-            # Prominent color circle swatch (14px)
-            color_swatch = Gtk.Box()
-            color_swatch.set_size_request(14, 14)
-            color_swatch.set_valign(Gtk.Align.CENTER)
-            color_swatch.add_css_class("highlight-circle-swatch")
-            bg_color = hl.get("color", "#FFEE55")
-            provider = Gtk.CssProvider()
-            provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}")
-            color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-            item_box.append(color_swatch)
+            if kind == "highlight":
+                # Prominent color circle swatch (14px) — note rows use the
+                # icon instead, keeping the same row structure.
+                color_swatch = Gtk.Box()
+                color_swatch.set_size_request(14, 14)
+                color_swatch.set_valign(Gtk.Align.CENTER)
+                color_swatch.add_css_class("highlight-circle-swatch")
+                bg_color = item.get("color", "#FFEE55")
+                provider = Gtk.CssProvider()
+                provider.load_from_string(f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}")
+                color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                item_box.append(color_swatch)
+                txt = (item.get("text", "") or "").strip() or "(Highlight)"
+            else:
+                note_icon = Gtk.Image.new_from_icon_name("mail-attachment-symbolic")
+                note_icon.set_pixel_size(14)
+                note_icon.set_valign(Gtk.Align.CENTER)
+                item_box.append(note_icon)
+                md_text = item.get("markdown", "") or ""
+                txt = next((ln.strip() for ln in md_text.splitlines() if ln.strip()), "") or "(Note)"
 
-            # 1-line compact text snippet label
-            txt = (hl.get("text", "") or "").strip() or "(Highlight)"
             txt_lbl = label(text=txt)
             txt_lbl.set_single_line_mode(True)
             txt_lbl.set_lines(1)
@@ -841,66 +855,21 @@ class MainWindow(Adw.ApplicationWindow):
             main_btn = Gtk.Button()
             main_btn.set_hexpand(True)
             main_btn.set_child(item_box)
-            main_btn.set_tooltip_text("Go to annotation")
-            main_btn.connect("clicked", lambda b, h=hl: self._activate_annotation(h))
+            if kind == "highlight":
+                main_btn.set_tooltip_text("Go to annotation")
+                main_btn.connect("clicked", lambda b, h=item: self._activate_annotation(h))
+            else:
+                main_btn.set_tooltip_text("Go to note")
+                main_btn.connect("clicked", lambda b, n=item: self._activate_note(n))
             linked_box.append(main_btn)
 
             btn_delete = Gtk.Button(icon_name="user-trash-symbolic")
-            btn_delete.set_tooltip_text("Delete annotation")
-            btn_delete.connect("clicked", lambda b, h=hl: self._delete_annotation(h))
-            linked_box.append(btn_delete)
-
-            self.annotations_list.append(linked_box)
-
-        last_page = None
-        for note in sorted(self.notes, key=lambda n: n.get("page", 0)):
-            page_idx = note.get("page", 0)
-            if page_idx != last_page and page_idx not in seen_pages:
-                hdr_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_start=4, margin_top=4, margin_bottom=1)
-                lbl = label(text=f"PAGE {page_idx + 1}", css_class="dim-label")
-                lbl.add_css_class("caption")
-                lbl.add_css_class("bold")
-                lbl.set_halign(Gtk.Align.START)
-                hdr_box.append(lbl)
-                self.annotations_list.append(hdr_box)
-                seen_pages.add(page_idx)
-            last_page = page_idx
-
-            item_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4, margin_end=4, margin_top=2, margin_bottom=2)
-
-            # Small note icon (decorative; the row itself jumps to the note)
-            icon_btn = Gtk.Button(icon_name="mail-attachment-symbolic")
-            icon_btn.add_css_class("flat")
-            icon_btn.set_size_request(24, 24)
-            icon_btn.set_sensitive(False)
-            item_box.append(icon_btn)
-
-            # 1-line compact snippet of the first non-empty markdown line
-            md_text = note.get("markdown", "") or ""
-            first_line = next((ln.strip() for ln in md_text.splitlines() if ln.strip()), "") or "(Note)"
-            txt_lbl = label(text=first_line)
-            txt_lbl.set_single_line_mode(True)
-            txt_lbl.set_lines(1)
-            txt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            txt_lbl.set_halign(Gtk.Align.START)
-            txt_lbl.set_xalign(0.0)
-            txt_lbl.set_hexpand(True)
-            item_box.append(txt_lbl)
-
-            linked_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-            linked_box.add_css_class("linked")
-            linked_box.set_hexpand(True)
-
-            main_btn = Gtk.Button()
-            main_btn.set_hexpand(True)
-            main_btn.set_child(item_box)
-            main_btn.set_tooltip_text("Go to note")
-            main_btn.connect("clicked", lambda b, n=note: self._activate_note(n))
-            linked_box.append(main_btn)
-
-            btn_delete = Gtk.Button(icon_name="user-trash-symbolic")
-            btn_delete.set_tooltip_text("Delete note")
-            btn_delete.connect("clicked", lambda b, n=note: self.notes_layer.delete_note(n))
+            if kind == "highlight":
+                btn_delete.set_tooltip_text("Delete annotation")
+                btn_delete.connect("clicked", lambda b, h=item: self._delete_annotation(h))
+            else:
+                btn_delete.set_tooltip_text("Delete note")
+                btn_delete.connect("clicked", lambda b, n=item: self.notes_layer.delete_note(n))
             linked_box.append(btn_delete)
 
             self.annotations_list.append(linked_box)
