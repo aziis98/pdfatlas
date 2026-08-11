@@ -72,6 +72,33 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
       word-wrap: break-word;
     }
 
+    /* Compact variant for the hover preview popover: no body padding,
+       smaller type, tighter heading/block margins. */
+    body.compact {
+      font-size: 13px;
+      line-height: 1.45;
+      padding: 8px;
+    }
+    body.compact h1, body.compact h2, body.compact h3,
+    body.compact h4, body.compact h5, body.compact h6 {
+      margin-top: 10px;
+      margin-bottom: 6px;
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    body.compact p, body.compact ul, body.compact ol {
+      margin: 6px 0;
+    }
+    body.compact pre {
+      padding: 8px;
+    }
+    body.compact blockquote {
+      padding: 0 0.5em;
+    }
+    body.compact code {
+      padding: 0.1em 0.3em;
+    }
+
     h1, h2, h3, h4, h5, h6 {
       margin-top: 24px;
       margin-bottom: 16px;
@@ -176,6 +203,13 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
+# Compact variant for the hover preview popover (body class="compact" — the
+# CSS rules live in the template above next to body { … }). The editor's
+# Rendered tab keeps the full-padding template.
+HTML_PREVIEW_TEMPLATE_COMPACT = HTML_PREVIEW_TEMPLATE.replace(
+    "<body>", '<body class="compact">', 1
+)
+
 
 def _assets_base_uri() -> str:
     """Base URI (file://…) for the vendored markdown assets, trailing slash."""
@@ -204,7 +238,7 @@ class NotesLayer:
         if self._preview_webview is None:
             self._preview_webview = WebKit.WebView.new()
             self._preview_webview.connect("load-changed", self._on_preview_load_changed)
-            self._preview_webview.load_html(HTML_PREVIEW_TEMPLATE, _assets_base_uri())
+            self._preview_webview.load_html(HTML_PREVIEW_TEMPLATE_COMPACT, _assets_base_uri())
         if self._preview_loaded and self._pending_preview_md is not None:
             md = self._pending_preview_md
             self._pending_preview_md = None
@@ -389,10 +423,12 @@ class NotesLayer:
             # and widget anchoring must be expressed as a pointing rect in the
             # popover parent's (canvas) coordinates.
             self._preview_popover.set_autohide(False)  # type: ignore[attr-defined]
+            self._preview_popover.set_has_arrow(False)
+            self._preview_popover.add_css_class("note-preview-popover")
             self._preview_popover.set_parent(self.win.canvas)
-            w = max(320, min(self.win.canvas.get_width() // 3, 480))
+            w = max(220, min(self.win.canvas.get_width() // 3, 300))
             child = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            child.set_size_request(w, 320)
+            child.set_size_request(w, 180)
             webview.set_hexpand(True)
             webview.set_vexpand(True)
             child.append(webview)
