@@ -44,7 +44,6 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
   <style>
     :root {
       color-scheme: light dark;
-      --bg-color: #ffffff;
       --text-color: #24292e;
       --code-bg: #f6f8fa;
       --border-color: #e1e4e8;
@@ -53,7 +52,6 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg-color: #1e1e1e;
         --text-color: #d4d4d4;
         --code-bg: #2d2d2d;
         --border-color: #3c3c3c;
@@ -61,11 +59,12 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
       }
     }
 
+    /* No background-color here: the webview is transparent so the popover /
+       editor window's theme background shows through. */
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       font-size: 15px;
       line-height: 1.6;
-      background-color: var(--bg-color);
       color: var(--text-color);
       padding: 24px 32px;
       margin: 0;
