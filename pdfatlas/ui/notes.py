@@ -12,7 +12,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("WebKit", "6.0")
-from gi.repository import Adw, GLib, Gdk, Gtk, WebKit
+from gi.repository import Adw, Gdk, GLib, Gtk, WebKit
 
 from ..core.layout import layout_scale, pdf_point_to_page_margin
 from ..core.resources import get_assets_dir
@@ -66,7 +66,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
       font-size: 15px;
       line-height: 1.6;
       color: var(--text-color);
-      padding: 24px 32px;
+      padding: 0 16px;
       margin: 0;
       word-wrap: break-word;
     }
@@ -237,7 +237,9 @@ class NotesLayer:
         if self._preview_webview is None:
             self._preview_webview = WebKit.WebView.new()
             self._preview_webview.connect("load-changed", self._on_preview_load_changed)
-            self._preview_webview.load_html(HTML_PREVIEW_TEMPLATE_COMPACT, _assets_base_uri())
+            self._preview_webview.load_html(
+                HTML_PREVIEW_TEMPLATE_COMPACT, _assets_base_uri()
+            )
         if self._preview_loaded and self._pending_preview_md is not None:
             md = self._pending_preview_md
             self._pending_preview_md = None
@@ -333,7 +335,9 @@ class NotesLayer:
             return
         _y_offset, dw, dh, crop_rect = layout[note["page"]]
         scale = layout_scale(self.win.canvas.zoom, self.win.canvas.dpi_scale_factor)
-        mx, my = pdf_point_to_page_margin(scale, note["x"], note["y"], crop_rect, dw, dh)
+        mx, my = pdf_point_to_page_margin(
+            scale, note["x"], note["y"], crop_rect, dw, dh
+        )
         btn.set_margin_start(int(mx))
         btn.set_margin_top(int(my))
 
@@ -390,7 +394,9 @@ class NotesLayer:
         if self._hover_hide_id is not None:
             GLib.source_remove(self._hover_hide_id)
             self._hover_hide_id = None
-        self._hover_show_id = GLib.timeout_add(PREVIEW_SHOW_MS, self._on_preview_show, note)
+        self._hover_show_id = GLib.timeout_add(
+            PREVIEW_SHOW_MS, self._on_preview_show, note
+        )
 
     def _schedule_preview_hide(self):
         if self._hover_show_id is not None:
@@ -530,9 +536,13 @@ class NoteEditorWindow(Adw.Window):
         self._buffer.connect("changed", self._on_buffer_changed)
 
         self._view_stack = Adw.ViewStack()
-        source_page = self._view_stack.add_titled(self._build_source_page(), "source", "Source")
+        source_page = self._view_stack.add_titled(
+            self._build_source_page(), "source", "Source"
+        )
         source_page.set_icon_name("document-edit-symbolic")
-        rendered_page = self._view_stack.add_titled(self._build_rendered_page(), "rendered", "Rendered")
+        rendered_page = self._view_stack.add_titled(
+            self._build_rendered_page(), "rendered", "Rendered"
+        )
         rendered_page.set_icon_name("view-reveal-symbolic")
 
         switcher = Adw.ViewSwitcher()
@@ -551,7 +561,9 @@ class NoteEditorWindow(Adw.Window):
         content.append(self._view_stack)
         self.set_content(content)
 
-        self._view_stack.connect("notify::visible-child", self._on_visible_child_changed)
+        self._view_stack.connect(
+            "notify::visible-child", self._on_visible_child_changed
+        )
         self.connect("close-request", self._on_close_request)
 
     def _build_source_page(self) -> Gtk.Widget:
