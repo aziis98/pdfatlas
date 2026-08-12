@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 Generate programmatically styled README screenshots for PDF Atlas.
-Saves generated screenshots with GNOME Libadwaita window decorations
-and soft ambient drop-shadows to ./assets/screenshots/
+Saves generated screenshots with Weston floating window desktop shell,
+32px background margin, and soft ambient drop-shadows to ./assets/screenshots/
 """
 
 import argparse
 import json
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +16,7 @@ from pathlib import Path
 # Paths
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MAIN_PY = REPO_ROOT / "main.py"
+WAYLAND_SCRIPT = REPO_ROOT / "scripts" / "screenshot_wayland_app.sh"
 ATTENTION_PDF = REPO_ROOT / "assets" / "sample-files" / "attention_is_all_you_need.pdf"
 CATEGORY_PDF = REPO_ROOT / "assets" / "sample-files" / "applied_category_theory.pdf"
 OUTPUT_DIR = REPO_ROOT / "assets" / "screenshots"
@@ -23,17 +26,20 @@ TASKS = [
     ("attention_hero.png", ATTENTION_PDF, {"scroll_y": 1500}),
     ("attention_portal_search.png", ATTENTION_PDF, {"query": "attention mechanism"}),
     (
-        "attention_reader_view.png",
+        "attention_no_gaps.png",
         ATTENTION_PDF,
         {"crop": True, "page_gaps": False, "scroll_y": 1100},
     ),
-    ("attention_minimap_view.png", CATEGORY_PDF, {"minimap": True}),
+    ("category_theory_minimap_view.png", CATEGORY_PDF, {"minimap": True}),
     (
         "attention_text_selection.png",
         "1706.03762",
         {
             "zoom": 1.5,
             "scroll_y": 3950,
+            "hide_cursor": False,
+            "cursor_x": 760,
+            "cursor_y": 215,
             "selection": {
                 "page": 3,
                 "start_idx": 120,
@@ -42,12 +48,13 @@ TASKS = [
         },
     ),
     (
-        "attention_annotations_popover.png",
+        "attention_notes_annotations.png",
         ATTENTION_PDF,
         {
-            "zoom": 2.14,
-            "scroll_y": 2750,
+            "fit_width": True,
+            "scroll_y": 350,
             "annotations_popover": True,
+            "open_note_preview": 1,
             "highlights": [
                 {
                     "page": 0,
@@ -69,6 +76,15 @@ TASKS = [
                     "color": "#FFEE55",
                     "text": "M sentences and split tokens into subwords...",
                 },
+            ],
+            "notes": [
+                {
+                    "id": 1,
+                    "page": 0,
+                    "x": 60.0,
+                    "y": 500.0,
+                    "markdown": "### Architecture Summary\n- **Self-attention** mechanism replaces recurrence.\n- **Multi-Head Attention** computes parallel projections.\n- Positional Encodings: $PE_{(pos, 2i)} = \\sin(pos/10000^{2i/d})$",
+                }
             ],
         },
     ),
@@ -95,24 +111,31 @@ def generate(filters: list[str] | None = None):
             print(f"[Error] PDF not found at {pdf_target}", file=sys.stderr)
             continue
 
-        cmd = [
-            sys.executable,
-            str(MAIN_PY),
-            str(pdf_target),
-            "--screenshot",
-            str(output_path),
-        ]
+        pdf_target_str = str(pdf_target)
+        app_cmd = f"{sys.executable} {MAIN_PY} {shlex.quote(pdf_target_str)}"
 
         if state:
             serialized = json.dumps(state)
-            cmd.extend(["--state", serialized])
+            app_cmd += f" --state {shlex.quote(serialized)}"
         else:
             serialized = None
 
         state_display = serialized or "(default)"
         target_name = pdf_target.name if isinstance(pdf_target, Path) else str(pdf_target)
         print(f"\n[Generating] {filename} using {target_name} with state: {state_display}...", flush=True)
-        res = subprocess.run(cmd, cwd=str(REPO_ROOT))
+
+        env = dict(os.environ)
+        env["APP_CMD"] = app_cmd
+        env["OUTPUT_PNG"] = str(output_path)
+
+        hide_cursor = state.get("hide_cursor", True) if state else True
+        env["PDFATLAS_HIDE_CURSOR"] = "1" if hide_cursor else "0"
+        if state and "cursor_x" in state:
+            env["CURSOR_X"] = str(state["cursor_x"])
+        if state and "cursor_y" in state:
+            env["CURSOR_Y"] = str(state["cursor_y"])
+
+        res = subprocess.run(["bash", str(WAYLAND_SCRIPT)], env=env, cwd=str(REPO_ROOT))
 
         if res.returncode != 0:
             print(f"[Error] Failed to generate {filename} (exit code: {res.returncode})", file=sys.stderr)

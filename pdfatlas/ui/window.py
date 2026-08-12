@@ -32,7 +32,7 @@ from .canvas import PDFCanvas
 from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
 from .notes import NotesLayer
-from .services import IconThemeManager, ScreenshotService
+from .services import IconThemeManager
 from .settings import SettingsWindow
 from .shortcuts import ShortcutsController
 from .theme import load_window_css
@@ -83,21 +83,15 @@ class MainWindow(Adw.ApplicationWindow):
       - Click-to-navigate search portal coordinates mapping.
     """
 
-    def __init__(self, app, state=None, screenshot_path=None, follow_link=None, debug_mode=False, render_mode="mp", render_workers=2):
+    def __init__(self, app, state=None, follow_link=None, debug_mode=False, render_mode="mp", render_workers=2):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
         self.debug_mode = debug_mode
         self.set_default_size(1000, 700)
         self.initial_state = state
-        self.screenshot_path = screenshot_path
         self.follow_link = follow_link
         self._deferred_state_query = None
-
-        if self.screenshot_path:
-            if (dir_name := os.path.dirname(self.screenshot_path)):
-                os.makedirs(dir_name, exist_ok=True)
-            GLib.timeout_add(2000, self._take_programmatic_screenshot)
 
         # Core models
         self.doc_model = None
@@ -146,6 +140,8 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.crop_action.connect("activate", self._on_crop_action_activated)
         self.add_action(self.crop_action)
+
+        self.connect("realize", self._on_window_realized)
 
         settings_action = Gio.SimpleAction.new("open-settings", None)
         settings_action.connect("activate", lambda act, param: self._on_settings_btn_clicked(None))
@@ -354,6 +350,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.hadjustment.connect("value-changed", self._on_horizontal_scroll_changed)
 
         self._setup_canvas_gestures()
+
+    def _on_window_realized(self, widget):
+        hide_env = os.environ.get("PDFATLAS_HIDE_CURSOR", "1")
+        if hide_env == "1":
+            blank_cursor = Gdk.Cursor.new_from_name("none", None)
+            self.set_cursor(blank_cursor)
+            surface = self.get_surface()
+            if surface:
+                surface.set_cursor(blank_cursor)
+        elif hide_env == "0":
+            default_cursor = Gdk.Cursor.new_from_name("default", None)
+            self.set_cursor(default_cursor)
+            surface = self.get_surface()
+            if surface:
+                surface.set_cursor(default_cursor)
 
     def _on_canvas_note_create(self, page: int, x: float, y: float):
         self.notes_layer.create_note(page, x, y)
@@ -601,8 +612,10 @@ class MainWindow(Adw.ApplicationWindow):
 
                     self._on_crop_settings_updated()
 
-                    # Defer scroll_y and search query application until layout realizes
+                    # Defer scroll_y, fit_width, and search query application until layout realizes
                     def apply_deferred_state():
+                        if "fit_width" in state and state["fit_width"]:
+                            self.zoom_fit_width()
                         if "scroll_y" in state:
                             self.vadjustment.set_value(float(state["scroll_y"]))
                         if "query" in state:
@@ -671,9 +684,28 @@ class MainWindow(Adw.ApplicationWindow):
                     if state.get("annotations_popover"):
                         def open_popover():
                             if self.annotations_btn.get_visible():
+                                if os.environ.get("PDFATLAS_HIDE_CURSOR") == "1":
+                                    blank = Gdk.Cursor.new_from_name("none", None)
+                                    self.annotations_popover.set_cursor(blank)
                                 self.annotations_popover.popup()
                             return False
                         GLib.timeout_add(400, open_popover)
+
+                    if state.get("open_note_preview"):
+                        def open_note():
+                            nid = int(state["open_note_preview"])
+                            note = next((n for n in self.notes if n.get("id") == nid), self.notes[0] if self.notes else None)
+                            if note and hasattr(self, "notes_layer"):
+                                self.notes_layer.prepare()
+                                self.notes_layer._on_preview_show(note)
+                                rect = self.notes_layer._preview_anchor_rect(note)
+                                if rect:
+                                    # Window-relative coordinates (Headerbar height = 46px, icon center offset +12)
+                                    exact_x = rect.x + 12
+                                    exact_y = 46 + rect.y + 12
+                                    print(f"[PDFAtlas] NOTE_ICON_EXACT_COORDS: {exact_x},{exact_y}", flush=True)
+                            return False
+                        GLib.timeout_add(600, open_note)
 
                     # If page is specified, navigate to it after layout
                     if "page" in state:
@@ -728,8 +760,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.index_conn = conn
         self.entry.set_sensitive(True)
         self.entry.set_placeholder_text("Search document...")
-        self.db_service.load_highlights(self._on_highlights_loaded)
-        self.db_service.load_notes(self._on_notes_loaded)
+        if not self.initial_state:
+            self.db_service.load_highlights(self._on_highlights_loaded)
+            self.db_service.load_notes(self._on_notes_loaded)
+
+        if hasattr(self, "_deferred_state_query") and self._deferred_state_query:
+            query = self._deferred_state_query
+            self._deferred_state_query = None
+            self.entry.set_text(query)
+            self.run_search(query)
 
         # Restore saved zoom & scroll_x/scroll_y state from .db if no CLI state was specified
         if not self.initial_state and conn is not None:
@@ -891,6 +930,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_annotations_button()
 
     def _on_highlights_loaded(self, highlights: list[dict]):
+        if self.initial_state:
+            return
         self.highlights = highlights
         self.canvas.set_highlights(highlights)
         self.canvas.queue_draw()
@@ -904,6 +945,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.run_search(query)
 
     def _on_notes_loaded(self, notes: list[dict]):
+        if self.initial_state:
+            return
         self.notes = notes
         self.notes_layer.set_notes(notes)
         self._update_annotations_button()
@@ -1021,7 +1064,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_escape(self):
         """Clears search input or closes minimap modal and returns focus to reader view."""
         if hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible():
-            self.minimap_dialog.destroy()
+            self.minimap_dialog.close()
             self.minimap_dialog = None
             self.canvas.grab_focus()
             return True
@@ -1243,7 +1286,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.minimap_dialog = dialog
         dialog.minimap.set_current_page(active_page)
-        dialog.present()
+        dialog.present(self)
 
     def _on_minimap_page_clicked(self, page_index):
         self.jump_to_page(page_index)
@@ -1919,19 +1962,3 @@ class MainWindow(Adw.ApplicationWindow):
         page_num = current_idx + 1
         if hasattr(self, "page_input") and self.page_input and not self.page_input.has_focus():
             self.page_input.set_text(str(page_num))
-
-    def _take_programmatic_screenshot(self):
-        print(f"[MainWindow] Taking scheduled screenshot of window to: {self.screenshot_path}", flush=True)
-        if self.current_source and self.current_source.is_arxiv:
-            if not self.arxiv_mapper or not self.arxiv_mapper.is_ready:
-                print("[Screenshot] Waiting for arXiv diff worker to complete...", flush=True)
-                GLib.timeout_add(500, self._take_programmatic_screenshot)
-                return False
-        try:
-            if self.screenshot_path:
-                ScreenshotService.capture_window(self, self.screenshot_path, getattr(self, "minimap_dialog", None))
-        finally:
-            self.close()
-            if self.app:
-                self.app.quit()
-        return False

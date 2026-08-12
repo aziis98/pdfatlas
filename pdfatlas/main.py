@@ -62,7 +62,6 @@ class PDFViewerApplication(Adw.Application):
         super().__init__(application_id="com.aziis98.pdfatlas", flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.filepath_to_open: str | None = None
         self.state: str | None = None
-        self.screenshot: str | None = None
         self.follow_link: int | None = None
         self.debug: bool = False
         self.render_mode: str = "mp"
@@ -75,14 +74,12 @@ class PDFViewerApplication(Adw.Application):
 
         # Create and present the main application window
         state = getattr(self, "state", None)
-        screenshot = getattr(self, "screenshot", None)
         follow_link = getattr(self, "follow_link", None)
         debug_mode = getattr(self, "debug", False)
 
         win = MainWindow(
             self,
             state=state,
-            screenshot_path=screenshot,
             follow_link=follow_link,
             debug_mode=debug_mode,
             render_mode=self.render_mode,
@@ -137,7 +134,6 @@ def main():
 
     parser.add_argument("pdf_path", nargs="?", help="Path to PDF file to open")
     parser.add_argument("--state", default=None, help="Initial application state as a JSON string")
-    parser.add_argument("--screenshot", default=None, help="Path to save window screenshot after 2 seconds")
     parser.add_argument("--follow-link", type=int, default=None, help="Index of N-th link in document to follow on open")
     parser.add_argument("--debug", action="store_true", help="Enable debug overlay for page layout values")
     parser.add_argument(
@@ -166,7 +162,6 @@ def main():
     app = PDFViewerApplication()
     app.filepath_to_open = args.pdf_path
     app.state = args.state
-    app.screenshot = args.screenshot
     app.follow_link = args.follow_link
     app.debug = args.debug
     app.render_mode = args.render_mode

@@ -183,6 +183,9 @@ class MiniMap(Gtk.DrawingArea):
                 self.on_page_clicked(page_index)
 
     def _draw_func(self, drawing_area, widget_cr, width, height):
+        if self.doc_model and (width != self.last_width or height != self.last_height or self.n_cols <= 0):
+            self._relayout(width, height)
+
         if not self.doc_model or not self.cache or self.n_cols <= 0 or self.n_rows <= 0:
             widget_cr.set_source_rgb(0.95, 0.95, 0.95)
             widget_cr.paint()
@@ -383,7 +386,7 @@ class MiniMap(Gtk.DrawingArea):
         self.queue_draw()
 
 
-class MinimapWindow(Gtk.Window):
+class MinimapWindow(Adw.Dialog):
     """
     A centered modal window containing the fitting grid Minimap.
     Clicking a page thumbnail jumps to it in the main viewer and closes this window.
@@ -401,28 +404,33 @@ class MinimapWindow(Gtk.Window):
         main_zoom,
         on_page_selected,
     ):
-        super().__init__(
-            title="Page Navigator", transient_for=parent_window, modal=True, destroy_with_parent=True
-        )
-        self.set_default_size(700, 520)
+        super().__init__(title="Minimap")
+        self.set_content_width(700)
+        self.set_content_height(520)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
         # Titlebar using Adw.HeaderBar
         header = Adw.HeaderBar()
-        self.set_titlebar(header)
+        content_box.append(header)
 
         # Minimap widget (added directly to window, no scrolled window, no scrollbars)
         self.minimap = MiniMap()
+        self.minimap.set_vexpand(True)
+        self.minimap.set_hexpand(True)
         self.minimap.main_zoom = main_zoom
         self.minimap.set_document(doc_model, cache, render_worker, crop_analyzer, settings)
         self.minimap.set_vadjustment(main_vadjustment)
-        self.set_child(self.minimap)
+        content_box.append(self.minimap)
+
+        self.set_child(content_box)
 
         # Connect callback to scroll and close the window
-        self.minimap.on_page_clicked = lambda idx: (on_page_selected(idx), self.destroy())
+        self.minimap.on_page_clicked = lambda idx: (on_page_selected(idx), self.close())
 
         # Close on Escape key
         shortcut_controller = Gtk.ShortcutController.new()
         trigger = Gtk.ShortcutTrigger.parse_string("Escape")
-        action = Gtk.CallbackAction.new(lambda w, a: (self.destroy(), True)[1])
+        action = Gtk.CallbackAction.new(lambda w, a: (self.close(), True)[1])
         shortcut_controller.add_shortcut(Gtk.Shortcut.new(trigger, action))
         self.add_controller(shortcut_controller)

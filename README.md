@@ -26,7 +26,7 @@ Entering text in the headerbar switches the application from Document View to Se
 
 <br clear="all" />
 
-<img src="assets/screenshots/attention_reader_view.png" alt="Continuous Reader & Gapless Mode" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
+<img src="assets/screenshots/attention_no_gaps.png" alt="Continuous Reader & Gapless Mode" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
 
 ### Continuous Reading & Gap-less View
 
@@ -38,7 +38,7 @@ Vertical page layout using PyMuPDF rendered to textures and drawn on a hardware-
 
 <br clear="all" />
 
-<img src="assets/screenshots/attention_minimap_view.png" alt="Grid Minimap Navigator" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+<img src="assets/screenshots/category_theory_minimap_view.png" alt="Grid Minimap Navigator" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
 
 ### Page Thumbnail Grid / Minimap
 
@@ -69,7 +69,7 @@ Select text in any document to open the context toolbar:
 
 <br clear="all" />
 
-<img src="assets/screenshots/attention_annotations_popover.png" alt="Annotations & Highlights Popover" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
+<img src="assets/screenshots/attention_notes_annotations.png" alt="Annotations, Highlights & Markdown Notes" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
 
 ### Annotations & Highlights
 

@@ -85,8 +85,12 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
       border-bottom: none;
       padding-bottom: 0;
     }
-    body.compact p, body.compact ul, body.compact ol {
+    body.compact p {
       margin: 6px 0;
+    }
+    body.compact ul, body.compact ol {
+      margin: 6px 0;
+      padding-left: 16px;
     }
     body.compact pre {
       padding: 8px;
