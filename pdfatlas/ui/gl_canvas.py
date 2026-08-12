@@ -451,6 +451,16 @@ class GLCanvas(Gtk.GLArea):
                 self._hl_layer.composite_page_to_screen(
                     r, tex_id, (box_w - dw) / 2.0, y_off, dw, dh, viewport_w, viewport_h, gl_scale)
 
+        debug_note_rect = getattr(canvas, "debug_note_rect", None)
+        if debug_note_rect is not None:
+            nx, ny, nw, nh = debug_note_rect
+            red = (1.0, 0.0, 0.0, 0.95)
+            bt = 1.5
+            r.fill_rect(nx, ny, nw, bt, red)
+            r.fill_rect(nx, ny + nh - bt, nw, bt, red)
+            r.fill_rect(nx, ny, bt, nh, red)
+            r.fill_rect(nx + nw - bt, ny, bt, nh, red)
+
         r.end()
         gl.glUseProgram(0)
         gl.glDisable(gl.GL_BLEND)

@@ -98,6 +98,7 @@ class PDFCanvas(Gtk.Overlay):
         self.render_worker = None
         self.crop_analyzer = None
         self.debug_mode: bool = False
+        self.debug_note_rect: tuple[float, float, float, float] | None = None
         self.settings = None
 
         self.zoom = 1.0

@@ -83,11 +83,12 @@ class MainWindow(Adw.ApplicationWindow):
       - Click-to-navigate search portal coordinates mapping.
     """
 
-    def __init__(self, app, state=None, follow_link=None, debug_mode=False, render_mode="mp", render_workers=2):
+    def __init__(self, app, state=None, follow_link=None, debug_mode=False, debug_note_rect=False, render_mode="mp", render_workers=2):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
         self.debug_mode = debug_mode
+        self.debug_note_rect = debug_note_rect
         self.set_default_size(1000, 700)
         self.initial_state = state
         self.follow_link = follow_link
@@ -352,19 +353,15 @@ class MainWindow(Adw.ApplicationWindow):
         self._setup_canvas_gestures()
 
     def _on_window_realized(self, widget):
-        hide_env = os.environ.get("PDFATLAS_HIDE_CURSOR", "1")
-        if hide_env == "1":
+        # Screenshot/debug-only: hide the cursor on a headless capture. When
+        # PDFATLAS_HIDE_CURSOR is not "1" (normal use), leave cursor handling
+        # entirely to the canvas hover logic -- do not force any cursor here.
+        if os.environ.get("PDFATLAS_HIDE_CURSOR") == "1":
             blank_cursor = Gdk.Cursor.new_from_name("none", None)
             self.set_cursor(blank_cursor)
             surface = self.get_surface()
             if surface:
                 surface.set_cursor(blank_cursor)
-        elif hide_env == "0":
-            default_cursor = Gdk.Cursor.new_from_name("default", None)
-            self.set_cursor(default_cursor)
-            surface = self.get_surface()
-            if surface:
-                surface.set_cursor(default_cursor)
 
     def _on_canvas_note_create(self, page: int, x: float, y: float):
         self.notes_layer.create_note(page, x, y)

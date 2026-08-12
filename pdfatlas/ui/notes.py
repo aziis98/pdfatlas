@@ -494,7 +494,7 @@ class NotesLayer:
             # and widget anchoring must be expressed as a pointing rect in the
             # popover parent's (canvas) coordinates.
             self._preview_popover.set_autohide(False)  # type: ignore[attr-defined]
-            self._preview_popover.set_has_arrow(False)
+            self._preview_popover.set_has_arrow(True)
             self._preview_popover.add_css_class("note-preview-popover")
             self._preview_popover.set_parent(self.win.canvas)
             w = max(220, min(self.win.canvas.get_width() // 3, 300))
@@ -519,6 +519,19 @@ class NotesLayer:
             return GLib.SOURCE_REMOVE
         self._preview_popover.set_pointing_to(rect)
         self._preview_popover.popup()
+        if getattr(self.win, "debug_note_rect", False):
+            # _preview_anchor_rect is viewport-relative (scroll already subtracted);
+            # the GL overlay draws in content coordinates, so add scroll back.
+            canvas = self.win.canvas
+            sx = canvas.hadjustment.get_value() if canvas.hadjustment else 0.0
+            sy = canvas.vadjustment.get_value() if canvas.vadjustment else 0.0
+            canvas.debug_note_rect = (
+                rect.x + sx,
+                rect.y + sy,
+                float(rect.width),
+                float(rect.height),
+            )
+            canvas.queue_draw_overlays("debug-note-rect")
         return GLib.SOURCE_REMOVE
 
     def _preview_anchor_rect(self, note: dict) -> Gdk.Rectangle | None:
@@ -540,11 +553,13 @@ class NotesLayer:
         page_x0 = (box_w - dw) / 2.0
         crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
         crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
+        # Icon centered on the note point; top-left uses a -13 offset with a
+        # 34x34 size.
         rect = Gdk.Rectangle()
-        rect.x = round(page_x0 + scale * (note["x"] - crop_off_x) - scroll_x)
-        rect.y = round(_y_offset + scale * (note["y"] - crop_off_y) - scroll_y)
-        rect.width = 24
-        rect.height = 24
+        rect.x = round(page_x0 + scale * (note["x"] - crop_off_x) - scroll_x - 13.0)
+        rect.y = round(_y_offset + scale * (note["y"] - crop_off_y) - scroll_y - 13.0)
+        rect.width = 34
+        rect.height = 34
         return rect
 
     def _on_preview_hide(self):

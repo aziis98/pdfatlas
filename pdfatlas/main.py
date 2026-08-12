@@ -64,6 +64,7 @@ class PDFViewerApplication(Adw.Application):
         self.state: str | None = None
         self.follow_link: int | None = None
         self.debug: bool = False
+        self.debug_note_rect: bool = False
         self.render_mode: str = "mp"
         self.render_workers: int = 2
 
@@ -76,12 +77,14 @@ class PDFViewerApplication(Adw.Application):
         state = getattr(self, "state", None)
         follow_link = getattr(self, "follow_link", None)
         debug_mode = getattr(self, "debug", False)
+        debug_note_rect = getattr(self, "debug_note_rect", False)
 
         win = MainWindow(
             self,
             state=state,
             follow_link=follow_link,
             debug_mode=debug_mode,
+            debug_note_rect=debug_note_rect,
             render_mode=self.render_mode,
             render_workers=self.render_workers,
         )
@@ -136,6 +139,8 @@ def main():
     parser.add_argument("--state", default=None, help="Initial application state as a JSON string")
     parser.add_argument("--follow-link", type=int, default=None, help="Index of N-th link in document to follow on open")
     parser.add_argument("--debug", action="store_true", help="Enable debug overlay for page layout values")
+    parser.add_argument("--debug-note-rect", action="store_true",
+                        help="Draw a red overlay at the note preview anchor rect")
     parser.add_argument(
         "--render-mode",
         choices=["mt", "mp"],
@@ -164,6 +169,7 @@ def main():
     app.state = args.state
     app.follow_link = args.follow_link
     app.debug = args.debug
+    app.debug_note_rect = args.debug_note_rect
     app.render_mode = args.render_mode
     app.render_workers = args.render_workers
 
