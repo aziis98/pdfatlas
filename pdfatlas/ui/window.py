@@ -39,6 +39,7 @@ from .shortcuts import ShortcutsController
 from .theme import load_window_css
 from .gui import box, button, label, search_entry, scrolled_window, spacer
 from .cairo_utils import hsl_to_hex
+from .welcome import WelcomeView
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 
@@ -366,6 +367,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_scrolled.set_child(self.results_box)
         self.stack.add_named(self.search_scrolled, "search-view")
 
+        # Welcome View (empty-window landing screen)
+        self.welcome_view = WelcomeView(self)
+        self.stack.add_named(self.welcome_view, "welcome-view")
+
         # Adjustments wiring (owned by the canvas)
         self.vadjustment = self.canvas.vadjustment
         self.hadjustment = self.canvas.hadjustment
@@ -373,6 +378,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.hadjustment.connect("value-changed", self._on_horizontal_scroll_changed)
 
         self._setup_canvas_gestures()
+
+        self._show_welcome()
+
+    def _show_welcome(self):
+        """Show the empty-window welcome screen with fresh recents and a tip."""
+        self.welcome_view.refresh(self.recent_files)
+        self.stack.set_visible_child_name("welcome-view")
 
     def _on_window_realized(self, widget):
         # Screenshot/debug-only: hide the cursor on a headless capture. When
