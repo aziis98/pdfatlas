@@ -71,11 +71,11 @@ Select text in any document to open the context toolbar:
 
 <img src="assets/screenshots/attention_notes_annotations.png" alt="Annotations, Highlights & Markdown Notes" width="45%" align="right" style="margin-left: 20px; margin-bottom: 20px;" />
 
-### Annotations & Highlights
+### Annotations, Highlights & Markdown Notes
 
-- **Overview Popover:** Lists all document highlights grouped by page.
-- **Quick Jump:** Click any item to jump directly to it in the document.
-- **Coming Soon:** *Text notes & comments on annotations.*
+- **Overview Popover:** Lists all document highlights and markdown notes, grouped by page, with quick-jump on click.
+- **Markdown Notes:** Drop a note at any point on the page (paperclip icon) and write it in Markdown.
+- **Rich Preview & Editing:** Hover a note icon for a rendered preview; click to open the editor with **Source**/**Rendered** tabs, KaTeX math support, and autosave.
 
 <br clear="all" />
 

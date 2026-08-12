@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 from pathlib import Path
 
@@ -40,6 +41,27 @@ from .gui import box, button, label, search_entry, scrolled_window, spacer
 from .cairo_utils import hsl_to_hex
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
+
+#: Max characters of a simplified note preview before GTK ellipsizes it.
+MAX_NOTE_PREVIEW_CHARS = 100
+
+
+def _simplify_md_preview(markdown: str) -> str:
+    """One-line markdown preview for the overview list row.
+
+    Strips heading markers line-by-line, drops math delimiters ($ / $$) and
+    bold/italic markers (*, **, _, __), joins all lines with spaces, collapses
+    whitespace, and truncates around MAX_NOTE_PREVIEW_CHARS; GTK ellipsizes
+    the rest.
+    """
+    lines = []
+    for ln in (markdown or "").splitlines():
+        ln = re.sub(r"^#{1,6}\s*", "", ln).strip()
+        if ln:
+            lines.append(ln)
+    text = re.sub(r"(\$+|\*+|_+)", "", " ".join(lines))
+    text = re.sub(r"\s{2,}", " ", text).strip()[:MAX_NOTE_PREVIEW_CHARS]
+    return text or "(Note)"
 
 # Fluorescent highlighter pen colors sorted strictly by hue with increased lightness (74%-82%)
 PALETTE_COLS = 6
@@ -677,6 +699,7 @@ class MainWindow(Adw.ApplicationWindow):
                                 n["markdown"] = ""
                         self.notes = sample_notes
                         self.notes_layer.set_notes(sample_notes)
+                        self._update_annotations_button()
 
                     if state.get("annotations_popover"):
                         def open_popover():
@@ -873,7 +896,7 @@ class MainWindow(Adw.ApplicationWindow):
                 note_icon.set_valign(Gtk.Align.CENTER)
                 item_box.append(note_icon)
                 md_text = item.get("markdown", "") or ""
-                txt = next((ln.strip() for ln in md_text.splitlines() if ln.strip()), "") or "(Note)"
+                txt = _simplify_md_preview(md_text)
 
             txt_lbl = label(text=txt)
             txt_lbl.set_single_line_mode(True)
