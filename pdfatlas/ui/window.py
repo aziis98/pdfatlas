@@ -837,6 +837,15 @@ class MainWindow(Adw.ApplicationWindow):
         popover_box.append(scrolled)
 
         self.annotations_popover.set_child(popover_box)
+        # Regenerate the list (especially note preview text) each time the
+        # popover opens so labels reflect the latest note content.
+        self.annotations_popover.connect(
+            "notify::visible", self._on_annotations_popover_visibility
+        )
+
+    def _on_annotations_popover_visibility(self, popover, pspec):
+        if popover.get_visible():
+            self._update_annotations_button()
 
     def _update_annotations_button(self):
         count = len(self.highlights) + len(self.notes)
