@@ -716,7 +716,6 @@ class PDFCanvas(Gtk.Overlay):
 
         page_count = self.doc_model.page_count
         self._layout.set_spacing(self.page_gap)
-        self._layout.set_margin_top(int(self.page_gap))
         self._layout.set_margin_bottom(int(self.page_gap))
 
         # Rebuild/recreate container widgets if size differs
@@ -733,7 +732,7 @@ class PDFCanvas(Gtk.Overlay):
                 self._layout.append(container)
                 self.containers.append(container)
 
-        current_y = float(self.page_gap)
+        current_y = 0.0
         self.page_layout = []
 
         for i in range(page_count):
