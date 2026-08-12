@@ -466,25 +466,32 @@ class MainWindow(Adw.ApplicationWindow):
 
     def open_document(self, source: PdfSource):
         filepath = source.uri
-        if not os.path.exists(filepath):
-            from ..core.arxiv_mapper import download_arxiv_source, extract_arxiv_id_from_raw
+        aid = arxiv_id_from_path(filepath)
 
-            aid = extract_arxiv_id_from_raw(filepath)
-            if aid:
-                try:
-                    pdf_path, _ = download_arxiv_source(aid)
-                    filepath = str(pdf_path)
-                    source = PdfSource(
-                        source_type="arxiv",
-                        uri=filepath,
-                        display_name=f"arXiv:{aid}",
-                    )
-                except Exception as e:
+        # arXiv sources resolve from the app-side arxiv cache (downloaded on
+        # first use) when an ID is known, so stale or moved local paths in the
+        # recents never map to the wrong file. The stored local path is used
+        # only as a fallback when the download fails and that file still
+        # exists on disk.
+        if aid and (source.source_type == "arxiv" or not os.path.exists(filepath)):
+            from ..core.arxiv_mapper import download_arxiv_source
+
+            try:
+                pdf_path, _ = download_arxiv_source(aid)
+                filepath = str(pdf_path)
+                source = PdfSource(
+                    source_type="arxiv",
+                    uri=filepath,
+                    display_name=source.display_name or f"arXiv:{aid}",
+                )
+            except Exception as e:
+                if not os.path.exists(filepath):
                     self._show_error_dialog(f"Failed to download arXiv paper '{filepath}':\n{e}")
                     return
-            else:
-                self._show_error_dialog(f"File not found: {filepath}")
-                return
+
+        if not os.path.exists(filepath):
+            self._show_error_dialog(f"File not found: {filepath}")
+            return
 
 
         aid = arxiv_id_from_path(filepath)

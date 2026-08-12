@@ -6,7 +6,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk, Pango
+gi.require_version("Gdk", "4.0")
+from gi.repository import Adw, Gdk, Gtk, Pango
 
 from .gui import box, button, label
 from .services.icon_theme import IconThemeManager
@@ -109,6 +110,11 @@ class WelcomeView(Gtk.Box):
         self.tip_button.set_halign(Gtk.Align.CENTER)
         self.tip_button.set_valign(Gtk.Align.END)
         self.tip_button.set_margin_bottom(18)
+        try:
+            cursor = Gdk.Cursor.new_from_name("pointer", None)
+            self.tip_button.set_cursor(cursor)
+        except Exception:
+            pass
         self.tip_button.connect("clicked", self._on_tip_clicked)
         self.append(self.tip_button)
 
