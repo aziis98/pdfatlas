@@ -47,7 +47,6 @@ TIP_MESSAGES: list[str] = [
     "Select any text to reveal the copy and highlight toolbar.",
     "On arXiv papers, Ctrl+C copies the original LaTeX source for your selection.",
     "Ctrl+Shift+C copies the plain PDF text of a selection.",
-    "Highlight with H, then pick from 18 highlighter colors.",
     "Highlights and notes are saved per document (by its checksum), so they come right back when you reopen the paper.",
     "Open the tag icon to browse all annotations and notes, grouped by page.",
     "Right-click anywhere on a page and choose Add note here to drop a paperclip note in Markdown.",
