@@ -30,6 +30,7 @@ def profile(
     repeat: int = 3,
     subprocesses: bool = False,
     fmt: str = "all",
+    use_shm: bool = False,
 ):
     if not pdf_path.exists():
         print(f"[Error] PDF file not found: {pdf_path}", file=sys.stderr)
@@ -51,9 +52,10 @@ def profile(
     state_json = json.dumps(state)
 
     # Construct the python main command
+    shm_flag = " --use-shm" if use_shm else ""
     target_cmd = (
         f"{sys.executable} -m pdfatlas.main {shlex.quote(str(pdf_path))} "
-        f"--render-mode {shlex.quote(render_mode)} --state {shlex.quote(state_json)}"
+        f"--render-mode {shlex.quote(render_mode)}{shm_flag} --state {shlex.quote(state_json)}"
     )
 
     subproc_flag = " --subprocesses" if (subprocesses or render_mode == "mp") else ""
@@ -71,7 +73,7 @@ def profile(
 
     print(f"[Profiler] Target PDF: {pdf_path}")
     print(f"[Profiler] Benchmark: Page {from_page} -> {to_page} ({steps} steps x {repeat} repeats)")
-    print(f"[Profiler] Render mode: {render_mode} (subprocesses profiling: {bool(subproc_flag)})")
+    print(f"[Profiler] Render mode: {render_mode}{shm_flag} (subprocesses profiling: {bool(subproc_flag)})")
     print(f"[Profiler] Output files: {output_svg} / {output_raw}")
     print("[Profiler] Launching profiler harness via Wayland script...")
 
@@ -131,6 +133,11 @@ if __name__ == "__main__":
         help="Profile subprocesses spawned by the app (automatically enabled for mp mode)",
     )
     parser.add_argument(
+        "--use-shm",
+        action="store_true",
+        help="Enable zero-copy shared memory IPC for multiprocessing render backend",
+    )
+    parser.add_argument(
         "--format",
         choices=["all", "flamegraph", "raw", "speedscope"],
         default="all",
@@ -149,4 +156,5 @@ if __name__ == "__main__":
         repeat=args.repeat,
         subprocesses=args.subprocesses,
         fmt=args.format,
+        use_shm=args.use_shm,
     )

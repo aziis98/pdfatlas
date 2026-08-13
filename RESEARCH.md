@@ -278,6 +278,17 @@ This document records durable technical findings, architectural decisions, mathe
 
 ---
 
+### 1.29 Zero-Copy Shared Memory IPC (`--use-shm`) for Multiprocessing Render Backend
+
+- **Discovery:** Standard Python `multiprocessing.Queue` serializes raw page pixel arrays (~14.4 MB per page frame) using `pickle.dumps()` and copies the byte payload through Unix domain sockets. This creates 3 memory allocations/copies and 15–25ms of IPC serialization latency per rendered frame.
+- **Durable Solution:**
+  1. `RenderWorker` in [`pdfatlas/core/renderer.py`](pdfatlas/core/renderer.py) pre-allocates a ring buffer of POSIX `SharedMemory` slots (8 slots of 32 MB each $\approx 256$ MB shared RAM) when activated via `--use-shm`.
+  2. Child processes in [`pdfatlas/core/render_child.py`](pdfatlas/core/render_child.py) write rasterized PyMuPDF `pix.samples` directly into shared memory buffers.
+  3. Child processes return lightweight 100-byte metadata dictionaries over IPC (without embedding `samples` bytes in the pickle payload), eliminating byte copying and `pickle` deserialization overhead.
+  4. On process exit, `atexit` handlers cleanly close and unlink `SharedMemory` segments.
+
+---
+
 
 ## 2. Rejected Approaches
 

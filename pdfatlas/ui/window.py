@@ -106,7 +106,17 @@ class MainWindow(Adw.ApplicationWindow):
       - Click-to-navigate search portal coordinates mapping.
     """
 
-    def __init__(self, app, state=None, follow_link=None, debug_mode=False, debug_note_rect=False, render_mode="mp", render_workers=2):
+    def __init__(
+        self,
+        app,
+        state=None,
+        follow_link=None,
+        debug_mode=False,
+        debug_note_rect=False,
+        render_mode="mp",
+        render_workers=2,
+        use_shm=False,
+    ):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
@@ -129,8 +139,9 @@ class MainWindow(Adw.ApplicationWindow):
         # LRU Caches and background thread pool for canvas rendering
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
-        self.render_worker = create_render_worker(render_mode, num_workers=render_workers)
-        print(f"[PDFAtlas] render backend: {render_mode} x{render_workers}", flush=True)
+        self.render_worker = create_render_worker(render_mode, num_workers=render_workers, use_shm=use_shm)
+        shm_str = " (zero-copy SHM IPC enabled)" if use_shm else ""
+        print(f"[PDFAtlas] render backend: {render_mode} x{render_workers}{shm_str}", flush=True)
 
         # Thread pool for search indexing & result portal rendering
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")

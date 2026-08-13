@@ -1,3 +1,4 @@
+import atexit
 import multiprocessing
 import os
 import queue
@@ -52,7 +53,7 @@ class RenderWorker:
       Priority 4: Crop analysis scans
     """
 
-    def __init__(self, num_workers: int = 2):
+    def __init__(self, num_workers: int = 2, use_shm: bool = False):
         self.queue = queue.PriorityQueue()
         self.counter = 0
         self.lock = threading.Lock()
@@ -64,13 +65,33 @@ class RenderWorker:
         self._stop = threading.Event()
 
         self.num_workers = max(1, num_workers)
+        self._use_shm = False
+        self._shm = None
+        self._shm_free_slots = set()
+        self._shm_slot_size = 32 * 1024 * 1024
+        self._shm_num_slots = 8
+
+        if use_shm:
+            try:
+                from multiprocessing.shared_memory import SharedMemory
+
+                total_size = self._shm_num_slots * self._shm_slot_size
+                self._shm = SharedMemory(create=True, size=total_size)
+                self._shm_free_slots = set(range(self._shm_num_slots))
+                self._use_shm = True
+                print(
+                    f"[RenderWorker] Initialized shared memory pool ({self._shm.name}, "
+                    f"{total_size // (1024 * 1024)} MB)",
+                    flush=True,
+                )
+            except Exception as e:
+                print(f"[RenderWorker] SharedMemory initialization failed ({e}); falling back to standard IPC", flush=True)
+                self._use_shm = False
+
         self._mp_ctx = multiprocessing.get_context("spawn")
         self._jobs_q = self._mp_ctx.Queue(maxsize=8)
         self._results_q = self._mp_ctx.Queue(maxsize=2)
         self._children: list = []
-        # Spawn children re-import ``main.py`` as ``__mp_main__``; the child
-        # redirects its stderr there into this log so crashes during the
-        # spawn/import chain are diagnosable instead of "unexpected death".
         os.environ.setdefault(
             "PDFATLAS_CHILD_STDERR_LOG",
             os.path.join(tempfile.gettempdir(), "pdfatlas-render-children.log"),
@@ -81,6 +102,18 @@ class RenderWorker:
         self._pump_thread = threading.Thread(target=self._pump_loop, daemon=True)
         self._dispatch_thread.start()
         self._pump_thread.start()
+        atexit.register(self.shutdown)
+
+    def _acquire_shm_slot(self) -> int | None:
+        with self.lock:
+            if self._shm_free_slots:
+                return self._shm_free_slots.pop()
+        return None
+
+    def _release_shm_slot(self, slot_idx: int | None):
+        if slot_idx is not None:
+            with self.lock:
+                self._shm_free_slots.add(slot_idx)
 
     # --- Public API (unchanged signatures) ---
 
@@ -268,6 +301,14 @@ class RenderWorker:
             self._results_q.close()
         except Exception:
             pass
+        shm = getattr(self, "_shm", None)
+        if shm is not None:
+            try:
+                shm.close()
+                shm.unlink()
+            except Exception:
+                pass
+            self._shm = None
 
     # --- Child process lifecycle ---
 
@@ -341,6 +382,15 @@ class RenderWorker:
                         "scale": scale,
                         "clip": crop_key,
                     }
+                    if self._use_shm and self._shm is not None:
+                        slot_idx = self._acquire_shm_slot()
+                        if slot_idx is not None:
+                            req["shm"] = {
+                                "name": self._shm.name,
+                                "slot": slot_idx,
+                                "slot_size": self._shm_slot_size,
+                            }
+                            entry["shm_slot"] = slot_idx
                 elif job_type == "portal":
                     _, filepath, page_index, target_y, target_w, target_h, _scale_factor = args
                     req = {
@@ -427,14 +477,24 @@ class RenderWorker:
         w = msg["width"]
         h = msg["height"]
 
+        shm = self._shm
+        if "shm_slot" in msg and shm is not None and shm.buf is not None:
+            slot_idx = msg.get("shm_slot", 0)
+            length = msg.get("length", 0)
+            offset = slot_idx * self._shm_slot_size
+            samples = bytes(shm.buf[offset : offset + length])
+            self._release_shm_slot(slot_idx)
+        else:
+            samples = msg.get("samples", b"")
+
         if not self._is_stale(entry):
             if entry["is_minimap"]:
-                bgra = bgra_from_rgb(msg["samples"], w, h)
+                bgra = bgra_from_rgb(samples, w, h)
                 surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_RGB24, w, h, w * 4)
                 surface.set_device_scale(entry["scale_factor"], entry["scale_factor"])
                 entry["target_cache"].set(entry["page_index"], surface, bgra)
             else:
-                texture = PageTexture(w, h, msg["channels"], msg["samples"])
+                texture = PageTexture(w, h, msg["channels"], samples)
                 entry["target_cache"].set(
                     entry["page_index"], entry["zoom"], entry["scale_factor"], entry["crop_key"], texture, None
                 )
@@ -451,7 +511,8 @@ class RenderWorker:
     def _deliver_portal(self, msg: RenderResult, entry: dict):
         w = msg["width"]
         h = msg["height"]
-        bgra = bgra_from_rgb(msg["samples"], w, h)
+        samples = msg.get("samples", b"")
+        bgra = bgra_from_rgb(samples, w, h)
         surface = cairo.ImageSurface.create_for_data(bgra, cairo.FORMAT_ARGB32, w, h, w * 4)
         surface.set_device_scale(entry["scale_factor"], entry["scale_factor"])
         from ..ui.portal import apply_card_decorations
@@ -466,8 +527,9 @@ class RenderWorker:
 
     def _deliver_crop(self, msg: RenderResult, entry: dict):
         analyzer = entry["crop_analyzer"]
+        samples = msg.get("samples", b"")
         bbox = analyzer.analyze_pixmap(
-            msg["width"], msg["height"], msg["channels"], msg["samples"], scale=entry["scale"]
+            msg["width"], msg["height"], msg["channels"], samples, scale=entry["scale"]
         )
         if self._is_stale(entry):
             return
@@ -490,6 +552,8 @@ class RenderWorker:
         (child death, failed dispatch, or delivery error) so nothing stays wedged:
         renders re-request via redraw, crop scans are finalized with the page
         treated as blank, portal jobs are simply dropped."""
+        if "shm_slot" in entry:
+            self._release_shm_slot(entry["shm_slot"])
         kind = entry["kind"]
         if kind == "render":
             GLib.idle_add(entry["redraw_callback"])
@@ -522,7 +586,7 @@ class RenderWorker:
         self._respawn_child("unexpected death")
 
 
-def create_render_worker(mode: str, num_workers: int = 2):
+def create_render_worker(mode: str, num_workers: int = 2, use_shm: bool = False):
     """Instantiate a background render backend.
 
     ``mode`` selects the rasterization backend:
@@ -534,7 +598,7 @@ def create_render_worker(mode: str, num_workers: int = 2):
         benchmarking and comparison; see RESEARCH.md 1.16.
     """
     if mode == "mp":
-        return RenderWorker(num_workers=num_workers)
+        return RenderWorker(num_workers=num_workers, use_shm=use_shm)
     if mode == "mt":
         from .renderer_mt import RenderWorkerMT
 

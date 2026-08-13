@@ -130,3 +130,33 @@ def test_render_worker_spawns_requested_children():
     assert len(worker._children) == 3
     assert all(c.is_alive() for c in worker._children)
     worker.shutdown()
+
+
+def test_mp_shm_renders_page_texture():
+    if not SAMPLE_PDF.exists():
+        pytest.skip("sample PDF not available")
+    doc = DocumentModel(str(SAMPLE_PDF))
+    page_count = min(doc.page_count, 4)
+    cache = RenderCache(4)
+    worker = create_render_worker("mp", num_workers=2, use_shm=True)
+    worker.set_document(str(SAMPLE_PDF))
+
+    done = {"count": 0}
+
+    def redraw():
+        done["count"] += 1
+
+    for i in range(page_count):
+        worker.queue_render_job(0, doc, i, 1.0, 1, None, False, cache, redraw)
+
+    ctx = GLib.MainContext.default()
+    deadline = time.perf_counter() + 30.0
+    while done["count"] < page_count and time.perf_counter() < deadline:
+        ctx.iteration(False)
+
+    worker.shutdown()
+    doc.close()
+
+    assert done["count"] == page_count
+    for i in range(page_count):
+        assert isinstance(cache.get(i, 1.0, 1, None), PageTexture)

@@ -10,9 +10,15 @@ This module deliberately imports only ``fitz`` (plus stdlib) so the child stays
 independent of the GTK/cairo stack. It never touches cairo, numpy, or GLib.
 """
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 import fitz
+
+
+class ShmInfo(TypedDict):
+    name: str
+    slot: int
+    slot_size: int
 
 
 class RenderRequest(TypedDict):
@@ -22,6 +28,7 @@ class RenderRequest(TypedDict):
     page: int
     scale: float
     clip: tuple[float, float, float, float] | None
+    shm: NotRequired[ShmInfo]
 
 
 class PortalRequest(TypedDict):
@@ -57,7 +64,9 @@ class RenderResult(TypedDict):
     width: int
     height: int
     channels: int
-    samples: bytes
+    samples: NotRequired[bytes]
+    shm_slot: NotRequired[int]
+    length: NotRequired[int]
 
 
 class OpenResult(TypedDict):
@@ -81,6 +90,7 @@ class _ChildRenderer:
     def __init__(self):
         self._doc = None
         self._filepath = None
+        self._shm_objects = {}
 
     def _ensure_doc(self, filepath: str):
         if self._doc is None or self._filepath != filepath:
@@ -89,6 +99,16 @@ class _ChildRenderer:
             self._doc = fitz.open(filepath)
             self._filepath = filepath
         return self._doc
+
+    def _ensure_shm(self, name: str):
+        if name not in self._shm_objects:
+            try:
+                from multiprocessing.shared_memory import SharedMemory
+
+                self._shm_objects[name] = SharedMemory(name=name, create=False)
+            except Exception:
+                return None
+        return self._shm_objects.get(name)
 
     def render(self, req: RenderRequest | PortalRequest | CropRequest) -> ChildResult:
         """Renders one request; returns a picklable result dict."""
@@ -114,12 +134,35 @@ class _ChildRenderer:
             scale = req["scale"]
             mat = fitz.Matrix(scale, scale)
             clip = None
-            clip_key = req["clip"]
+            clip_key = req.get("clip")
             if clip_key is not None:
                 x0, y0, x1, y1 = clip_key
                 clip = fitz.Rect(x0, y0, x1, y1)
 
         pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
+
+        shm_info = req.get("shm")
+        if shm_info:
+            shm_name = shm_info["name"]
+            slot_idx = shm_info["slot"]
+            slot_size = shm_info["slot_size"]
+            offset = slot_idx * slot_size
+            samples_bytes = pix.samples
+            length = len(samples_bytes)
+
+            shm = self._ensure_shm(shm_name)
+            if shm and offset + length <= len(shm.buf):
+                shm.buf[offset : offset + length] = samples_bytes
+                return {
+                    "kind": "render_result",
+                    "seq": req["seq"],
+                    "width": pix.width,
+                    "height": pix.height,
+                    "channels": pix.n,
+                    "shm_slot": slot_idx,
+                    "length": length,
+                }
+
         return {
             "kind": "render_result",
             "seq": req["seq"],
@@ -155,3 +198,8 @@ def child_main(input_q, result_q):
             break
     if renderer._doc is not None:
         renderer._doc.close()
+    for shm in renderer._shm_objects.values():
+        try:
+            shm.close()
+        except Exception:
+            pass
