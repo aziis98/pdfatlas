@@ -10,9 +10,14 @@ class DocumentModel:
         self.filepath = filepath
         self.doc = fitz.open(filepath)
         self._page_count = len(self.doc)
-        # Pre-cache page rectangles to avoid retrieving them repeatedly
+        # Pre-cache page rectangles and links to avoid retrieving them repeatedly during GL render passes
         self._page_rects = [self.doc[i].rect for i in range(self._page_count)]
-        self._page_links: list[list[dict] | None] = [None] * self._page_count
+        self._page_links: list[list[dict]] = []
+        for i in range(self._page_count):
+            try:
+                self._page_links.append(self.doc[i].get_links())
+            except (RuntimeError, ValueError):
+                self._page_links.append([])
 
     @property
     def page_count(self) -> int:
@@ -21,15 +26,10 @@ class DocumentModel:
     def get_page_links(self, index: int) -> list[dict]:
         """
         Retrieve list of link dictionaries for a page.
-        Cached per page to avoid repeatedly parsing link annotations.
+        Pre-cached on init to ensure lock-free O(1) access during GL rendering.
         """
         if 0 <= index < self._page_count:
-            if self._page_links[index] is None:
-                try:
-                    self._page_links[index] = self.doc[index].get_links()
-                except (RuntimeError, ValueError):
-                    self._page_links[index] = []
-            return self._page_links[index] or []
+            return self._page_links[index]
         return []
 
     def get_page(self, index: int) -> fitz.Page:

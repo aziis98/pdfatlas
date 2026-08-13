@@ -645,6 +645,9 @@ class PDFCanvas(Gtk.Overlay):
         self.is_scrolling = False
         self._update_visibility()
         self.gl_canvas.queue_draw()
+        win = getattr(self, "win", None)
+        if win and hasattr(win, "_schedule_state_save"):
+            win._schedule_state_save()
         return False  # GLib.SOURCE_REMOVE
 
     def _effective_render_zoom(self) -> float:

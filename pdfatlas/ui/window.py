@@ -1,6 +1,7 @@
 import os
 import re
 import threading
+from bisect import bisect_right
 from pathlib import Path
 
 
@@ -2067,24 +2068,19 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_scroll_page_changed(self, adj):
         self.notes_layer.hide_preview()
-        self._schedule_state_save()
         if not self.doc_model or not self.canvas.page_layout:
             return
-
 
         y_val = adj.get_value()
         viewport_h = adj.get_page_size()
         y_center = y_val + (viewport_h / 2.0)
 
-        current_idx = 0
-        for i, layout in enumerate(self.canvas.page_layout):
-            y_offset, dw, dh, crop_rect = layout
-            page_y0 = y_offset
-            page_y1 = y_offset + dh + self.canvas.page_gap
-            if page_y0 <= y_center <= page_y1:
-                current_idx = i
-                break
+        page_layout = self.canvas.page_layout
+        offsets = [layout[0] for layout in page_layout]
+        idx = bisect_right(offsets, y_center) - 1
+        current_idx = max(0, min(idx, len(page_layout) - 1))
 
-        page_num = current_idx + 1
+        page_num_str = str(current_idx + 1)
         if hasattr(self, "page_input") and self.page_input and not self.page_input.has_focus():
-            self.page_input.set_text(str(page_num))
+            if self.page_input.get_text() != page_num_str:
+                self.page_input.set_text(page_num_str)
