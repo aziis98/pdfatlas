@@ -115,7 +115,7 @@ class MainWindow(Adw.ApplicationWindow):
         debug_note_rect=False,
         render_mode="mp",
         render_workers=2,
-        use_shm=False,
+        use_shm=True,
     ):
         super().__init__(application=app)
         self.app = app

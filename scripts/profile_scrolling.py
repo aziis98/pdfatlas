@@ -30,7 +30,8 @@ def profile(
     repeat: int = 3,
     subprocesses: bool = False,
     fmt: str = "all",
-    use_shm: bool = False,
+    use_shm: bool = True,
+    zoom: float = 1.0,
 ):
     if not pdf_path.exists():
         print(f"[Error] PDF file not found: {pdf_path}", file=sys.stderr)
@@ -40,6 +41,7 @@ def profile(
     output_raw = output_svg.with_suffix(".raw")
 
     state = {
+        "zoom": zoom,
         "scroll_benchmark": {
             "from_page": from_page,
             "to_page": to_page,
@@ -47,12 +49,12 @@ def profile(
             "interval_ms": 16,
             "repeat": repeat,
             "auto_quit": True,
-        }
+        },
     }
     state_json = json.dumps(state)
 
     # Construct the python main command
-    shm_flag = " --use-shm" if use_shm else ""
+    shm_flag = "" if use_shm else " --no-shm"
     target_cmd = (
         f"{sys.executable} -m pdfatlas.main {shlex.quote(str(pdf_path))} "
         f"--render-mode {shlex.quote(render_mode)}{shm_flag} --state {shlex.quote(state_json)}"
@@ -133,10 +135,12 @@ if __name__ == "__main__":
         help="Profile subprocesses spawned by the app (automatically enabled for mp mode)",
     )
     parser.add_argument(
-        "--use-shm",
-        action="store_true",
-        help="Enable zero-copy shared memory IPC for multiprocessing render backend",
+        "--no-shm",
+        action="store_false",
+        dest="use_shm",
+        help="Disable zero-copy shared memory IPC for multiprocessing render backend",
     )
+    parser.add_argument("--zoom", type=float, default=1.0, help="Initial document zoom level (default: 1.0)")
     parser.add_argument(
         "--format",
         choices=["all", "flamegraph", "raw", "speedscope"],
@@ -157,4 +161,5 @@ if __name__ == "__main__":
         subprocesses=args.subprocesses,
         fmt=args.format,
         use_shm=args.use_shm,
+        zoom=args.zoom,
     )

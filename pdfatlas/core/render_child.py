@@ -10,6 +10,7 @@ This module deliberately imports only ``fitz`` (plus stdlib) so the child stays
 independent of the GTK/cairo stack. It never touches cairo, numpy, or GLib.
 """
 
+import sys
 from typing import Literal, NotRequired, TypedDict
 
 import fitz
@@ -162,6 +163,12 @@ class _ChildRenderer:
                     "shm_slot": slot_idx,
                     "length": length,
                 }
+            else:
+                sys.stderr.write(
+                    f"[RenderChild] SHM buffer slot overflow (page frame {pix.width}x{pix.height}x{pix.n} = {length} bytes > "
+                    f"slot size {slot_size} bytes); falling back to standard queue IPC for seq={req['seq']}\n"
+                )
+                sys.stderr.flush()
 
         return {
             "kind": "render_result",

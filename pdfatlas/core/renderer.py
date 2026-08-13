@@ -53,7 +53,7 @@ class RenderWorker:
       Priority 4: Crop analysis scans
     """
 
-    def __init__(self, num_workers: int = 2, use_shm: bool = False):
+    def __init__(self, num_workers: int = 2, use_shm: bool = True):
         self.queue = queue.PriorityQueue()
         self.counter = 0
         self.lock = threading.Lock()
@@ -391,6 +391,11 @@ class RenderWorker:
                                 "slot_size": self._shm_slot_size,
                             }
                             entry["shm_slot"] = slot_idx
+                        else:
+                            sys.stderr.write(
+                                f"[RenderWorker] All SHM slots in use; falling back to standard queue IPC for job seq={seq}\n"
+                            )
+                            sys.stderr.flush()
                 elif job_type == "portal":
                     _, filepath, page_index, target_y, target_w, target_h, _scale_factor = args
                     req = {
@@ -586,7 +591,7 @@ class RenderWorker:
         self._respawn_child("unexpected death")
 
 
-def create_render_worker(mode: str, num_workers: int = 2, use_shm: bool = False):
+def create_render_worker(mode: str, num_workers: int = 2, use_shm: bool = True):
     """Instantiate a background render backend.
 
     ``mode`` selects the rasterization backend:

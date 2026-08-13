@@ -67,7 +67,7 @@ class PDFViewerApplication(Adw.Application):
         self.debug_note_rect: bool = False
         self.render_mode: str = "mp"
         self.render_workers: int = 2
-        self.use_shm: bool = False
+        self.use_shm: bool = True
 
     def do_activate(self):
         from .core.installation import get_installation_mode_info
@@ -156,9 +156,11 @@ def main():
         help="Number of parallel rasterization workers (default: 2)",
     )
     parser.add_argument(
-        "--use-shm",
-        action="store_true",
-        help="Enable zero-copy shared memory IPC for multiprocessing render backend",
+        "--no-shm",
+        action="store_false",
+        dest="use_shm",
+        default=True,
+        help="Disable zero-copy shared memory IPC for multiprocessing render backend",
     )
     parser.add_argument("--headless", action="store_true", help="Run inside a virtual display using xvfb-run if available")
 
