@@ -287,8 +287,21 @@ This document records durable technical findings, architectural decisions, mathe
   3. Child processes return lightweight 100-byte metadata dictionaries over IPC (without embedding `samples` bytes in the pickle payload), eliminating byte copying and `pickle` deserialization overhead.
   4. On process exit, `atexit` handlers cleanly close and unlink `SharedMemory` segments.
 
----
+### 1.30 Eliminating Main-Thread UI Scroll Stutter & OpenGL Quad Batching
 
+- **Background:** High-frequency main-thread profiling during scrolling revealed stutter even when page textures were already loaded in `RenderCache`.
+- **Root Causes Discovered:**
+  1. **GTK Widget Layout Invalidation (`Gtk.Entry.set_text`):** In `window.py`, `_on_scroll_page_changed()` called `self.page_input.set_text(str(page_num))` unconditionally on every scroll adjustment tick (60–120 Hz). Calling `set_text()` on GTK4 Entry widgets invalidates CSS and layout nodes, forcing text re-measurement passes on the main thread during scrolling even when the page number string hadn't changed.
+  2. **Per-Frame Timer Churn:** `_on_scroll_page_changed()` invoked `GLib.source_remove()` and `GLib.timeout_add()` on every scroll frame tick to reset state saving timers.
+  3. **PyMuPDF Link Fetching inside 60 FPS GL Render Loop:** `GLCanvas._on_render()` called `doc_model.get_page_links(i)` inside the render pass, invoking PyMuPDF C extensions on the main thread when a page first became visible.
+  4. **Per-Link Individual `fill_rect` Draw Calls:** `GLCanvas._on_render()` made 4 `fill_rect` draw calls for every single link on visible pages, updating 4 GL uniforms per call. For pages with 50+ links, this issued over 200 `glDrawArrays` calls per frame.
+- **Solution & Engineering Tradeoffs:**
+  - **Deduplicated `set_text`:** Guarded `page_input.set_text()` with `if self.page_input.get_text() != page_num_str`, reducing `_on_scroll_page_changed` CPU cost by >95% (from 1.16% to <0.04%).
+  - **Debounced State Save:** Moved `_schedule_state_save()` to `_on_scroll_settled()`.
+  - **Pre-cached Link Annotations:** Pre-cached all page links in `DocumentModel.__init__`, turning `get_page_links()` into a pure $O(1)$ array lookup with 0 PyMuPDF C-extension calls inside GL rendering.
+  - **Batched Quad Renderer (`fill_rects`):** Added `fill_rects()` to `QuadRenderer` to bind shader state and color uniforms once per batch. Grouped link borders and text selection rects into single batch calls, reducing GL quad render overhead from 6.53% to 3.44% and increasing main-thread GLib idle margin from 68.38% to 77.79%.
+
+---
 
 ## 2. Rejected Approaches
 
