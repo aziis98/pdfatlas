@@ -145,6 +145,21 @@ class QuadRenderer:
         gl.glUniform2f(self.u_page_size, float(w), float(h))
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
 
+    def fill_rects(
+        self,
+        rects: list[tuple[float, float, float, float]],
+        color: tuple[float, float, float, float],
+    ):
+        if not rects:
+            return
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        gl.glUniform1i(self.u_is_placeholder, 2)
+        gl.glUniform4f(self.u_color, *color)
+        for x, y, w, h in rects:
+            gl.glUniform2f(self.u_page_pos, float(x), float(y))
+            gl.glUniform2f(self.u_page_size, float(w), float(h))
+            gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
     def fill_round_rect(self, x: float, y: float, w: float, h: float,
                         color: tuple[float, float, float, float], radius: float):
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)

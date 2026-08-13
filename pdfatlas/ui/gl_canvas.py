@@ -193,12 +193,16 @@ class GLCanvas(Gtk.GLArea):
                     if sel_rects:
                         co_x = crop_rect.x0 if crop_rect is not None else 0.0
                         co_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        for rx0, ry0, rx1, ry1 in sel_rects:
-                            sx = x_offset + (rx0 - co_x) * scale
-                            sy = page_y0 + (ry0 - co_y) * scale
-                            sw = (rx1 - rx0) * scale
-                            sh = (ry1 - ry0) * scale
-                            r.fill_rect(sx, sy, sw, sh, (0.07, 0.175, 0.35, 0.35))
+                        sel_quads = [
+                            (
+                                x_offset + (rx0 - co_x) * scale,
+                                page_y0 + (ry0 - co_y) * scale,
+                                (rx1 - rx0) * scale,
+                                (ry1 - ry0) * scale,
+                            )
+                            for rx0, ry0, rx1, ry1 in sel_rects
+                        ]
+                        r.fill_rects(sel_quads, (0.07, 0.175, 0.35, 0.35))
 
                 if (canvas.debug_mode and canvas.text_selection is not None
                         and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection())):
@@ -387,6 +391,10 @@ class GLCanvas(Gtk.GLArea):
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
                     co_y = crop_rect.y0 if crop_rect is not None else 0.0
 
+                    internal_borders: list[tuple[float, float, float, float]] = []
+                    uri_borders: list[tuple[float, float, float, float]] = []
+                    bt = 1.8
+
                     for link in links:
                         from_rect = link.get("from")
                         if not from_rect:
@@ -410,15 +418,21 @@ class GLCanvas(Gtk.GLArea):
                             else:
                                 r.fill_rect(lx0, ly0, lw, lh, (0.06, 0.156, 0.27, 0.30))
 
+                        rect_quads = [
+                            (lx0, ly0, lw, bt),
+                            (lx0, ly0 + lh - bt, lw, bt),
+                            (lx0, ly0, bt, lh),
+                            (lx0 + lw - bt, ly0, bt, lh),
+                        ]
                         if is_uri:
-                            ec = (0.153, 0.646, 0.4165, 0.85)
+                            uri_borders.extend(rect_quads)
                         else:
-                            ec = (0.17, 0.442, 0.765, 0.85)
-                        bt = 1.8
-                        r.fill_rect(lx0, ly0, lw, bt, ec)
-                        r.fill_rect(lx0, ly0 + lh - bt, lw, bt, ec)
-                        r.fill_rect(lx0, ly0, bt, lh, ec)
-                        r.fill_rect(lx0 + lw - bt, ly0, bt, lh, ec)
+                            internal_borders.extend(rect_quads)
+
+                    if internal_borders:
+                        r.fill_rects(internal_borders, (0.17, 0.442, 0.765, 0.85))
+                    if uri_borders:
+                        r.fill_rects(uri_borders, (0.153, 0.646, 0.4165, 0.85))
 
                 if getattr(canvas, "debug_mode", False):
                     mc = (0.9, 0.0, 0.9, 0.9)
