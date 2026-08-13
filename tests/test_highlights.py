@@ -69,7 +69,8 @@ def test_double_click_word_selection():
     from pdfatlas.core.document import DocumentModel
     from pdfatlas.core.text_selection import TextSelection
 
-    doc = DocumentModel("./assets/sample-files/attention_is_all_you_need.pdf")
+    doc = DocumentModel("./sandbox.local/sample-files/attention_is_all_you_need.pdf")
+
     sel = TextSelection(doc)
 
     sel.select_word_at(0, 2)

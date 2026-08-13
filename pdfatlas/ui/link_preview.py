@@ -81,12 +81,8 @@ class LinkPreviewManager:
             return False
 
         target_rect = self.win.doc_model.page_rect(target_page)
-        to_point = link.get("to")
-        target_y = (
-            max(0.0, target_rect.height - float(to_point.y))
-            if (to_point and hasattr(to_point, "y") and to_point.y is not None and to_point.y > 0.0)
-            else (target_rect.height / 2.0)
-        )
+        target_y = self.win.doc_model.resolve_link_target_y(link)
+
 
         viewport_w = max(300.0, float(self.win.canvas.viewport_width()))
         viewport_h = max(300.0, float(self.win.canvas.viewport_height()))

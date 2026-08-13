@@ -1260,13 +1260,9 @@ class MainWindow(Adw.ApplicationWindow):
                     print(f"[MainWindow] Error launching URI {uri}: {e}", flush=True)
             return
 
-        target_rect = self.doc_model.page_rect(target_page)
-        to_point = link.get("to")
-        if to_point and hasattr(to_point, "y") and to_point.y is not None and to_point.y > 0.0:
-            # PyMuPDF to_point coordinates are PDF native bottom-up (0 is page bottom)
-            y_offset_in_page = max(0.0, target_rect.height - float(to_point.y))
-        else:
-            y_offset_in_page = 0.0
+        y_offset_in_page = self.doc_model.resolve_link_target_y(link)
+
+
 
         y_offset, dw, dh, crop_rect = self.canvas.page_layout[target_page]
         crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0

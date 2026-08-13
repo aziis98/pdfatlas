@@ -17,10 +17,11 @@ from pdfatlas.core.texture import PageTexture
 
 SAMPLE_PDF = (
     Path(__file__).resolve().parents[1]
-    / "assets"
+    / "sandbox.local"
     / "sample-files"
     / "attention_is_all_you_need.pdf"
 )
+
 
 
 def test_create_mp_worker():

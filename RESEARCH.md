@@ -248,7 +248,28 @@ This document records durable technical findings, architectural decisions, mathe
 - **Rebuild the overview list on popover open:** hook `popover.connect("notify::visible", …)` and call `_update_annotations_button()` when it becomes visible, so note labels/counts are always fresh without live-rebuilding on every keystroke.
 - **Cursor override gating:** `PDFATLAS_HIDE_CURSOR` is screenshot/debug-only. Only act when it equals `"1"`; when unset or `"0"`, do **not** force any cursor at realize — leave it to the canvas hover logic (`_on_pointer_motion` picks `pointer`/`default`). An earlier version defaulted to hiding and force-set a `default` cursor in the non-hide branch, both of which were unnecessary overrides.
 
+### 1.27. PDF Link Target Coordinate Resolution (`LINK_GOTO` vs `LINK_NAMED`)
+- **Finding:** Internal PDF links in PyMuPDF (`fitz`) belong to distinct link types with differing coordinate system representations for `link.get("to")`:
+  1. **Kind 1 (`fitz.LINK_GOTO` - Direct GoTo):** PyMuPDF automatically converts destination coordinates to **top-down page coordinates** ($0.0 = \text{top of page}$).
+  2. **Kind 4 (`fitz.LINK_NAMED` - Named Destinations):** PyMuPDF returns destination points in **PDF native bottom-up coordinates** ($0.0 = \text{bottom of page}$).
+- **The Bug:** Prior implementations unconditionally applied `target_y = target_rect.height - float(to_point.y)` to all links under the assumption that all `to_point` values were bottom-up. This worked for documents whose links are all Kind 4 (e.g. `applied_category_theory.pdf` with 2,665 Kind 4 links, or middle-of-page links where $y \approx \text{height} - y$), but inverted top/bottom links for Kind 1 documents (e.g. `deepseek-cordis.local.pdf` where citations like Ref 19 and Ref 33 are Kind 1).
+- **Solution / Unified Target Y Rule:**
+  ```python
+  def resolve_link_target_y(link: dict, target_page_rect: fitz.Rect) -> float:
+      to_point = link.get("to")
+      if not to_point or not hasattr(to_point, "y") or to_point.y is None:
+          return target_page_rect.height / 2.0
+      raw_y = float(to_point.y)
+      kind = link.get("kind")
+      if kind == 4:  # fitz.LINK_NAMED
+          return max(0.0, target_page_rect.height - raw_y)
+      else:
+          return max(0.0, raw_y)
+  ```
+- **Application:** Implemented as `DocumentModel.resolve_link_target_y(link)` in [`pdfatlas/core/document.py`](pdfatlas/core/document.py) and consumed across `link_preview.py` and `window.py`.
+
 ---
+
 
 ## 2. Rejected Approaches
 

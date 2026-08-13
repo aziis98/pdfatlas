@@ -81,8 +81,8 @@ pdfatlas/
 │       ├── theme.py         # Window CSS provider loading
 │       └── window.py        # MainWindow (Adw.HeaderBar, Gtk.Stack navigation)
 ├── assets/
-│   ├── sample-files/        # Sample PDF documents
 │   ├── screenshots/         # Documentation screenshots
+
 │   ├── shaders/             # OpenGL vertex and fragment shaders
 │   └── window.css           # Main window GTK CSS theme
 ├── scripts/                 # Maintenance and benchmark scripts

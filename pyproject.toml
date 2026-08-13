@@ -40,7 +40,10 @@ dev = [
 ignore = ["E402"]
 
 [tool.pyright]
+include = ["pdfatlas", "scripts", "tests"]
+exclude = ["sandbox.local", "**/__pycache__"]
 reportMissingModuleSource = false
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -17,8 +17,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MAIN_PY = REPO_ROOT / "main.py"
 WAYLAND_SCRIPT = REPO_ROOT / "scripts" / "screenshot_wayland_app.sh"
-ATTENTION_PDF = REPO_ROOT / "assets" / "sample-files" / "attention_is_all_you_need.pdf"
-CATEGORY_PDF = REPO_ROOT / "assets" / "sample-files" / "applied_category_theory.pdf"
+ATTENTION_PDF = REPO_ROOT / "sandbox.local" / "sample-files" / "attention_is_all_you_need.pdf"
+CATEGORY_PDF = REPO_ROOT / "sandbox.local" / "sample-files" / "applied_category_theory.pdf"
+
 OUTPUT_DIR = REPO_ROOT / "assets" / "screenshots"
 
 # Screenshot tasks: (output_filename, pdf_path, state_json)
