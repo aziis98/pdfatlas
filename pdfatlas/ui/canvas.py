@@ -631,6 +631,11 @@ class PDFCanvas(Gtk.Overlay):
         if not self.is_scrolling:
             self._scroll_use_low_res = self._slow_renders
         self.is_scrolling = True
+        if self.hovered_link is not None:
+            self.hovered_link = None
+        win = getattr(self, "win", None)
+        if win and hasattr(win, "link_preview_manager") and win.link_preview_manager:
+            win.link_preview_manager.hide_portal_card()
         self._arm_scroll_settle()
         self._update_visibility()
         self.gl_canvas.queue_draw()

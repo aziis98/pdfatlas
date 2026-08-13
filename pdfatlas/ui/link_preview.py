@@ -28,10 +28,23 @@ class LinkPreviewManager:
         # Setup portal card in container
         self.portal_card.set_visible(False)
 
+    def hide_portal_card(self):
+        """Immediately hides link portal preview cards and resets hover state."""
+        self._active_hover_link = None
+        self.portal_card.set_visible(False)
+        self.win.link_preview_label.set_text("")
+        self.win.link_preview_card_box.set_visible(False)
+        if not self.win.debug_info_label or not self.win.debug_info_label.get_visible():
+            self.win.link_preview_box.set_visible(False)
+
     def on_link_hovered(self, source_page_index: int | None, link: dict | None):
         """
         Handles mouse hover state over interactive PDF internal links.
         """
+        if self.win.canvas and self.win.canvas.is_scrolling:
+            self.hide_portal_card()
+            return
+
         if link:
             link_uri = link.get("uri", "")
             target_page = link.get("page")
@@ -59,13 +72,7 @@ class LinkPreviewManager:
                 self._active_hover_link = link
                 self.show_link_portal_preview(source_page_index, link)
         else:
-            self.win.link_preview_label.set_text("")
-            self.win.link_preview_card_box.set_visible(False)
-            self._active_hover_link = None
-            self.portal_card.set_visible(False)
-
-            if not self.win.debug_info_label or not self.win.debug_info_label.get_visible():
-                self.win.link_preview_box.set_visible(False)
+            self.hide_portal_card()
 
     def show_link_portal_preview(self, source_page_index: int | None, link: dict) -> bool:
         """
