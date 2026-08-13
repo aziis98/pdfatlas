@@ -668,6 +668,9 @@ class MainWindow(Adw.ApplicationWindow):
                         if "hover_link" in state:
                             hover_idx = int(state["hover_link"])
                             GLib.timeout_add(400, lambda: self._simulate_link_hover(hover_idx))
+                        if "scroll_benchmark" in state:
+                            bench_info = state["scroll_benchmark"]
+                            GLib.timeout_add(300, lambda: self._run_scroll_benchmark(bench_info))
                         if "selection" in state:
                             sel_info = state["selection"]
                             page_idx = int(sel_info.get("page", 0))
@@ -1914,6 +1917,74 @@ class MainWindow(Adw.ApplicationWindow):
                     self.link_preview_manager.on_link_hovered(page_idx, link)
                     return False
                 current_count += 1
+        return False
+
+    def _run_scroll_benchmark(self, bench_info: dict) -> bool:
+        """
+        Executes a frame-by-frame programmatic scroll benchmark between specified pages,
+        animating vadjustment smoothly and triggering auto-quit if configured.
+        """
+        if not self.doc_model or not self.canvas.page_layout:
+            return False
+
+        from_page_num = int(bench_info.get("from_page", 8))
+        to_page_num = int(bench_info.get("to_page", 9))
+        steps = max(1, int(bench_info.get("steps", 40)))
+        interval_ms = max(1, int(bench_info.get("interval_ms", 16)))
+        repeat_count = max(1, int(bench_info.get("repeat", 3)))
+        auto_quit = bool(bench_info.get("auto_quit", True))
+
+        from_idx = max(0, min(self.doc_model.page_count - 1, from_page_num - 1))
+        to_idx = max(0, min(self.doc_model.page_count - 1, to_page_num - 1))
+
+        page_layout = self.canvas.page_layout
+        if not page_layout or from_idx >= len(page_layout) or to_idx >= len(page_layout):
+            return False
+
+        page_gap = self.canvas.page_gap
+        y_start = max(0.0, page_layout[from_idx][0] - (page_gap / 2.0))
+        y_end = max(0.0, page_layout[to_idx][0] - (page_gap / 2.0))
+
+        self.vadjustment.set_value(y_start)
+
+        current_repeat = 0
+        current_step = 0
+        direction = 1
+
+        print(
+            f"[ScrollBenchmark] Starting benchmark: Page {from_page_num} -> {to_page_num} "
+            f"({y_start:.1f}px -> {y_end:.1f}px) across {steps} steps x {repeat_count} repeats",
+            flush=True,
+        )
+
+        def _step_callback():
+            nonlocal current_step, current_repeat, direction
+            current_step += 1
+            t = current_step / steps
+            if direction == 1:
+                target_y = y_start + t * (y_end - y_start)
+            else:
+                target_y = y_end + t * (y_start - y_end)
+
+            self.vadjustment.set_value(target_y)
+
+            if current_step >= steps:
+                current_step = 0
+                if direction == 1:
+                    direction = -1
+                else:
+                    direction = 1
+                    current_repeat += 1
+
+                if current_repeat >= repeat_count:
+                    print("[ScrollBenchmark] Benchmark complete.", flush=True)
+                    if auto_quit:
+                        GLib.timeout_add(500, lambda: self.app.quit())
+                    return False
+
+            return True
+
+        GLib.timeout_add(interval_ms, _step_callback)
         return False
 
     def jump_to_page(self, page_index: int, smooth: bool = True):

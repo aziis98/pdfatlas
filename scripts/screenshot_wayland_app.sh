@@ -253,7 +253,6 @@ if [ "$USE_LABWC" = "1" ]; then
     exit 1
   fi
   echo "[Screenshot Tool] Application process alive and running."
-
   SANDBOX_DIR="$APP_DIR/sandbox.local"
   mkdir -p "$SANDBOX_DIR"
 
@@ -267,6 +266,12 @@ if [ "$USE_LABWC" = "1" ]; then
 
   echo "[Screenshot Tool] Step 1: Capturing pure Wayland frame via grim..."
   WAYLAND_DISPLAY="$WAYLAND_SOCKET_NAME" grim "$STEP1_RAW"
+
+  if [ "${WAIT_FOR_EXIT:-0}" = "1" ]; then
+    echo "[Screenshot Tool] Waiting for application process (PID: $APP_PID) to exit..."
+    wait "$APP_PID" 2>/dev/null || true
+    echo "[Screenshot Tool] Application process exited."
+  fi
 
 else
   echo "[Screenshot Tool] Falling back to Weston + Xvfb pipeline..."
@@ -351,35 +356,6 @@ else
     exit 1
   fi
   echo "[Screenshot Tool] Application process alive and running."
-
-  EXACT_COORDS=$(grep -oE 'NOTE_ICON_EXACT_COORDS: [0-9]+,[0-9]+' "$APP_LOG" | tail -1 | cut -d' ' -f2 || true)
-  if [ -n "$EXACT_COORDS" ] && [ "${OVERRIDE_CURSOR_COORDS:-0}" = "0" ]; then
-    CURSOR_X=$(echo "$EXACT_COORDS" | cut -d',' -f1)
-    CURSOR_Y=$(echo "$EXACT_COORDS" | cut -d',' -f2)
-    echo "[Screenshot Tool] Auto-detected note icon exact coordinates: ($CURSOR_X, $CURSOR_Y)"
-  else
-    CURSOR_X="${CURSOR_X:-960}"
-    CURSOR_Y="${CURSOR_Y:-540}"
-  fi
-
-  export CURSOR_X="$CURSOR_X"
-  export CURSOR_Y="$CURSOR_Y"
-
-  echo "[Screenshot Tool] Moving mouse cursor to ($CURSOR_X, $CURSOR_Y)..."
-  DISPLAY=":$XVFB_DISPLAY_NUM" xdotool mousemove "$CURSOR_X" "$CURSOR_Y" 2>/dev/null || true
-  sleep 0.2
-
-  echo "[Screenshot Tool] Locating Weston X11 window..."
-  WIN_ID=$(xwininfo -root -tree -display ":$XVFB_DISPLAY_NUM" 2>/dev/null \
-    | grep "Weston Compositor" | grep -oE '0x[0-9a-f]+' | head -1)
-
-  if [ -z "$WIN_ID" ]; then
-    echo "ERROR: could not find weston's X11 window. xwininfo output:" >&2
-    xwininfo -root -tree -display ":$XVFB_DISPLAY_NUM" >&2
-    exit 1
-  fi
-  echo "[Screenshot Tool] Found Weston X11 window ID: $WIN_ID"
-
   SANDBOX_DIR="$APP_DIR/sandbox.local"
   mkdir -p "$SANDBOX_DIR"
 
@@ -393,6 +369,12 @@ else
 
   echo "[Screenshot Tool] Step 1: Capturing raw Weston window screenshot..."
   import -window "$WIN_ID" "$STEP1_RAW"
+
+  if [ "${WAIT_FOR_EXIT:-0}" = "1" ]; then
+    echo "[Screenshot Tool] Waiting for application process (PID: $APP_PID) to exit..."
+    wait "$APP_PID" 2>/dev/null || true
+    echo "[Screenshot Tool] Application process exited."
+  fi
 fi
 
 python3 -c "

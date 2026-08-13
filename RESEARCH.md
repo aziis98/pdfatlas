@@ -253,6 +253,14 @@ This document records durable technical findings, architectural decisions, mathe
   1. **Kind 1 (`fitz.LINK_GOTO` - Direct GoTo):** PyMuPDF automatically converts destination coordinates to **top-down page coordinates** ($0.0 = \text{top of page}$).
   2. **Kind 4 (`fitz.LINK_NAMED` - Named Destinations):** PyMuPDF returns destination points in **PDF native bottom-up coordinates** ($0.0 = \text{bottom of page}$).
 - **The Bug:** Prior implementations unconditionally applied `target_y = target_rect.height - float(to_point.y)` to all links under the assumption that all `to_point` values were bottom-up. This worked for documents whose links are all Kind 4 (e.g. `applied_category_theory.pdf` with 2,665 Kind 4 links, or middle-of-page links where $y \approx \text{height} - y$), but inverted top/bottom links for Kind 1 documents (e.g. `deepseek-cordis.local.pdf` where citations like Ref 19 and Ref 33 are Kind 1).
+
+### 1.28. Headless Scroll Performance Profiling Harness (`scripts/profile_scrolling.py`)
+- **Finding:** GTK4's `GtkScrolledWindow` has no built-in `smooth_scroll_to` method; scroll adjustments (`vadjustment.set_value`) update position instantly.
+- **Scroll Benchmark Engine:** Added `--state` parsing for `"scroll_benchmark"` in `pdfatlas/ui/window.py`. `_run_scroll_benchmark()` calculates page scroll Y coordinates from `canvas.page_layout` and uses GTK timeout callbacks to step `vadjustment.set_value()` frame-by-frame between configured pages (`from_page` -> `to_page`), triggering `app.quit()` after `repeat` passes.
+- **Headless Profiling Harness:** Combined `py-spy record --format flamegraph --subprocesses` with `scripts/screenshot_wayland_app.sh` (using `WAIT_FOR_EXIT=1`) to capture single-process (`--render-mode mt`) and multi-process (`--render-mode mp`) flame graphs headlessly without manual user interaction.
+- **Page Boundary Lag Root Cause:**
+  1. **`mt` Mode:** PyMuPDF C-calls (`fz_new_display_list_from_page`, `fz_run_display_list`) re-acquire Python's GIL during image decode/scaling on worker threads, causing brief 10–30ms main-thread micro-stalls.
+  2. **`mp` Mode:** While rasterization runs off-thread in child processes, large raw RGB pixel buffers (~14.4 MB per page) are transferred via IPC (`multiprocessing/connection.py`), followed by main-thread GPU texture allocation (`TextureUploader` / `glTexImage2D`) when the new page boundary enters the viewport.
 - **Solution / Unified Target Y Rule:**
   ```python
   def resolve_link_target_y(link: dict, target_page_rect: fitz.Rect) -> float:
