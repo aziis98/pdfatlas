@@ -582,8 +582,8 @@ class NotesLayer:
         # Icon centered on the note point; top-left uses a -13 offset with a
         # 34x34 size.
         rect = Gdk.Rectangle()
-        rect.x = round(page_x0 + scale * (note["x"] - crop_off_x) - scroll_x - 13.0)
-        rect.y = round(_y_offset + scale * (note["y"] - crop_off_y) - scroll_y - 13.0)
+        rect.x = page_x0 + scale * (note["x"] - crop_off_x) - scroll_x - 13.0
+        rect.y = _y_offset + scale * (note["y"] - crop_off_y) - scroll_y - 32.0
         rect.width = 34
         rect.height = 34
         return rect
