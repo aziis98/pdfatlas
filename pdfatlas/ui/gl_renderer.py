@@ -116,7 +116,7 @@ class QuadRenderer:
         self._offset_y = float(offset_y)
 
         gl.glViewport(0, 0, physical_w, physical_h)
-        gl.glClearColor(0.88, 0.88, 0.88, 1.0)
+        gl.glClearColor(0.0, 0.0, 0.0, 0.0)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
         gl.glUseProgram(self.program)
