@@ -60,8 +60,8 @@ class PageContainer(Gtk.Overlay):
         self.h = 0.0
         self.crop_rect = None
 
-        self.set_valign(Gtk.Align.CENTER)
-        self.set_halign(Gtk.Align.CENTER)
+        self.set_valign(Gtk.Align.START)
+        self.set_halign(Gtk.Align.START)
         self.set_focusable(False)
         self.add_css_class("page-container")
 
@@ -175,7 +175,7 @@ class PDFCanvas(Gtk.Overlay):
         self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.ALWAYS)
         self.add_overlay(self.scrolled_window)
 
-        self._layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._layout = Gtk.Fixed()
         self.scrolled_window.set_child(self._layout)
 
         # Internal scroll wiring: adjustments feed visibility / render scheduling
@@ -183,6 +183,12 @@ class PDFCanvas(Gtk.Overlay):
         self.vadjustment = self.scrolled_window.get_vadjustment()
         self.vadjustment.connect("value-changed", self._on_scroll)
         self.hadjustment.connect("value-changed", self._on_scroll)
+
+        # Reposition pages (x offsets) when the viewport width changes so pages
+        # stay horizontally centered even though GtkFixed does no auto-layout.
+        self.hadjustment.connect(
+            "notify::page-size", lambda *_: self._reposition_pages()
+        )
 
         self.set_focusable(False)
 
@@ -223,6 +229,37 @@ class PDFCanvas(Gtk.Overlay):
     def viewport_height(self) -> int:
         """Height of the visible document viewport, in device pixels."""
         return self.scrolled_window.get_height()
+
+    def _viewport_width(self) -> float:
+        """Viewport width, preferring the horizontal adjustment page size (robust
+        before the scrolled window is realized and on resize)."""
+        if self.hadjustment and self.hadjustment.get_page_size() > 0:
+            return self.hadjustment.get_page_size()
+        return float(self.get_width())
+
+    def _reposition_pages(self, viewport_w: float | None = None):
+        """Absolutely position each PageContainer at its float page_layout
+        coordinate, snapped to pixels only at the last step (round of the
+        absolute y, so error stays <=0.5px per page and never accumulates).
+
+        Also sizes the fixed content box and re-centers pages horizontally when
+        the viewport width changes (GtkFixed performs no auto-layout, unlike the
+        previous Gtk.Box)."""
+        if not self.page_layout or not self.containers:
+            return
+        if viewport_w is None:
+            viewport_w = self._viewport_width()
+        max_dw = max((dw for _, dw, _, _ in self.page_layout), default=0.0)
+        box_w = max(viewport_w, max_dw)
+        # Content height mirrors the float accumulation in update_layout.
+        _last_y, _last_dw, last_dh, _last_crop = self.page_layout[-1]
+        content_h = _last_y + last_dh + self.page_gap
+        self._layout.set_size_request(int(box_w), int(content_h))
+        for i, (y_offset, dw, _dh, _crop) in enumerate(self.page_layout):
+            if i >= len(self.containers):
+                break
+            page_x0 = round((box_w - dw) / 2.0)
+            self._layout.move(self.containers[i], page_x0, round(y_offset))
 
     def set_kinetic_scrolling(self, enabled: bool) -> None:
         """Enable or disable kinetic (inertial) scrolling of the document."""
@@ -723,8 +760,6 @@ class PDFCanvas(Gtk.Overlay):
             self.page_gap = 12
 
         page_count = self.doc_model.page_count
-        self._layout.set_spacing(self.page_gap)
-        self._layout.set_margin_bottom(int(self.page_gap))
 
         # Rebuild/recreate container widgets if size differs
         if len(self.containers) != page_count:
@@ -737,7 +772,9 @@ class PDFCanvas(Gtk.Overlay):
             self.containers = []
             for i in range(page_count):
                 container = PageContainer(i)
-                self._layout.append(container)
+                if getattr(self, "debug_mode", False):
+                    container.add_css_class("page-container-debug")
+                self._layout.put(container, 0, 0)
                 self.containers.append(container)
 
         current_y = 0.0
@@ -764,6 +801,8 @@ class PDFCanvas(Gtk.Overlay):
 
         if self.vadjustment:
             self.vadjustment.set_upper(current_y)
+
+        self._reposition_pages()
 
         notes_layer = getattr(self, "notes_layer", None)
         if notes_layer is not None:

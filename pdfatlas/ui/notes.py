@@ -25,6 +25,10 @@ PREVIEW_HIDE_MS = 200
 EDITOR_RENDER_MS = 32
 #: Debounce between keystroke and DB write in the editor.
 EDITOR_SAVE_MS = 300
+#: Rendered size of the note-icon button. Used to center the icon on the note
+#: point both in `_position_icon` and `_preview_anchor_rect`, so the icon box
+#: and the preview anchor rect agree exactly. (HALF used for top-left offsets.)
+NOTE_ICON_SIZE = 34.0
 
 HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 <html>
@@ -374,7 +378,7 @@ class NotesLayer:
         _y_offset, dw, dh, crop_rect = layout[note["page"]]
         scale = layout_scale(self.win.canvas.zoom, self.win.canvas.dpi_scale_factor)
         mx, my = pdf_point_to_page_margin(
-            scale, note["x"], note["y"], crop_rect, dw, dh
+            scale, note["x"], note["y"], crop_rect, dw, dh, icon_size=NOTE_ICON_SIZE
         )
         btn.set_margin_start(int(mx))
         btn.set_margin_top(int(my))
@@ -579,13 +583,14 @@ class NotesLayer:
         page_x0 = (box_w - dw) / 2.0
         crop_off_x = crop_rect.x0 if crop_rect is not None else 0.0
         crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
-        # Icon centered on the note point; top-left uses a -13 offset with a
-        # 34x34 size.
+        half = NOTE_ICON_SIZE / 2.0
+        # Icon box centered on the note point (matches _position_icon, which uses
+        # the same NOTE_ICON_SIZE), so the arrow points at the note point.
         rect = Gdk.Rectangle()
-        rect.x = page_x0 + scale * (note["x"] - crop_off_x) - scroll_x - 13.0
-        rect.y = _y_offset + scale * (note["y"] - crop_off_y) - scroll_y - 32.0
-        rect.width = 34
-        rect.height = 34
+        rect.x = round(page_x0 + scale * (note["x"] - crop_off_x) - scroll_x - half - 1.0)
+        rect.y = round(_y_offset + scale * (note["y"] - crop_off_y) - scroll_y - half - 1.0)
+        rect.width = int(NOTE_ICON_SIZE + 1.0)
+        rect.height = int(NOTE_ICON_SIZE + 1.0)
         return rect
 
     def _on_preview_hide(self):

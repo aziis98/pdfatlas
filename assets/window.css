@@ -186,6 +186,16 @@ page overlay, plus a soft shadow. */
     box-shadow: 0 1px 3px alpha(#000000, 0.35);
 }
 
+/* Debug-only (-–debug): outline each real GTK page container allocation in
+   magenta so container bounds and any drift from the GL textures / page_layout
+   are visually auditable. */
+.page-container-debug {
+    border: 2px solid #00ffd5;
+    background: none;
+    box-shadow: none;
+    outline: none;
+}
+
 /* Compact note preview popover: no theme chrome (padding/margin/arrow) and a
    small shadow — GtkPopover sizes itself to content + box-shadow extents of
    its `contents` node (the default libadwaita shadow inflates it by ~32px per
