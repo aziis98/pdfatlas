@@ -1,36 +1,10 @@
-import multiprocessing
 import os
 import sys
 
-# Spawn children (RenderWorker) re-import this module during multiprocessing's
-# child preparation, before the bootstrap reaches the target function. Their
-# stderr is redirected into the log chosen by the parent (see
-# ``RenderWorker.__init__``) so a crash in the spawn/import chain (e.g.
-# WebKitGTK) is diagnosable instead of "child processes keep dying (unexpected
-# death)". ``current_process()._inheriting`` is set by ``spawn_main.prepare()``
-# only while the child is importing the main module; the app's own import of
-# this module never sees it set.
-if getattr(multiprocessing.current_process(), "_inheriting", False):
-    # Ctrl+C (SIGINT) goes to the whole foreground process group, including
-    # render children; their Python-level handler raises KeyboardInterrupt and
-    # kills them mid-import or mid-loop, which the parent misreads as an
-    # unexpected crash and respawns (queue/semaphore leak + "giving up" spam).
-    # The parent owns child lifecycles (terminate() on shutdown), so children
-    # ignore SIGINT entirely (see RESEARCH.md §1.23).
-    import signal as _signal
+from .core.process_utils import init_child_process_prelude
 
-    _signal.signal(_signal.SIGINT, _signal.SIG_IGN)
-    _child_log = os.environ.get("PDFATLAS_CHILD_STDERR_LOG")
-    if _child_log:
-        try:
-            import time as _time
-
-            _f = open(_child_log, "a", buffering=1)
-            sys.stderr = _f
-            sys.stdout = _f
-            _f.write(f"\n=== render child pid={os.getpid()} at {_time.time():.3f} ===\n")
-        except Exception:
-            pass
+# Early initialization for multiprocessing spawn workers before GTK/WebKit imports
+init_child_process_prelude()
 
 # WebKitGTK must run without its compositing mode (unstable on some GPUs);
 # set before any gi/GTK initialization (see RESEARCH.md §1.21).
