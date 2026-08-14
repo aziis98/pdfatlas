@@ -120,13 +120,15 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Markdown Preview</title>
 
-  <!-- Marked.js for Markdown parsing -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- markdown-it for Markdown parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.3.0/dist/markdown-it.min.js"></script>
+  <!-- markdown-it-texmath: tokenizes $/$$/\\(…\\)/\\[…\\]/begin{} math BEFORE the
+       escape rule, so LaTeX escapes like \\{ \\} \\, reach KaTeX untouched. -->
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it-texmath@1.0.0/texmath.js"></script>
 
   <!-- KaTeX for TeX Math rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
 
   <style>
     :root {
@@ -230,32 +232,56 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
       overflow-y: hidden;
       padding: 8px 0;
     }
+
+    /* markdown-it-texmath output wrappers (css/texmath.css) */
+    .katex { font-size: 1em !important; }
+    eq { display: inline-block; }
+    eqn { display: block; }
+    section.eqno {
+      display: flex;
+      flex-direction: row;
+      align-content: space-between;
+      align-items: center;
+    }
+    section.eqno > eqn {
+      width: 100%;
+      margin-left: 3em;
+    }
+    section.eqno > span {
+      width: 3em;
+      text-align: right;
+    }
   </style>
 </head>
 <body>
   <div id="content"></div>
 
   <script>
+    let _md = null;
+
+    function getMarkdownIt() {
+      if (_md === null &&
+          typeof markdownit !== 'undefined' &&
+          typeof texmath !== 'undefined' &&
+          typeof katex !== 'undefined') {
+        _md = markdownit({ html: true }).use(texmath, {
+          engine: katex,
+          delimiters: ['dollars', 'brackets', 'beg_end'],
+          katexOptions: { throwOnError: false }
+        });
+      }
+      return _md;
+    }
+
     function updateContent(markdownText) {
       const container = document.getElementById("content");
       if (!container) return;
 
-      if (typeof marked !== 'undefined') {
-        container.innerHTML = marked.parse(markdownText);
+      const md = getMarkdownIt();
+      if (md !== null) {
+        container.innerHTML = md.render(markdownText);
       } else {
         container.textContent = markdownText;
-      }
-
-      if (typeof renderMathInElement !== 'undefined') {
-        renderMathInElement(container, {
-          delimiters: [
-            {left: '$$', right: '$$', display: true},
-            {left: '$', right: '$', display: false},
-            {left: '\\\\(', right: '\\\\)', display: false},
-            {left: '\\\\[', right: '\\\\]', display: true}
-          ],
-          throwOnError: false
-        });
       }
     }
   </script>

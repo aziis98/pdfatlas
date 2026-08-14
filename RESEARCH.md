@@ -299,7 +299,17 @@ This document records durable technical findings, architectural decisions, mathe
   - **Deduplicated `set_text`:** Guarded `page_input.set_text()` with `if self.page_input.get_text() != page_num_str`, reducing `_on_scroll_page_changed` CPU cost by >95% (from 1.16% to <0.04%).
   - **Debounced State Save:** Moved `_schedule_state_save()` to `_on_scroll_settled()`.
   - **Pre-cached Link Annotations:** Pre-cached all page links in `DocumentModel.__init__`, turning `get_page_links()` into a pure $O(1)$ array lookup with 0 PyMuPDF C-extension calls inside GL rendering.
-  - **Batched Quad Renderer (`fill_rects`):** Added `fill_rects()` to `QuadRenderer` to bind shader state and color uniforms once per batch. Grouped link borders and text selection rects into single batch calls, reducing GL quad render overhead from 6.53% to 3.44% and increasing main-thread GLib idle margin from 68.38% to 77.79%.
+   - **Batched Quad Renderer (`fill_rects`):** Added `fill_rects()` to `QuadRenderer` to bind shader state and color uniforms once per batch. Grouped link borders and text selection rects into single batch calls, reducing GL quad render overhead from 6.53% to 3.44% and increasing main-thread GLib idle margin from 68.38% to 77.79%.
+
+### 1.31. Note Preview Markdown: Math Rendering & LaTeX Escape Preservation
+
+- **Background:** The note-preview webview needed LaTeX math ($\LaTeX$ `$...$`, `$$...$$`, `\(...\)`, `\[...\]`, `\begin{}` environments) alongside markdown. Naive approaches either stripped backslashes or double-rendered via the markdown escape rule.
+- **Vendored Assets (`assets/markdown/`):** `markdown-it.min.js`, `texmath.js`, and `katex.min.js` are committed so the webview renders with **zero network access**. Pip-installed packages (KaTeX) are a static browser bundle and cannot be shipped from `site-packages` reliably.
+- **Why `markdown-it` + `texmath` + `katex` instead of `marked` + `markdown-it-katex`:** `markdown-it-texmath` tokenizes `$...$`/`\(...\)`/`\begin{}` math in a dedicated rule that runs **before** the markdown escape rule, so backslash sequences inside math reach KaTeX untouched. `marked`/markdown-it-katex treat `$` as ordinary text and mangle inline math.
+- **The parse-order failure mode:** In the old template the markdown escape rule ran first and turned `\{`/`\}` into `{`/`}`, so KaTeX never saw the backslash — inline `$\{x\}$` rendered as literal braces (no grouping). Fix: `md.inline.ruler`'s `escape` must not fire inside math; `texmath` handles this by running math tokenization before the escape rule.
+- **`texmath` fork detail:** Upstream `texmath.js` only exposes itself as a CommonJS module or relies on classic-script top-level function declaration becoming `window.texmath`. We explicitly added `window.texmath = texmath` (guarded by `typeof window === "object"`) so the webview binding works regardless of script context. This is the only vendored-file divergence; document it before re-copying upstream.
+- **KaTeX options matter:** `{throwOnError: false}` is required so malformed/partial math renders as literal text instead of throwing during `updateContent`. Without it a single bad `$` could break the entire preview.
+- **Verification:** Loading order in the template is critical — `markdown-it.min.js` → `texmath.js` → `katex.min.js` — because each UMD/classic script pollutes `window`. A headless node script (`scripts/markdown_renderer.py`) reproduces the webview's global-based wiring and asserts the math HTML is produced (KaTeX `span.katex`), escape preservation, and that currency/`\$` text stays literal.
 
 ---
 
