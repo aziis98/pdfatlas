@@ -82,12 +82,6 @@ class PDFViewerApplication(Adw.Application):
 
             if existing:
                 source = existing
-            elif aid and not os.path.exists(raw_arg):
-                source = PdfSource(
-                    source_type="arxiv",
-                    uri=raw_arg,
-                    display_name=f"arXiv:{aid}",
-                )
             elif aid:
                 source = PdfSource(
                     source_type="arxiv",

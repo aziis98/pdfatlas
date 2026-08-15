@@ -130,7 +130,7 @@ class SearchController:
 
         self.win.stack.set_visible_child_name("search-view")
 
-        if hasattr(self.win, "search_scrolled") and self.win.search_scrolled:
+        if self.win.search_scrolled:
             vadj = self.win.search_scrolled.get_vadjustment()
             if vadj:
                 vadj.set_value(vadj.get_lower())

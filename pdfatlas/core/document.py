@@ -61,7 +61,7 @@ class DocumentModel:
         
         target_rect = self.page_rect(target_page)
         to_point = link.get("to")
-        if not to_point or not hasattr(to_point, "y") or to_point.y is None or to_point.y < 0.0:
+        if not isinstance(to_point, fitz.Point) or to_point.y < 0.0:
             return target_rect.height / 2.0
         
         raw_y = float(to_point.y)

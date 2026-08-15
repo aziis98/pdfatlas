@@ -184,7 +184,7 @@ class GLCanvas(Gtk.GLArea):
                         hh = (by1 - by0) * scale
                         r.fill_rect(hx, hy, hw, hh, (0.35, 0.2975, 0.0, 0.35))
 
-                if hasattr(canvas, "highlights") and canvas.highlights:
+                if canvas.highlights:
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
                     co_y = crop_rect.y0 if crop_rect is not None else 0.0
                     pad = 2.0

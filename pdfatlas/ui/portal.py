@@ -329,7 +329,7 @@ class ResultRow(Gtk.Overlay):
 
     def _render_worker(self, pdf_path, page_no, x0, y0, x1, y1, query_terms):
         try:
-            scale_factor = float(self.get_scale_factor()) if hasattr(self, "get_scale_factor") and self.get_scale_factor() > 0 else 2.0
+            scale_factor = float(self.get_scale_factor() or 2.0)
             surface = render_strip_surface(
                 pdf_path,
                 page_no,

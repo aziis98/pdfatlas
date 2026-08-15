@@ -4,7 +4,6 @@ import threading
 from bisect import bisect_right
 from pathlib import Path
 
-
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -24,13 +23,13 @@ from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
 from ..core.index import DatabaseService, get_db_for_pdf, load_doc_state
 from ..core.installation import ensure_app_installed, is_app_installed
-
+from ..core.pdf_source import PdfSource, RecentFilesManager
 from ..core.renderer import create_render_worker
 from ..core.settings import CropSettings
-from ..core.pdf_source import PdfSource, RecentFilesManager
 from .arxiv_dialog import ArxivDialog
+from .cairo_utils import hsl_to_hex
 from .canvas import PDFCanvas
-
+from .gui import box, button, label, scrolled_window, search_entry, spacer
 from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
 from .notes import NotesLayer
@@ -38,8 +37,6 @@ from .services import IconThemeManager
 from .settings import SettingsWindow
 from .shortcuts import ShortcutsController
 from .theme import load_window_css
-from .gui import box, button, label, search_entry, scrolled_window, spacer
-from .cairo_utils import hsl_to_hex
 from .welcome import WelcomeView
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
@@ -121,14 +118,16 @@ class MainWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
         self.app = app
         self.set_title("PDF Viewer")
-        self.debug_mode = debug_mode
-        self.debug_note_rect = debug_note_rect
         self.set_default_size(1000, 700)
+
+        # 1. Window & CLI execution parameters
         self.initial_state = state
         self.follow_link = follow_link
+        self.debug_mode = debug_mode
+        self.debug_note_rect = debug_note_rect
         self._deferred_state_query = None
 
-        # Core models
+        # 2. Core models & persistent configuration
         self.doc_model = None
         self.crop_analyzer = None
         self.settings = CropSettings.load()
@@ -136,37 +135,56 @@ class MainWindow(Adw.ApplicationWindow):
         self.recent_files = RecentFilesManager()
         self.arxiv_mapper: ArxivDiffMapper | None = None
 
-
-        # LRU Caches and background thread pool for canvas rendering
+        # 3. LRU Caches and background rendering worker
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
         self.render_worker = create_render_worker(render_mode, num_workers=render_workers, use_shm=use_shm)
-        shm_str = " (zero-copy SHM IPC enabled)" if use_shm else ""
-        print(f"[PDFAtlas] render backend: {render_mode} x{render_workers}{shm_str}", flush=True)
 
-        # Thread pool for search indexing & result portal rendering
+        print(f"[PDFAtlas] render backend: {render_mode} x{render_workers}", flush=True)
+        if use_shm:
+            print("[PDFAtlas] Zero-copy SHM IPC enabled", flush=True)
+
+        # 4. Search indexing & database persistence
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
         self.db_service = DatabaseService()
         self.index_conn = None
         self._state_save_timer_id: int | None = None
         self.pinned = {}  # id -> {"result": ..., "query_terms": ...}
-
         self._debounce_source_id = None
         self._last_query = ""
 
-        # Highlights state
-        self.highlights: list[dict] = []
-        self.notes: list[dict] = []
-        self.active_highlight_color: str = "#FFF49C"
-
-        # UI Zoom & pointer state
+        # 5. UI, viewport, annotations & interaction state
         self.zoom = 1.0
         self.pointer_x: float = 0.0
         self.pointer_y: float = 0.0
+        self.highlights: list[dict] = []
+        self.notes: list[dict] = []
+        self.active_highlight_color: str = "#FFF49C"
         self._active_progress_tasks: dict[str, dict] = {}
-
-        # Define window actions for the menu
         self.night_mode = self.is_effective_dark()
+
+        # Optional / on-demand widgets and debug labels
+        self.minimap_dialog: MinimapWindow | None = None
+        self.debug_cache_label: Gtk.Label | None = None
+        self.debug_info_label: Gtk.Label | None = None
+
+        # 6. Window actions and menu signals
+        self._setup_actions()
+
+        # 7. Feature controllers
+        self.nav_controller = NavigationController(self)
+        self.search_controller = SearchController(self)
+
+        # 8. Build UI hierarchy & widgets
+        self._build_ui()
+
+        # 9. Keyboard shortcuts and window event listeners
+        self.shortcuts_controller = ShortcutsController(self)
+        self.connect("realize", self._on_window_realized)
+
+    def _setup_actions(self):
+        """Register application and window Gio actions."""
+        # Night mode stateful toggle
         self.night_mode_action = Gio.SimpleAction.new_stateful(
             "night-mode", None, GLib.Variant.new_boolean(self.night_mode)
         )
@@ -175,55 +193,36 @@ class MainWindow(Adw.ApplicationWindow):
 
         Adw.StyleManager.get_default().connect("notify::dark", self._on_style_manager_dark_changed)
 
-        gapless_state = not self.settings.page_gaps
+        # Gapless mode stateful toggle
         self.gapless_action = Gio.SimpleAction.new_stateful(
-            "gapless-mode", None, GLib.Variant.new_boolean(gapless_state)
+            "gapless-mode", None, GLib.Variant.new_boolean(not self.settings.page_gaps)
         )
         self.gapless_action.connect("activate", self._on_gapless_action_activated)
         self.add_action(self.gapless_action)
 
-        crop_state = self.settings.enabled
+        # Crop mode stateful toggle
         self.crop_action = Gio.SimpleAction.new_stateful(
-            "crop-mode", None, GLib.Variant.new_boolean(crop_state)
+            "crop-mode", None, GLib.Variant.new_boolean(self.settings.enabled)
         )
         self.crop_action.connect("activate", self._on_crop_action_activated)
         self.add_action(self.crop_action)
 
-        self.connect("realize", self._on_window_realized)
-
-        settings_action = Gio.SimpleAction.new("open-settings", None)
-        settings_action.connect("activate", lambda act, param: self._on_settings_btn_clicked(None))
-        self.add_action(settings_action)
-
-        about_action = Gio.SimpleAction.new("about", None)
-        about_action.connect("activate", lambda act, param: self._on_about_action_activated(None))
-        self.add_action(about_action)
-
-        install_action = Gio.SimpleAction.new("install-app", None)
-        install_action.connect("activate", lambda act, param: self._on_install_app_action_activated())
-        self.add_action(install_action)
-
-        open_file_action = Gio.SimpleAction.new("open-file", None)
-        open_file_action.connect("activate", lambda act, param: self._open_file_dialog())
-        self.add_action(open_file_action)
-
-        open_arxiv_action = Gio.SimpleAction.new("open-arxiv", None)
-        open_arxiv_action.connect("activate", lambda act, param: self._open_arxiv_dialog())
-        self.add_action(open_arxiv_action)
+        # Stateless command actions
+        actions = [
+            ("open-settings", lambda act, param: self._on_settings_btn_clicked(None)),
+            ("about", lambda act, param: self._on_about_action_activated(None)),
+            ("install-app", lambda act, param: self._on_install_app_action_activated()),
+            ("open-file", lambda act, param: self._open_file_dialog()),
+            ("open-arxiv", lambda act, param: self._open_arxiv_dialog()),
+        ]
+        for name, callback in actions:
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", callback)
+            self.add_action(action)
 
         open_recent_action = Gio.SimpleAction.new("open-recent", GLib.VariantType.new("s"))
         open_recent_action.connect("activate", self._on_open_recent)
         self.add_action(open_recent_action)
-
-        # Controllers setup
-        self.nav_controller = NavigationController(self)
-        self.search_controller = SearchController(self)
-
-        # Build UI layout
-        self._build_ui()
-
-        # Setup shortcuts controller
-        self.shortcuts_controller = ShortcutsController(self)
 
     def _is_entry_focused(self) -> bool:
         focus = self.get_focus()
@@ -537,7 +536,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self.doc_model.close()
 
             # Save state for previous document
-            if hasattr(self, "db_service") and self.db_service:
+            if self.db_service:
                 self._save_current_doc_state()
 
             self.doc_model = DocumentModel(filepath)
@@ -546,7 +545,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             # Try extracting PDF metadata title for local files if display name is just basename/generic
             if source.display_name in (os.path.basename(filepath), "paper.pdf") or source.display_name.startswith("arXiv:"):
-                meta_title = (self.doc_model.doc.metadata or {}).get("title") if hasattr(self.doc_model.doc, "metadata") else None
+                meta_title = (self.doc_model.doc.metadata or {}).get("title")
                 if meta_title and isinstance(meta_title, str):
                     cleaned_meta = meta_title.strip()
                     if cleaned_meta and cleaned_meta.lower() not in ("paper.pdf", "untitled", "none"):
@@ -556,11 +555,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.recent_files.add(source)
             self._rebuild_open_menu()
 
-            if hasattr(self, "_active_progress_tasks"):
-                self._active_progress_tasks.clear()
-            if hasattr(self, "progress_card_box"):
+            self._active_progress_tasks.clear()
+            if self.progress_card_box:
                 self.progress_card_box.set_visible(False)
-            self.progress_bar.set_visible(False)
+            if self.progress_bar:
+                self.progress_bar.set_visible(False)
 
             self.highlights = []
             self.canvas.set_highlights([])
@@ -763,7 +762,7 @@ class MainWindow(Adw.ApplicationWindow):
                         def open_note():
                             nid = int(state["open_note_preview"])
                             note = next((n for n in self.notes if n.get("id") == nid), self.notes[0] if self.notes else None)
-                            if note and hasattr(self, "notes_layer"):
+                            if note and self.notes_layer:
                                 self.notes_layer.prepare()
                                 self.notes_layer._on_preview_show(note)
                                 rect = self.notes_layer._preview_anchor_rect(note)
@@ -819,7 +818,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_arxiv_diff_complete(self, mapper: ArxivDiffMapper | None):
         self.arxiv_mapper = mapper
         self._hide_progress("arxiv_diff")
-        if hasattr(self, "selection_toolbar") and self.selection_toolbar.get_visible():
+        if self.selection_toolbar and self.selection_toolbar.get_visible():
             self._update_selection_toolbar(True)
 
 
@@ -832,7 +831,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.db_service.load_highlights(self._on_highlights_loaded)
             self.db_service.load_notes(self._on_notes_loaded)
 
-        if hasattr(self, "_deferred_state_query") and self._deferred_state_query:
+        if self._deferred_state_query:
             query = self._deferred_state_query
             self._deferred_state_query = None
             self.entry.set_text(query)
@@ -898,10 +897,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _update_annotations_button(self):
         count = len(self.highlights) + len(self.notes)
         self.annotations_btn.set_visible(count > 0)
-        if hasattr(self, "annotations_count_label"):
+        if self.annotations_count_label:
             self.annotations_count_label.set_text(f"Annotations ({count})")
 
-        if not hasattr(self, "annotations_list"):
+        if not self.annotations_list:
             return
 
         child = self.annotations_list.get_first_child()
@@ -1015,7 +1014,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_annotations_button()
 
         # If there's a deferred query from state restoration, execute it now
-        if hasattr(self, "_deferred_state_query") and self._deferred_state_query:
+        if self._deferred_state_query:
             query = self._deferred_state_query
             self._deferred_state_query = None
             self.entry.set_text(query)
@@ -1029,7 +1028,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_annotations_button()
 
     def _schedule_state_save(self):
-        if hasattr(self, "_state_save_timer_id") and self._state_save_timer_id is not None:
+        if self._state_save_timer_id is not None:
             GLib.source_remove(self._state_save_timer_id)
 
         def _on_save_timer():
@@ -1040,10 +1039,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._state_save_timer_id = GLib.timeout_add(1000, _on_save_timer)
 
     def _save_current_doc_state(self):
-        if hasattr(self, "db_service") and self.db_service:
+        if self.db_service:
             zoom = self.zoom
-            scroll_y = self.vadjustment.get_value() if hasattr(self, "vadjustment") else 0.0
-            scroll_x = self.hadjustment.get_value() if hasattr(self, "hadjustment") else 0.0
+            scroll_y = self.vadjustment.get_value() if self.vadjustment else 0.0
+            scroll_x = self.hadjustment.get_value() if self.hadjustment else 0.0
             self.db_service.save_state(zoom, scroll_y, scroll_x)
 
     def _on_horizontal_scroll_changed(self, adj):
@@ -1140,13 +1139,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_escape(self):
         """Clears search input or closes minimap modal and returns focus to reader view."""
-        if hasattr(self, "minimap_dialog") and self.minimap_dialog and self.minimap_dialog.get_visible():
+        if self.minimap_dialog and self.minimap_dialog.get_visible():
             self.minimap_dialog.close()
             self.minimap_dialog = None
             self.canvas.grab_focus()
             return True
 
-        if self.page_input.has_focus():
+        if self.page_input and self.page_input.has_focus():
             self._on_scroll_page_changed(self.vadjustment)
             self.canvas.grab_focus()
             return True
@@ -1182,14 +1181,15 @@ class MainWindow(Adw.ApplicationWindow):
         ]
 
     def _update_selection_toolbar(self, has_selection: bool):
-        if hasattr(self, "selection_toolbar"):
+        if self.selection_toolbar:
             if has_selection and self.canvas.text_selection and self.canvas.text_selection.has_selection():
                 is_tex_available = bool(self.arxiv_mapper and self.arxiv_mapper.is_ready)
-                self.btn_copy_tex.set_visible(is_tex_available)
-                self.btn_copy_tex.set_sensitive(is_tex_available)
-                if is_tex_available:
-                    self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
-                if hasattr(self, "btn_remove_hl"):
+                if self.btn_copy_tex:
+                    self.btn_copy_tex.set_visible(is_tex_available)
+                    self.btn_copy_tex.set_sensitive(is_tex_available)
+                    if is_tex_available:
+                        self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
+                if self.btn_remove_hl:
                     self.btn_remove_hl.set_visible(bool(self._selection_matching_highlights()))
                 self.selection_toolbar.set_visible(True)
             else:
@@ -1407,20 +1407,19 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_settings_changed(self):
         self._on_crop_settings_updated()
         # Re-clamp current zoom if the min/max zoom limits changed
-        if hasattr(self, "zoom"):
-            min_zoom = self.settings.min_zoom
-            max_zoom = self.settings.max_zoom
-            if self.zoom < min_zoom or self.zoom > max_zoom:
-                self.set_zoom_level(self.zoom)
+        min_zoom = self.settings.min_zoom
+        max_zoom = self.settings.max_zoom
+        if self.zoom < min_zoom or self.zoom > max_zoom:
+            self.set_zoom_level(self.zoom)
         # Re-run search if a query is active to apply layout changes (list vs grid) in real-time
-        if hasattr(self, "_last_query") and self._last_query:
+        if self._last_query:
             self.run_search(self._last_query)
 
     def _on_crop_settings_updated(self):
         # Sync stateful action states
-        if hasattr(self, "crop_action") and self.crop_action:
+        if self.crop_action:
             self.crop_action.set_state(GLib.Variant.new_boolean(self.settings.enabled))
-        if hasattr(self, "gapless_action") and self.gapless_action:
+        if self.gapless_action:
             self.gapless_action.set_state(GLib.Variant.new_boolean(self.settings.page_gaps))
         self._apply_color_scheme()
         self.settings.save()
@@ -1470,9 +1469,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.on_crop_changed()
 
     def _show_progress(self, task_id: str, description: str, fraction: float):
-        if not hasattr(self, "_active_progress_tasks"):
-            self._active_progress_tasks = {}
-
         pct = int(round(fraction * 100))
         formatted_desc = f"{description} ({pct}%)" if fraction > 0 else description
 
@@ -1483,15 +1479,18 @@ class MainWindow(Adw.ApplicationWindow):
         }
 
         max_fraction = max(t["fraction"] for t in self._active_progress_tasks.values())
-        self.progress_bar.set_fraction(max_fraction)
-        self.progress_bar.set_visible(True)
+        if self.progress_bar:
+            self.progress_bar.set_fraction(max_fraction)
+            self.progress_bar.set_visible(True)
 
         latest_task = list(self._active_progress_tasks.values())[-1]
         progress_text = latest_task["formatted"]
 
-        if hasattr(self, "progress_label"):
+        if self.progress_label:
             self.progress_label.set_label(progress_text)
+        if self.progress_card_box:
             self.progress_card_box.set_visible(True)
+        if self.link_preview_box:
             self.link_preview_box.set_visible(True)
 
     def _hide_progress(self, task_id: str):
@@ -1499,16 +1498,18 @@ class MainWindow(Adw.ApplicationWindow):
             del self._active_progress_tasks[task_id]
 
         if not self._active_progress_tasks:
-            self.progress_bar.set_visible(False)
-            if hasattr(self, "progress_card_box"):
+            if self.progress_bar:
+                self.progress_bar.set_visible(False)
+            if self.progress_card_box:
                 self.progress_card_box.set_visible(False)
-                if hasattr(self, "link_preview_card_box") and not self.link_preview_card_box.get_visible():
-                    self.link_preview_box.set_visible(False)
+            if self.link_preview_card_box and not self.link_preview_card_box.get_visible() and self.link_preview_box:
+                self.link_preview_box.set_visible(False)
         else:
             latest_task = list(self._active_progress_tasks.values())[-1]
             max_fraction = max(t["fraction"] for t in self._active_progress_tasks.values())
-            self.progress_bar.set_fraction(max_fraction)
-            if hasattr(self, "progress_label"):
+            if self.progress_bar:
+                self.progress_bar.set_fraction(max_fraction)
+            if self.progress_label:
                 self.progress_label.set_label(latest_task["formatted"])
 
     def add_toast(self, toast: Adw.Toast):
@@ -1833,7 +1834,7 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.timeout_add(1000, self._refresh_debug_cache)
 
     def _refresh_debug_cache(self) -> bool:
-        if not self.debug_mode or not hasattr(self, "debug_cache_label"):
+        if not self.debug_mode or not self.debug_cache_label:
             return False
         entries = self.render_cache.total_entries()
         cache_mb = self.render_cache.total_bytes() / (1024 * 1024)
@@ -2106,9 +2107,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _sync_effective_theme(self):
         self.night_mode = self.is_effective_dark()
-        if hasattr(self, "night_mode_action") and self.night_mode_action:
+        if self.night_mode_action:
             self.night_mode_action.set_state(GLib.Variant.new_boolean(self.night_mode))
-        if hasattr(self, "canvas") and self.canvas:
+        if self.canvas:
             self.canvas.set_night_mode(
                 self.night_mode,
                 invert_amount=self.settings.night_mode_invert,
@@ -2131,7 +2132,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_scroll_page_changed(self, adj):
         self.notes_layer.hide_preview()
-        if not self.doc_model or not self.canvas.page_layout:
+        if not self.doc_model or not self.canvas or not self.canvas.page_layout:
             return
 
         y_val = adj.get_value()
@@ -2144,6 +2145,6 @@ class MainWindow(Adw.ApplicationWindow):
         current_idx = max(0, min(idx, len(page_layout) - 1))
 
         page_num_str = str(current_idx + 1)
-        if hasattr(self, "page_input") and self.page_input and not self.page_input.has_focus():
+        if self.page_input and not self.page_input.has_focus():
             if self.page_input.get_text() != page_num_str:
                 self.page_input.set_text(page_num_str)

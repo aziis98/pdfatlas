@@ -212,7 +212,7 @@ class PDFCanvas(Gtk.Overlay):
         self.night_mode = enabled
         self.night_mode_invert = invert_amount
         self.night_mode_hue_rotate = hue_rotate
-        if hasattr(self, "gl_canvas") and self.gl_canvas is not None:
+        if self.gl_canvas is not None:
             self.gl_canvas.night_mode = enabled
             self.gl_canvas.night_mode_invert = invert_amount
             self.gl_canvas.night_mode_hue_rotate = hue_rotate
@@ -612,7 +612,7 @@ class PDFCanvas(Gtk.Overlay):
     def _on_click(self, gesture, n_press, x, y):
         if n_press == 1:
             root = self.get_root()
-            if root and hasattr(root, "set_focus"):
+            if isinstance(root, Gtk.Window):
                 root.set_focus(None)
 
             hit = self._hit_test_link(x, y)
@@ -689,7 +689,7 @@ class PDFCanvas(Gtk.Overlay):
         if self.hovered_link is not None:
             self.hovered_link = None
         win = self.win
-        if win and hasattr(win, "link_preview_manager") and win.link_preview_manager:
+        if win and win.link_preview_manager:
             win.link_preview_manager.hide_portal_card()
         self._arm_scroll_settle()
         self._update_visibility()
@@ -706,7 +706,7 @@ class PDFCanvas(Gtk.Overlay):
         self._update_visibility()
         self.gl_canvas.queue_draw()
         win = self.win
-        if win and hasattr(win, "_schedule_state_save"):
+        if win:
             win._schedule_state_save()
         return False  # GLib.SOURCE_REMOVE
 

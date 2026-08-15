@@ -173,7 +173,7 @@ class NavigationController:
         box_w_old = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
 
         self.win.zoom = new_zoom
-        if hasattr(self.win, "zoom_label") and self.win.zoom_label is not None:
+        if self.win.zoom_label is not None:
             self.win.zoom_label.set_label(f"{int(new_zoom * 100)}%")
 
         # Apply to canvas (recomputes layout & updates vadjustment upper bounds instantly)
