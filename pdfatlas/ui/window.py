@@ -672,6 +672,17 @@ class MainWindow(Adw.ApplicationWindow):
                         self.settings.enabled = bool(state["crop"])
                     if "page_gaps" in state:
                         self.settings.page_gaps = bool(state["page_gaps"])
+                    if "color_scheme" in state:
+                        self.settings.color_scheme = str(state["color_scheme"])
+                    elif "night_mode" in state:
+                        self.settings.color_scheme = "dark" if state["night_mode"] else "light"
+                    elif "dark_mode" in state:
+                        self.settings.color_scheme = "dark" if state["dark_mode"] else "light"
+
+                    if "night_mode_invert" in state:
+                        self.settings.night_mode_invert = float(state["night_mode_invert"])
+                    if "night_mode_hue_rotate" in state:
+                        self.settings.night_mode_hue_rotate = bool(state["night_mode_hue_rotate"])
 
                     self._on_crop_settings_updated()
 

@@ -79,6 +79,16 @@ Select text in any document to open the context toolbar:
 
 <br clear="all" />
 
+<img src="assets/screenshots/attention_dark_mode.png" alt="Night Mode & Hue-Preserving Color Inversion" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
+
+### Night Mode & Color Inversion
+
+- **Hue-Preserving Inversion:** Uses an `invert + 180° hue rotate` trick: inverting colors turns bright white pages dark, while rotating the hue by 180° restores the original colors of diagrams, charts, and syntax highlighting instead of turning them into negative colors.
+- **System Theme Support:** Automatically follows your desktop environment's Light or Dark preference via Libadwaita (`System`, `Dark`, or `Light` in Settings).
+- **Quick Toggle (`N`):** Switch between Light and Night Mode at any time with `N`, or fine-tune inversion intensity in Settings.
+
+<br clear="all" />
+
 
 ## Architecture
 
@@ -248,6 +258,8 @@ uv run main.py 1706.03762 --debug
 | `F`                     | Fit Entire Page in Viewport                |
 | `M`                     | Toggle Pages Minimap Navigator             |
 | `C`                     | Toggle Auto-crop margins                   |
+| `N`                     | Toggle Night Mode (Dark theme)             |
+| `G`                     | Toggle Gap-less Mode                       |
 | `Page Up` / `Page Down` | Scroll by viewport height                  |
 | `Left` / `Right` or `h` / `l` | Scroll Back / Forward by viewport height   |
 | `Up` / `Down` or `k` / `j` | Fine step scroll Up / Down                 |
