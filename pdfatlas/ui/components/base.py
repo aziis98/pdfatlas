@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Generic, TypeVar
 from gi.repository import Gtk
 
+S = TypeVar("S")
 
-class GtkComponent(ABC):
+
+class GtkComponent(ABC, Generic[S]):
     """
-    A single unified interface for composable GTK UI components used in collections (such as overlay_components).
+    A single unified interface for composable GTK UI components parameterized by their state type S.
     """
 
     @abstractmethod
@@ -13,6 +15,6 @@ class GtkComponent(ABC):
         """Constructs and returns the top-level Gtk.Widget."""
         pass
 
-    def update_state(self, state: dict[str, Any]) -> None:
-        """Optional state update callback."""
+    def update_state(self, state: S) -> None:
+        """State update callback."""
         pass

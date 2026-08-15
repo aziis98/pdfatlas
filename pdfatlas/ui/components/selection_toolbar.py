@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from dataclasses import dataclass
+from typing import Callable
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -8,7 +9,12 @@ from gi.repository import Gtk
 from .base import GtkComponent
 
 
-class SelectionToolbarComponent(GtkComponent):
+@dataclass
+class SelectionToolbarState:
+    has_selection: bool = False
+
+
+class SelectionToolbarComponent(GtkComponent[SelectionToolbarState]):
     """
     Floating bottom action bar for text selection & clipboard export.
     """
@@ -20,15 +26,14 @@ class SelectionToolbarComponent(GtkComponent):
     ):
         self.on_copy_text = on_copy_text
         self.on_copy_tex = on_copy_tex
-        self.toolbar_box: Gtk.Box | None = None
+        self.toolbar_box: Gtk.Box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.toolbar_box.add_css_class("selection-toolbar")
+        self.toolbar_box.set_valign(Gtk.Align.END)
+        self.toolbar_box.set_halign(Gtk.Align.FILL)
+        self.toolbar_box.set_visible(False)
 
     def build_widget(self) -> Gtk.Widget:
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        toolbar.add_css_class("selection-toolbar")
-        toolbar.set_valign(Gtk.Align.END)
-        toolbar.set_halign(Gtk.Align.FILL)
-        toolbar.set_visible(False)
-        self.toolbar_box = toolbar
+        toolbar = self.toolbar_box
 
         left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
@@ -94,6 +99,5 @@ class SelectionToolbarComponent(GtkComponent):
         toolbar.append(info_menu_btn)
         return toolbar
 
-    def update_state(self, state: dict[str, Any]) -> None:
-        if "has_selection" in state and self.toolbar_box is not None:
-            self.toolbar_box.set_visible(state["has_selection"])
+    def update_state(self, state: SelectionToolbarState) -> None:
+        self.toolbar_box.set_visible(state.has_selection)

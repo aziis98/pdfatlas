@@ -12,6 +12,7 @@ dependencies = [
     "pygobject-stubs>=2.17.0",
     "pymupdf>=1.28.0",
     "pyopengl>=3.1.10",
+    "pydantic>=2.0.0",
     "rapidfuzz>=3.14.5",
     "tqdm>=4.70.0",
 ]

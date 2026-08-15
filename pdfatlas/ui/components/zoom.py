@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from dataclasses import dataclass
+from typing import Callable
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -7,7 +8,12 @@ from gi.repository import Gtk
 from .base import GtkComponent
 
 
-class ZoomControlsComponent(GtkComponent):
+@dataclass
+class ZoomState:
+    zoom: float = 1.0
+
+
+class ZoomControlsComponent(GtkComponent[ZoomState]):
     """
     Floating bottom-right zoom controls widget.
     """
@@ -42,7 +48,5 @@ class ZoomControlsComponent(GtkComponent):
 
         return zoom_box
 
-    def update_state(self, state: dict[str, Any]) -> None:
-        if "zoom" in state:
-            zoom_val = state["zoom"]
-            self.zoom_label.set_label(f"{int(zoom_val * 100)}%")
+    def update_state(self, state: ZoomState) -> None:
+        self.zoom_label.set_label(f"{int(state.zoom * 100)}%")

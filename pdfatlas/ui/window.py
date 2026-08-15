@@ -26,6 +26,7 @@ from ..core.installation import ensure_app_installed, is_app_installed
 from ..core.pdf_source import PdfSource, RecentFilesManager
 from ..core.renderer import create_render_worker
 from ..core.settings import CropSettings
+from ..core.state import CliState
 from .arxiv_dialog import ArxivDialog
 from .cairo_utils import hsl_to_hex
 from .canvas import PDFCanvas
@@ -662,70 +663,65 @@ class MainWindow(Adw.ApplicationWindow):
             # Restore state if passed programmatically
             if self.initial_state:
                 try:
-                    import json
+                    state = CliState.from_json(self.initial_state)
 
-                    state = json.loads(self.initial_state)
+                    if state.zoom is not None:
+                        self.set_zoom_level(state.zoom)
+                    if state.crop is not None:
+                        self.settings.enabled = state.crop
+                    if state.page_gaps is not None:
+                        self.settings.page_gaps = state.page_gaps
+                    if state.color_scheme is not None:
+                        self.settings.color_scheme = state.color_scheme
+                    elif state.night_mode is not None:
+                        self.settings.color_scheme = "dark" if state.night_mode else "light"
+                    elif state.dark_mode is not None:
+                        self.settings.color_scheme = "dark" if state.dark_mode else "light"
 
-                    if "zoom" in state:
-                        self.set_zoom_level(float(state["zoom"]))
-                    if "crop" in state:
-                        self.settings.enabled = bool(state["crop"])
-                    if "page_gaps" in state:
-                        self.settings.page_gaps = bool(state["page_gaps"])
-                    if "color_scheme" in state:
-                        self.settings.color_scheme = str(state["color_scheme"])
-                    elif "night_mode" in state:
-                        self.settings.color_scheme = "dark" if state["night_mode"] else "light"
-                    elif "dark_mode" in state:
-                        self.settings.color_scheme = "dark" if state["dark_mode"] else "light"
-
-                    if "night_mode_invert" in state:
-                        self.settings.night_mode_invert = float(state["night_mode_invert"])
-                    if "night_mode_hue_rotate" in state:
-                        self.settings.night_mode_hue_rotate = bool(state["night_mode_hue_rotate"])
+                    if state.night_mode_invert is not None:
+                        self.settings.night_mode_invert = state.night_mode_invert
+                    if state.night_mode_hue_rotate is not None:
+                        self.settings.night_mode_hue_rotate = state.night_mode_hue_rotate
 
                     self._on_crop_settings_updated()
 
                     # Defer scroll_y, fit_width, and search query application until layout realizes
                     def apply_deferred_state():
-                        if "fit_width" in state and state["fit_width"]:
+                        if state.fit_width:
                             self.zoom_fit_width()
-                        if "scroll_y" in state:
-                            self.vadjustment.set_value(float(state["scroll_y"]))
-                        if "query" in state:
-                            query = str(state["query"])
+                        if state.scroll_y is not None:
+                            self.vadjustment.set_value(state.scroll_y)
+                        if state.query:
                             if self.index_conn:
-                                self.entry.set_text(query)
-                                self.run_search(query)
+                                self.entry.set_text(state.query)
+                                self.run_search(state.query)
                             else:
-                                self._deferred_state_query = query
-                        if "minimap" in state and state["minimap"]:
+                                self._deferred_state_query = state.query
+                        if state.minimap:
                             GLib.timeout_add(500, self.toggle_minimap)
-                        if "hover_link" in state:
-                            hover_idx = int(state["hover_link"])
+                        if state.hover_link is not None:
+                            hover_idx = state.hover_link
                             GLib.timeout_add(400, lambda: self._simulate_link_hover(hover_idx))
-                        if "scroll_benchmark" in state:
-                            bench_info = state["scroll_benchmark"]
+                        if state.scroll_benchmark is not None:
+                            bench_info = state.scroll_benchmark
                             GLib.timeout_add(300, lambda: self._run_scroll_benchmark(bench_info))
-                        if "selection" in state:
-                            sel_info = state["selection"]
-                            page_idx = int(sel_info.get("page", 0))
+                        if state.selection is not None:
+                            sel_info = state.selection
+                            page_idx = sel_info.page
                             if self.canvas.text_selection:
                                 pi = self.canvas.text_selection.get_page_index(page_idx)
-                                start_idx = None
-                                end_idx = None
+                                start_idx = sel_info.start_idx
+                                end_idx = sel_info.end_idx
 
-                                if "start_idx" in sel_info and "end_idx" in sel_info:
-                                    start_idx = int(sel_info["start_idx"])
-                                    end_idx = int(sel_info["end_idx"])
-                                elif pi and pi.chars:
-                                    s_text = str(sel_info.get("start", ""))
-                                    e_text = str(sel_info.get("end", s_text))
-                                    for idx, c in enumerate(pi.chars):
-                                        if start_idx is None and s_text and s_text in c.char:
-                                            start_idx = idx
-                                        if e_text and e_text in c.char:
-                                            end_idx = idx
+                                if start_idx is None or end_idx is None:
+                                    if pi and pi.chars and sel_info.start:
+                                        s_text = sel_info.start
+                                        e_text = sel_info.end or s_text
+                                        for idx, c in enumerate(pi.chars):
+                                            if start_idx is None and s_text in c.char:
+                                                start_idx = idx
+                                            if e_text in c.char:
+                                                end_idx = idx
 
                                 if start_idx is not None and end_idx is not None:
                                     self.canvas.text_selection.start_selection(page_idx, start_idx)
@@ -737,8 +733,8 @@ class MainWindow(Adw.ApplicationWindow):
 
                     GLib.idle_add(apply_deferred_state)
 
-                    if "highlights" in state:
-                        sample_hls = state["highlights"]
+                    if state.highlights is not None:
+                        sample_hls = state.highlights
                         for idx, h in enumerate(sample_hls):
                             if "id" not in h:
                                 h["id"] = idx + 1
@@ -748,8 +744,8 @@ class MainWindow(Adw.ApplicationWindow):
                         self.canvas.set_highlights(sample_hls)
                         self._update_annotations_button()
 
-                    if "notes" in state:
-                        sample_notes = state["notes"]
+                    if state.notes is not None:
+                        sample_notes = state.notes
                         for idx, n in enumerate(sample_notes):
                             if "id" not in n:
                                 n["id"] = idx + 1
@@ -759,7 +755,7 @@ class MainWindow(Adw.ApplicationWindow):
                         self.notes_layer.set_notes(sample_notes)
                         self._update_annotations_button()
 
-                    if state.get("annotations_popover"):
+                    if state.annotations_popover:
                         def open_popover():
                             if self.annotations_btn.get_visible():
                                 if os.environ.get("PDFATLAS_HIDE_CURSOR") == "1":
@@ -769,9 +765,9 @@ class MainWindow(Adw.ApplicationWindow):
                             return False
                         GLib.timeout_add(400, open_popover)
 
-                    if state.get("open_note_preview"):
+                    if state.open_note_preview is not None:
                         def open_note():
-                            nid = int(state["open_note_preview"])
+                            nid = state.open_note_preview
                             note = next((n for n in self.notes if n.get("id") == nid), self.notes[0] if self.notes else None)
                             if note and self.notes_layer:
                                 self.notes_layer.prepare()
@@ -786,8 +782,8 @@ class MainWindow(Adw.ApplicationWindow):
                         GLib.timeout_add(600, open_note)
 
                     # If page is specified, navigate to it after layout
-                    if "page" in state:
-                        target_page = int(state["page"]) - 1
+                    if state.page is not None:
+                        target_page = state.page - 1
                         GLib.idle_add(lambda: self.jump_to_page(target_page))
                 except Exception as e:
                     print(f"Failed to restore initial CLI state: {e}")
