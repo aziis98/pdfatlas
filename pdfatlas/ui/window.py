@@ -159,8 +159,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.notes: list[dict] = []
         self.active_highlight_color: str = "#FFF49C"
 
-        # UI Zoom state
+        # UI Zoom & pointer state
         self.zoom = 1.0
+        self.pointer_x: float = 0.0
+        self.pointer_y: float = 0.0
+        self._active_progress_tasks: dict[str, dict] = {}
 
         # Define window actions for the menu
         self.night_mode = self.is_effective_dark()
@@ -172,7 +175,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         Adw.StyleManager.get_default().connect("notify::dark", self._on_style_manager_dark_changed)
 
-        gapless_state = not getattr(self.settings, "page_gaps", True)
+        gapless_state = not self.settings.page_gaps
         self.gapless_action = Gio.SimpleAction.new_stateful(
             "gapless-mode", None, GLib.Variant.new_boolean(gapless_state)
         )
@@ -477,8 +480,8 @@ class MainWindow(Adw.ApplicationWindow):
         modifiers = controller.get_current_event_state()
         if modifiers & Gdk.ModifierType.CONTROL_MASK:
             factor = 1.2 if dy < 0 else (1.0 / 1.2)
-            px = getattr(self, "pointer_x", 0.0)
-            py = getattr(self, "pointer_y", 0.0)
+            px = self.pointer_x
+            py = self.pointer_y
             # pointer coords are viewport-relative; convert to document coords for anchoring
             self.set_zoom_level(self.zoom * factor, center_x=px + self.hadjustment.get_value(),
                                 center_y=py + self.vadjustment.get_value())
@@ -1038,7 +1041,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _save_current_doc_state(self):
         if hasattr(self, "db_service") and self.db_service:
-            zoom = getattr(self, "zoom", 1.0)
+            zoom = self.zoom
             scroll_y = self.vadjustment.get_value() if hasattr(self, "vadjustment") else 0.0
             scroll_x = self.hadjustment.get_value() if hasattr(self, "hadjustment") else 0.0
             self.db_service.save_state(zoom, scroll_y, scroll_x)
@@ -1405,8 +1408,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._on_crop_settings_updated()
         # Re-clamp current zoom if the min/max zoom limits changed
         if hasattr(self, "zoom"):
-            min_zoom = getattr(self.settings, "min_zoom", 0.25)
-            max_zoom = getattr(self.settings, "max_zoom", 50.0)
+            min_zoom = self.settings.min_zoom
+            max_zoom = self.settings.max_zoom
             if self.zoom < min_zoom or self.zoom > max_zoom:
                 self.set_zoom_level(self.zoom)
         # Re-run search if a query is active to apply layout changes (list vs grid) in real-time
@@ -1418,7 +1421,7 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "crop_action") and self.crop_action:
             self.crop_action.set_state(GLib.Variant.new_boolean(self.settings.enabled))
         if hasattr(self, "gapless_action") and self.gapless_action:
-            self.gapless_action.set_state(GLib.Variant.new_boolean(getattr(self.settings, "page_gaps", True)))
+            self.gapless_action.set_state(GLib.Variant.new_boolean(self.settings.page_gaps))
         self._apply_color_scheme()
         self.settings.save()
 
@@ -1492,10 +1495,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.link_preview_box.set_visible(True)
 
     def _hide_progress(self, task_id: str):
-        if hasattr(self, "_active_progress_tasks") and task_id in self._active_progress_tasks:
+        if task_id in self._active_progress_tasks:
             del self._active_progress_tasks[task_id]
 
-        if not getattr(self, "_active_progress_tasks", None):
+        if not self._active_progress_tasks:
             self.progress_bar.set_visible(False)
             if hasattr(self, "progress_card_box"):
                 self.progress_card_box.set_visible(False)
@@ -2081,7 +2084,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._on_crop_settings_updated()
 
     def is_effective_dark(self) -> bool:
-        scheme = getattr(self.settings, "color_scheme", "system")
+        scheme = self.settings.color_scheme
         if scheme == "dark":
             return True
         elif scheme == "light":
@@ -2090,7 +2093,7 @@ class MainWindow(Adw.ApplicationWindow):
             return Adw.StyleManager.get_default().get_dark()
 
     def _apply_color_scheme(self):
-        scheme = getattr(self.settings, "color_scheme", "system")
+        scheme = self.settings.color_scheme
         style_mgr = Adw.StyleManager.get_default()
         if scheme == "dark":
             style_mgr.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
@@ -2108,12 +2111,12 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "canvas") and self.canvas:
             self.canvas.set_night_mode(
                 self.night_mode,
-                invert_amount=getattr(self.settings, "night_mode_invert", 0.95),
-                hue_rotate=getattr(self.settings, "night_mode_hue_rotate", True),
+                invert_amount=self.settings.night_mode_invert,
+                hue_rotate=self.settings.night_mode_hue_rotate,
             )
 
     def _on_style_manager_dark_changed(self, style_mgr, pspec):
-        scheme = getattr(self.settings, "color_scheme", "system")
+        scheme = self.settings.color_scheme
         if scheme == "system":
             self._sync_effective_theme()
 

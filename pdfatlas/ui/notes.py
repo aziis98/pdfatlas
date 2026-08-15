@@ -554,7 +554,7 @@ class NotesLayer:
             return GLib.SOURCE_REMOVE
         self._preview_popover.set_pointing_to(rect)
         self._preview_popover.popup()
-        if getattr(self.win, "debug_note_rect", False):
+        if self.win.debug_note_rect:
             # _preview_anchor_rect is viewport-relative (scroll already subtracted);
             # the GL overlay draws in content coordinates, so add scroll back.
             canvas = self.win.canvas

@@ -145,7 +145,7 @@ class SearchController:
         query_terms = {t.strip(string.punctuation).lower() for t in query.strip().split() if t}
 
         self.clear_results_box()
-        is_grid = getattr(self.win.settings, "search_layout", "grid") == "grid"
+        is_grid = self.win.settings.search_layout == "grid"
 
         pinned_grid = None
         live_grid = None

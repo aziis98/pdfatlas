@@ -31,16 +31,26 @@ class PDFViewerApplication(Adw.Application):
     Handles startup, activation, and loading initial command-line documents.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        filepath_to_open: str | None = None,
+        state: str | None = None,
+        follow_link: int | None = None,
+        debug: bool = False,
+        debug_note_rect: bool = False,
+        render_mode: str = "mp",
+        render_workers: int = 2,
+        use_shm: bool = True,
+    ):
         super().__init__(application_id="com.aziis98.pdfatlas", flags=Gio.ApplicationFlags.NON_UNIQUE)
-        self.filepath_to_open: str | None = None
-        self.state: str | None = None
-        self.follow_link: int | None = None
-        self.debug: bool = False
-        self.debug_note_rect: bool = False
-        self.render_mode: str = "mp"
-        self.render_workers: int = 2
-        self.use_shm: bool = True
+        self.filepath_to_open = filepath_to_open
+        self.state = state
+        self.follow_link = follow_link
+        self.debug = debug
+        self.debug_note_rect = debug_note_rect
+        self.render_mode = render_mode
+        self.render_workers = render_workers
+        self.use_shm = use_shm
 
     def do_activate(self):
         from .core.installation import get_installation_mode_info
@@ -48,17 +58,12 @@ class PDFViewerApplication(Adw.Application):
         print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
 
         # Create and present the main application window
-        state = getattr(self, "state", None)
-        follow_link = getattr(self, "follow_link", None)
-        debug_mode = getattr(self, "debug", False)
-        debug_note_rect = getattr(self, "debug_note_rect", False)
-
         win = MainWindow(
             self,
-            state=state,
-            follow_link=follow_link,
-            debug_mode=debug_mode,
-            debug_note_rect=debug_note_rect,
+            state=self.state,
+            follow_link=self.follow_link,
+            debug_mode=self.debug,
+            debug_note_rect=self.debug_note_rect,
             render_mode=self.render_mode,
             render_workers=self.render_workers,
             use_shm=self.use_shm,
@@ -146,15 +151,16 @@ def main():
             cmd = [xvfb, "-a", sys.executable] + sys.argv
             sys.exit(subprocess.call(cmd))
 
-    app = PDFViewerApplication()
-    app.filepath_to_open = args.pdf_path
-    app.state = args.state
-    app.follow_link = args.follow_link
-    app.debug = args.debug
-    app.debug_note_rect = args.debug_note_rect
-    app.render_mode = args.render_mode
-    app.render_workers = args.render_workers
-    app.use_shm = args.use_shm
+    app = PDFViewerApplication(
+        filepath_to_open=args.pdf_path,
+        state=args.state,
+        follow_link=args.follow_link,
+        debug=args.debug,
+        debug_note_rect=args.debug_note_rect,
+        render_mode=args.render_mode,
+        render_workers=args.render_workers,
+        use_shm=args.use_shm,
+    )
 
     sys.exit(app.run([sys.argv[0]]))
 

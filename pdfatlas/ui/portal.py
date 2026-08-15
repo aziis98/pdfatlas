@@ -97,12 +97,21 @@ def _display_height(y0, y1):
 
 
 # Thread-local storage for PyMuPDF Document instances to ensure thread safety
-_thread_local = threading.local()
+class _ThreadDocStorage(threading.local):
+    doc: fitz.Document | None
+    pdf_path: str | None
+
+    def __init__(self):
+        self.doc = None
+        self.pdf_path = None
 
 
-def _thread_doc(pdf_path):
-    doc = getattr(_thread_local, "doc", None)
-    if doc is None or getattr(_thread_local, "pdf_path", None) != pdf_path:
+_thread_local = _ThreadDocStorage()
+
+
+def _thread_doc(pdf_path: str) -> fitz.Document:
+    doc = _thread_local.doc
+    if doc is None or _thread_local.pdf_path != pdf_path:
         doc = fitz.open(pdf_path)
         _thread_local.doc = doc
         _thread_local.pdf_path = pdf_path

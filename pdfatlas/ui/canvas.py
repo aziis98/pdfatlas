@@ -307,7 +307,7 @@ class PDFCanvas(Gtk.Overlay):
 
     def _on_context_press(self, gesture, n_press, x, y):
         """Show the context menu at a page point on right-click."""
-        notes_layer = getattr(self, "notes_layer", None)
+        notes_layer = self.notes_layer
         if notes_layer is not None and notes_layer.icon_at(x, y):
             return  # over a note icon — its own Delete-note menu handles it
         page_idx = self._hit_test_page(x, y)
@@ -688,7 +688,7 @@ class PDFCanvas(Gtk.Overlay):
         self.is_scrolling = True
         if self.hovered_link is not None:
             self.hovered_link = None
-        win = getattr(self, "win", None)
+        win = self.win
         if win and hasattr(win, "link_preview_manager") and win.link_preview_manager:
             win.link_preview_manager.hide_portal_card()
         self._arm_scroll_settle()
@@ -705,7 +705,7 @@ class PDFCanvas(Gtk.Overlay):
         self.is_scrolling = False
         self._update_visibility()
         self.gl_canvas.queue_draw()
-        win = getattr(self, "win", None)
+        win = self.win
         if win and hasattr(win, "_schedule_state_save"):
             win._schedule_state_save()
         return False  # GLib.SOURCE_REMOVE
@@ -772,7 +772,7 @@ class PDFCanvas(Gtk.Overlay):
             return
 
         # Update page gap based on settings dynamically
-        if self.settings and not getattr(self.settings, "page_gaps", True):
+        if self.settings and not self.settings.page_gaps:
             self.page_gap = 0
         else:
             self.page_gap = 12
@@ -790,7 +790,7 @@ class PDFCanvas(Gtk.Overlay):
             self.containers = []
             for i in range(page_count):
                 container = PageContainer(i)
-                if getattr(self, "debug_mode", False):
+                if self.debug_mode:
                     container.add_css_class("page-container-debug")
                 self._layout.put(container, 0, 0)
                 self.containers.append(container)
@@ -822,7 +822,7 @@ class PDFCanvas(Gtk.Overlay):
 
         self._reposition_pages()
 
-        notes_layer = getattr(self, "notes_layer", None)
+        notes_layer = self.notes_layer
         if notes_layer is not None:
             notes_layer.on_layout_changed()
 
@@ -856,7 +856,7 @@ class PDFCanvas(Gtk.Overlay):
     def render_zoom(self) -> float:
         """Zoom passed to the render worker so texture resolution honors the
         ``max_texture_zoom`` setting (``None`` = Infinity, no cap)."""
-        max_zoom = getattr(self.settings, "max_texture_zoom", MAX_TEXTURE_ZOOM)
+        max_zoom = self.settings.max_texture_zoom if (self.settings and self.settings.max_texture_zoom is not None) else MAX_TEXTURE_ZOOM
         return texture_zoom(self.zoom, self.dpi_scale_factor, max_zoom)
 
     def _request_render(self, page_index: int, zoom_key: float, scale_factor: int, crop_key, priority: int = 0):

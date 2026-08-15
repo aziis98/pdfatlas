@@ -42,7 +42,7 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.theme_combo = Adw.ComboRow(title="Theme")
         self.theme_combo.set_model(Gtk.StringList.new(["System", "Light", "Dark"]))
         scheme_order = ["system", "light", "dark"]
-        curr_scheme = getattr(self.settings, "color_scheme", "system")
+        curr_scheme = self.settings.color_scheme
         if curr_scheme in scheme_order:
             self.theme_combo.set_selected(scheme_order.index(curr_scheme))
         else:
@@ -50,7 +50,7 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.theme_combo.connect("notify::selected", self._on_theme_changed)
 
         self.invert_adj = Gtk.Adjustment(
-            value=int(getattr(self.settings, "night_mode_invert", 0.95) * 100.0),
+            value=int(self.settings.night_mode_invert * 100.0),
             lower=0.0,
             upper=100.0,
             step_increment=1.0,
@@ -61,7 +61,7 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.invert_adj.connect("value-changed", self._on_invert_changed)
 
         self.hue_rotate_switch = Adw.SwitchRow(title="Preserve colors (hue rotate)")
-        self.hue_rotate_switch.set_active(getattr(self.settings, "night_mode_hue_rotate", True))
+        self.hue_rotate_switch.set_active(self.settings.night_mode_hue_rotate)
         self.hue_rotate_switch.connect("notify::active", self._on_hue_rotate_toggled)
 
         self.enable_switch = Adw.SwitchRow(title="Enable auto-crop")
@@ -69,7 +69,7 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.enable_switch.connect("notify::active", self._on_enable_toggled)
 
         self.gaps_switch = Adw.SwitchRow(title="Page gaps")
-        self.gaps_switch.set_active(getattr(self.settings, "page_gaps", True))
+        self.gaps_switch.set_active(self.settings.page_gaps)
         self.gaps_switch.connect("notify::active", self._on_gaps_toggled)
 
         self._add_group(page, "Appearance", [self.theme_combo, self.invert_spin, self.hue_rotate_switch])
@@ -162,7 +162,7 @@ class SettingsWindow(Adw.PreferencesDialog):
 
         self.layout_combo = Adw.ComboRow(title="Result layout")
         self.layout_combo.set_model(Gtk.StringList.new(["List", "Grid"]))
-        if getattr(self.settings, "search_layout", "grid") == "list":
+        if self.settings.search_layout == "list":
             self.layout_combo.set_selected(0)
         else:
             self.layout_combo.set_selected(1)

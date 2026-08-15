@@ -35,6 +35,15 @@ from .settings import CropSettings
 from .texture import PageTexture
 
 
+class _ThreadDocStorage(threading.local):
+    doc: fitz.Document | None
+    filepath: str | None
+
+    def __init__(self):
+        self.doc = None
+        self.filepath = None
+
+
 class RenderWorkerMT:
     """
     Background rendering thread coordinator.
@@ -54,7 +63,7 @@ class RenderWorkerMT:
         self._generation = 0
         self._active_filepath = None
         self._stop = threading.Event()
-        self._thread_local = threading.local()
+        self._thread_local = _ThreadDocStorage()
 
         self.num_workers = max(1, num_workers)
         self._threads = []
@@ -185,8 +194,8 @@ class RenderWorkerMT:
     def _thread_doc(self, filepath: str) -> fitz.Document:
         """Each worker thread opens its own fitz.Document (lazily cached per
         filepath) because PyMuPDF documents are not safe to share across threads."""
-        cached = getattr(self._thread_local, "doc", None)
-        if cached is None or getattr(self._thread_local, "filepath", None) != filepath:
+        cached = self._thread_local.doc
+        if cached is None or self._thread_local.filepath != filepath:
             cached = fitz.open(filepath)
             self._thread_local.doc = cached
             self._thread_local.filepath = filepath

@@ -308,8 +308,8 @@ class MiniMap(Gtk.DrawingArea):
 
             # Viewport strip tracker (on all pages the viewport overlaps)
             if self.main_vadjustment:
-                main_zoom = getattr(self, "main_zoom", 1.0)
-                main_page_gap = 12 if (self.settings and getattr(self.settings, "page_gaps", True)) else 0
+                main_zoom = self.main_zoom
+                main_page_gap = 12 if (self.settings and self.settings.page_gaps) else 0
 
                 page_canvas_y0 = 0.0
                 for j in range(i):

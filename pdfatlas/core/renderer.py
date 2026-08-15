@@ -301,7 +301,7 @@ class RenderWorker:
             self._results_q.close()
         except Exception:
             pass
-        shm = getattr(self, "_shm", None)
+        shm = self._shm
         if shm is not None:
             try:
                 shm.close()

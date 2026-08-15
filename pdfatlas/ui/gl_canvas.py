@@ -171,7 +171,7 @@ class GLCanvas(Gtk.GLArea):
                 else:
                     r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col)
 
-                hl_block = getattr(canvas, "highlighted_block", None)
+                hl_block = canvas.highlighted_block
                 if hl_block is not None:
                     h_page_idx, h_bbox = hl_block
                     if h_page_idx == i:
@@ -219,14 +219,14 @@ class GLCanvas(Gtk.GLArea):
 
                 if (canvas.debug_mode and canvas.text_selection is not None
                         and (canvas.text_selection.is_selecting or canvas.text_selection.has_selection())):
-                    win_obj = getattr(canvas, "win", None)
-                    arxiv_mapper = getattr(win_obj, "arxiv_mapper", None) if win_obj else None
+                    win_obj = canvas.win
+                    arxiv_mapper = win_obj.arxiv_mapper if win_obj else None
                     if arxiv_mapper and arxiv_mapper.is_ready and arxiv_mapper.word_metadata:
                         pi = canvas.text_selection.get_page_index(i)
                         co_x = crop_rect.x0 if crop_rect is not None else 0.0
                         co_y = crop_rect.y0 if crop_rect is not None else 0.0
                         dark_green = (0.05, 0.65, 0.25, 0.40)
-                        mapped_set = getattr(arxiv_mapper, "mapped_pdf_indices", set(arxiv_mapper.tex_to_pdf_map.values()))
+                        mapped_set = arxiv_mapper.mapped_pdf_indices
                         for w_idx, w_meta in enumerate(arxiv_mapper.word_metadata):
                             if w_meta[0] == i and w_idx in mapped_set:
                                 _, wc_start, wc_end = w_meta
@@ -302,8 +302,8 @@ class GLCanvas(Gtk.GLArea):
                     if rng is not None and pi.chars:
                         s_char, e_char = rng
 
-                        win_obj = getattr(canvas, "win", None)
-                        arxiv_mapper = getattr(win_obj, "arxiv_mapper", None) if win_obj else None
+                        win_obj = canvas.win
+                        arxiv_mapper = win_obj.arxiv_mapper if win_obj else None
 
                         if arxiv_mapper and arxiv_mapper.is_ready and arxiv_mapper.word_metadata:
                             w_start, w_end = arxiv_mapper.find_pdf_word_range(i, s_char, e_char)
@@ -447,7 +447,7 @@ class GLCanvas(Gtk.GLArea):
                     if uri_borders:
                         r.fill_rects(uri_borders, (0.153, 0.646, 0.4165, 0.85))
 
-                if getattr(canvas, "debug_mode", False):
+                if canvas.debug_mode:
                     mc = (0.9, 0.0, 0.9, 0.9)
                     mb_t = 2.0
                     r.fill_rect(x_offset, page_y0, dw, mb_t, mc)
@@ -480,7 +480,7 @@ class GLCanvas(Gtk.GLArea):
                     night_mode=self.night_mode,
                 )
 
-        debug_note_rect = getattr(canvas, "debug_note_rect", None)
+        debug_note_rect = canvas.debug_note_rect
         if debug_note_rect is not None:
             nx, ny, nw, nh = debug_note_rect
             red = (1.0, 0.0, 0.0, 0.95)
