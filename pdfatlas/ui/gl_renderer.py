@@ -20,6 +20,9 @@ class QuadRenderer:
         self.u_color = -1
         self.u_radius = -1
         self.u_flip_v = -1
+        self.u_night_mode = -1
+        self.u_invert_amount = -1
+        self.u_hue_rotate = -1
         self._offset_x = 0.0
         self._offset_y = 0.0
 
@@ -71,6 +74,9 @@ class QuadRenderer:
         self.u_color = gl.glGetUniformLocation(self.program, "u_color")
         self.u_radius = gl.glGetUniformLocation(self.program, "u_radius")
         self.u_flip_v = gl.glGetUniformLocation(self.program, "u_flip_v")
+        self.u_night_mode = gl.glGetUniformLocation(self.program, "u_night_mode")
+        self.u_invert_amount = gl.glGetUniformLocation(self.program, "u_invert_amount")
+        self.u_hue_rotate = gl.glGetUniformLocation(self.program, "u_hue_rotate")
 
         vertices = np.array([
             0.0, 0.0, 0.0, 0.0,
@@ -108,7 +114,17 @@ class QuadRenderer:
         self.vbo = 0
         self.program = 0
 
-    def begin(self, viewport_w: int, viewport_h: int, offset_x: float, offset_y: float, gl_scale: int):
+    def begin(
+        self,
+        viewport_w: int,
+        viewport_h: int,
+        offset_x: float,
+        offset_y: float,
+        gl_scale: int,
+        night_mode: bool = False,
+        invert_amount: float = 0.95,
+        hue_rotate: bool = True,
+    ):
         physical_w = int(viewport_w * gl_scale)
         physical_h = int(viewport_h * gl_scale)
 
@@ -124,6 +140,9 @@ class QuadRenderer:
         gl.glUniform2f(self.u_offset, float(offset_x), float(offset_y))
         gl.glUniform1i(self.u_texture_hl, 1)   # u_texture stays on default unit 0
         gl.glUniform1f(self.u_flip_v, 0.0)
+        gl.glUniform1i(self.u_night_mode, 1 if night_mode else 0)
+        gl.glUniform1f(self.u_invert_amount, float(invert_amount))
+        gl.glUniform1i(self.u_hue_rotate, 1 if hue_rotate else 0)
 
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
@@ -276,7 +295,8 @@ class CompositingLayer:
 
     def composite_page_to_screen(self, renderer: QuadRenderer, page_tex_id: int,
                                  x: float, y: float, w: float, h: float,
-                                 viewport_w: int, viewport_h: int, gl_scale: int) -> None:
+                                 viewport_w: int, viewport_h: int, gl_scale: int,
+                                 night_mode: bool = False) -> None:
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._default_fbo)
         gl.glViewport(0, 0, int(viewport_w * gl_scale), int(viewport_h * gl_scale))
 
@@ -288,7 +308,10 @@ class CompositingLayer:
         gl.glUniform1f(renderer.u_flip_v, 0.0)   # page texture is top-down (like r.textured)
         gl.glUniform2f(renderer.u_page_pos, float(x), float(y))
         gl.glUniform2f(renderer.u_page_size, float(w), float(h))
-        gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
+        if night_mode:
+            gl.glBlendFunc(gl.GL_ONE, gl.GL_ZERO)
+        else:
+            gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
         gl.glActiveTexture(gl.GL_TEXTURE0)   # restore unit 0 so r.end() unbinds the right texture

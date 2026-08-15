@@ -50,6 +50,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
   <style>
     :root {
       color-scheme: light dark;
+      --bg-color: #fafafa;
       --text-color: #24292e;
       --code-bg: #f6f8fa;
       --border-color: #e1e4e8;
@@ -58,6 +59,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
     @media (prefers-color-scheme: dark) {
       :root {
+        --bg-color: #242424;
         --text-color: #d4d4d4;
         --code-bg: #2d2d2d;
         --border-color: #3c3c3c;
@@ -65,8 +67,11 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
       }
     }
 
-    /* No background-color here: the webview is transparent so the popover /
-       editor window's theme background shows through. */
+    /* Solid theme-matching background clears WebKit software dirty rects cleanly */
+    html, body {
+      background-color: var(--bg-color);
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       font-size: 15px;
@@ -78,10 +83,10 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     }
 
     /* Compact variant for the hover preview popover: no body padding,
-       smaller type, tighter heading/block margins. */
+       compact heading/block margins. */
     body.compact {
-      font-size: 13px;
-      line-height: 1.45;
+      font-size: 14.5px;
+      line-height: 1.5;
       padding: 0 8px;
     }
     body.compact h1, body.compact h2, body.compact h3,

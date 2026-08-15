@@ -103,6 +103,9 @@ class PDFCanvas(Gtk.Overlay):
 
         self.zoom = 1.0
         self.crop_active = False
+        self.night_mode = False
+        self.night_mode_invert = 0.95
+        self.night_mode_hue_rotate = True
         self.page_gap = 12
         self.highlighted_block = None
         self.containers = []
@@ -199,6 +202,21 @@ class PDFCanvas(Gtk.Overlay):
     def set_highlights(self, highlights: list[dict]):
         self.highlights = highlights
         self.queue_draw_overlays("highlights-updated")
+
+    def set_night_mode(
+        self,
+        enabled: bool,
+        invert_amount: float = 0.95,
+        hue_rotate: bool = True,
+    ):
+        self.night_mode = enabled
+        self.night_mode_invert = invert_amount
+        self.night_mode_hue_rotate = hue_rotate
+        if hasattr(self, "gl_canvas") and self.gl_canvas is not None:
+            self.gl_canvas.night_mode = enabled
+            self.gl_canvas.night_mode_invert = invert_amount
+            self.gl_canvas.night_mode_hue_rotate = hue_rotate
+            self.gl_canvas.queue_draw()
 
     def _setup_scroll_input_controllers(self):
         """Attach full-viewport input controllers to the scroll container."""

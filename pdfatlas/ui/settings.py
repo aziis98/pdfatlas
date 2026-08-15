@@ -39,6 +39,31 @@ class SettingsWindow(Adw.PreferencesDialog):
     def _build_general_page(self):
         page = Adw.PreferencesPage(title="General", icon_name="preferences-other-symbolic")
 
+        self.theme_combo = Adw.ComboRow(title="Theme")
+        self.theme_combo.set_model(Gtk.StringList.new(["System", "Light", "Dark"]))
+        scheme_order = ["system", "light", "dark"]
+        curr_scheme = getattr(self.settings, "color_scheme", "system")
+        if curr_scheme in scheme_order:
+            self.theme_combo.set_selected(scheme_order.index(curr_scheme))
+        else:
+            self.theme_combo.set_selected(0)
+        self.theme_combo.connect("notify::selected", self._on_theme_changed)
+
+        self.invert_adj = Gtk.Adjustment(
+            value=int(getattr(self.settings, "night_mode_invert", 0.95) * 100.0),
+            lower=0.0,
+            upper=100.0,
+            step_increment=1.0,
+            page_increment=5.0,
+        )
+        self.invert_spin = Adw.SpinRow(adjustment=self.invert_adj, title="Invert percentage")
+        self.invert_spin.set_digits(0)
+        self.invert_adj.connect("value-changed", self._on_invert_changed)
+
+        self.hue_rotate_switch = Adw.SwitchRow(title="Preserve colors (hue rotate)")
+        self.hue_rotate_switch.set_active(getattr(self.settings, "night_mode_hue_rotate", True))
+        self.hue_rotate_switch.connect("notify::active", self._on_hue_rotate_toggled)
+
         self.enable_switch = Adw.SwitchRow(title="Enable auto-crop")
         self.enable_switch.set_active(self.settings.enabled)
         self.enable_switch.connect("notify::active", self._on_enable_toggled)
@@ -47,6 +72,7 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.gaps_switch.set_active(getattr(self.settings, "page_gaps", True))
         self.gaps_switch.connect("notify::active", self._on_gaps_toggled)
 
+        self._add_group(page, "Appearance", [self.theme_combo, self.invert_spin, self.hue_rotate_switch])
         self._add_group(page, "Cropping", [self.enable_switch, self.gaps_switch])
         self.add(page)
 
@@ -249,6 +275,19 @@ class SettingsWindow(Adw.PreferencesDialog):
         self._popdown_timeout = None
         self.texture_zoom_popover.popdown()
         return False
+
+    def _on_theme_changed(self, row, pspec):
+        scheme_order = ["system", "light", "dark"]
+        self.settings.color_scheme = scheme_order[row.get_selected()]
+        self.on_changed()
+
+    def _on_invert_changed(self, adjustment):
+        self.settings.night_mode_invert = adjustment.get_value() / 100.0
+        self.on_changed()
+
+    def _on_hue_rotate_toggled(self, row, pspec):
+        self.settings.night_mode_hue_rotate = row.get_active()
+        self.on_changed()
 
     def _on_enable_toggled(self, row, pspec):
         self.settings.enabled = row.get_active()

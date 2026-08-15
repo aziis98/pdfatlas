@@ -29,6 +29,9 @@ class GLCanvas(Gtk.GLArea):
         self._uploader: TextureUploader | None = None
         self._last_uploaded: dict[tuple, "PageTexture"] = {}
         self._hl_layer: CompositingLayer | None = None
+        self.night_mode: bool = False
+        self.night_mode_invert: float = 0.95
+        self.night_mode_hue_rotate: bool = True
 
         self.set_required_version(3, 3)
         self.set_has_depth_buffer(False)
@@ -103,7 +106,17 @@ class GLCanvas(Gtk.GLArea):
         gl_scale = self.get_scale_factor()
         scale = canvas.zoom * canvas.dpi_scale_factor
 
-        r.begin(viewport_w, viewport_h, x_min, y_min, gl_scale)
+        r.begin(
+            viewport_w,
+            viewport_h,
+            x_min,
+            y_min,
+            gl_scale,
+            night_mode=self.night_mode,
+            invert_amount=self.night_mode_invert,
+            hue_rotate=self.night_mode_hue_rotate,
+        )
+        placeholder_col = (0.12, 0.12, 0.12, 1.0) if self.night_mode else (0.95, 0.95, 0.95, 1.0)
         keep_surfaces = set()
         hl_screen_groups: list[tuple[tuple[float, float, float, float], list[tuple[float, float, float, float]]]] = []
         page_tex_ids: dict[int, int] = {}
@@ -156,7 +169,7 @@ class GLCanvas(Gtk.GLArea):
                     if not used_fallback:
                         self._last_uploaded[page_key] = surface
                 else:
-                    r.fill_rect(x_offset, page_y0, dw, dh, (0.95, 0.95, 0.95, 1.0))
+                    r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col)
 
                 hl_block = getattr(canvas, "highlighted_block", None)
                 if hl_block is not None:
@@ -442,7 +455,7 @@ class GLCanvas(Gtk.GLArea):
                     r.fill_rect(x_offset, page_y0, mb_t, dh, mc)
                     r.fill_rect(x_offset + dw - mb_t, page_y0, mb_t, dh, mc)
             else:
-                r.fill_rect(x_offset, page_y0, dw, dh, (0.95, 0.95, 0.95, 1.0))
+                r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col)
 
         if self._uploader is not None:
             self._uploader.evict_not_active(keep_surfaces)
@@ -463,7 +476,9 @@ class GLCanvas(Gtk.GLArea):
             for i, tex_id in page_tex_ids.items():
                 y_off, dw, dh, _ = canvas.page_layout[i]
                 self._hl_layer.composite_page_to_screen(
-                    r, tex_id, (box_w - dw) / 2.0, y_off, dw, dh, viewport_w, viewport_h, gl_scale)
+                    r, tex_id, (box_w - dw) / 2.0, y_off, dw, dh, viewport_w, viewport_h, gl_scale,
+                    night_mode=self.night_mode,
+                )
 
         debug_note_rect = getattr(canvas, "debug_note_rect", None)
         if debug_note_rect is not None:

@@ -131,7 +131,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Core models
         self.doc_model = None
         self.crop_analyzer = None
-        self.settings = CropSettings()
+        self.settings = CropSettings.load()
         self.current_source: PdfSource | None = None
         self.recent_files = RecentFilesManager()
         self.arxiv_mapper: ArxivDiffMapper | None = None
@@ -163,6 +163,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.zoom = 1.0
 
         # Define window actions for the menu
+        self.night_mode = self.is_effective_dark()
+        self.night_mode_action = Gio.SimpleAction.new_stateful(
+            "night-mode", None, GLib.Variant.new_boolean(self.night_mode)
+        )
+        self.night_mode_action.connect("activate", self._on_night_mode_action_activated)
+        self.add_action(self.night_mode_action)
+
+        Adw.StyleManager.get_default().connect("notify::dark", self._on_style_manager_dark_changed)
+
         gapless_state = not getattr(self.settings, "page_gaps", True)
         self.gapless_action = Gio.SimpleAction.new_stateful(
             "gapless-mode", None, GLib.Variant.new_boolean(gapless_state)
@@ -290,6 +299,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # GMenu Model
         menu = Gio.Menu.new()
+        menu.append("Night Mode", "win.night-mode")
         menu.append("Gap-less Mode", "win.gapless-mode")
         menu.append("Auto-crop Mode", "win.crop-mode")
         section = Gio.Menu.new()
@@ -353,6 +363,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_page_hovered = self._on_page_hovered
         self.canvas.on_selection_changed = self._update_selection_toolbar
+        self._apply_color_scheme()
 
         self._build_floating_zoom_controls()
         self._build_floating_link_preview()
@@ -1408,6 +1419,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.crop_action.set_state(GLib.Variant.new_boolean(self.settings.enabled))
         if hasattr(self, "gapless_action") and self.gapless_action:
             self.gapless_action.set_state(GLib.Variant.new_boolean(getattr(self.settings, "page_gaps", True)))
+        self._apply_color_scheme()
+        self.settings.save()
 
         if self.crop_analyzer:
             self.crop_analyzer.compute_crop_rects(self.settings)
@@ -1504,6 +1517,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.menu_badge_dot.set_visible(show_badge)
 
         menu = Gio.Menu.new()
+        menu.append("Night Mode", "win.night-mode")
         menu.append("Gap-less Mode", "win.gapless-mode")
         menu.append("Auto-crop Mode", "win.crop-mode")
 
@@ -1549,9 +1563,9 @@ class MainWindow(Adw.ApplicationWindow):
             orientation=Gtk.Orientation.VERTICAL, spacing=4, css_class="zoom-floating-box",
             halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=20, margin_bottom=20,
             children=[
-                button(icon_name="zoom-in-symbolic", tooltip="Zoom In", on_clicked=lambda b: self.zoom_in()),
+                button(icon_name="zoom-in-symbolic", tooltip="Zoom In", css_class="flat", on_clicked=lambda b: self.zoom_in()),
                 self.zoom_label,
-                button(icon_name="zoom-out-symbolic", tooltip="Zoom Out", on_clicked=lambda b: self.zoom_out()),
+                button(icon_name="zoom-out-symbolic", tooltip="Zoom Out", css_class="flat", on_clicked=lambda b: self.zoom_out()),
             ],
         )
 
@@ -2065,6 +2079,52 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.settings.enabled = new_state
         self._on_crop_settings_updated()
+
+    def is_effective_dark(self) -> bool:
+        scheme = getattr(self.settings, "color_scheme", "system")
+        if scheme == "dark":
+            return True
+        elif scheme == "light":
+            return False
+        else:  # "system"
+            return Adw.StyleManager.get_default().get_dark()
+
+    def _apply_color_scheme(self):
+        scheme = getattr(self.settings, "color_scheme", "system")
+        style_mgr = Adw.StyleManager.get_default()
+        if scheme == "dark":
+            style_mgr.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        elif scheme == "light":
+            style_mgr.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+        else:  # "system"
+            style_mgr.set_color_scheme(Adw.ColorScheme.DEFAULT)
+
+        self._sync_effective_theme()
+
+    def _sync_effective_theme(self):
+        self.night_mode = self.is_effective_dark()
+        if hasattr(self, "night_mode_action") and self.night_mode_action:
+            self.night_mode_action.set_state(GLib.Variant.new_boolean(self.night_mode))
+        if hasattr(self, "canvas") and self.canvas:
+            self.canvas.set_night_mode(
+                self.night_mode,
+                invert_amount=getattr(self.settings, "night_mode_invert", 0.95),
+                hue_rotate=getattr(self.settings, "night_mode_hue_rotate", True),
+            )
+
+    def _on_style_manager_dark_changed(self, style_mgr, pspec):
+        scheme = getattr(self.settings, "color_scheme", "system")
+        if scheme == "system":
+            self._sync_effective_theme()
+
+    def toggle_night_mode(self):
+        current_dark = self.is_effective_dark()
+        self.settings.color_scheme = "light" if current_dark else "dark"
+        self._apply_color_scheme()
+        self.settings.save()
+
+    def _on_night_mode_action_activated(self, action, parameter):
+        self.toggle_night_mode()
 
     def _on_scroll_page_changed(self, adj):
         self.notes_layer.hide_preview()

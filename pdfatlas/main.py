@@ -25,7 +25,6 @@ from .core.pdf_source import PdfSource
 from .ui.window import MainWindow
 
 
-
 class PDFViewerApplication(Adw.Application):
     """
     Main Adw.Application entry point for the PDF viewer.

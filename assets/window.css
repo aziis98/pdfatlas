@@ -33,23 +33,24 @@
 }
 
 .zoom-floating-box {
-    background-color: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(0, 0, 0, 0.15);
-    border-radius: 10px;
+    background-color: @theme_bg_color;
+    color: @theme_fg_color;
+    border: 1px solid alpha(@theme_fg_color, 0.15);
+    border-radius: 6px;
     padding: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 3px 10px alpha(#000000, 0.22);
 }
 .zoom-floating-label {
     font-size: 10px;
-    font-weight: bold;
-    color: #2e2e2e;
-    margin: 4px 0;
+    font-weight: 600;
+    color: @theme_fg_color;
+    margin: 1px 0;
 }
 .zoom-floating-box button {
-    min-width: 30px;
-    min-height: 30px;
-    padding: 0;
-    border-radius: 6px;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 2px;
+    border-radius: 4px;
 }
 headerbar entry.page-input text,
 headerbar entry.page-input > text,
@@ -203,6 +204,13 @@ page overlay, plus a soft shadow. */
 popover.background.note-preview-popover {
     margin: 0;
     padding: 0;
+}
+popover.note-preview-popover > arrow,
+popover.note-preview-popover arrow,
+popover.background.note-preview-popover > arrow,
+popover.background.note-preview-popover > contents {
+    background-color: @theme_bg_color;
+    color: @theme_fg_color;
 }
 popover.background.note-preview-popover > contents {
     box-shadow: 0 2px 6px alpha(#000000, 0.35);

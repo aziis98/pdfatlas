@@ -46,6 +46,7 @@ class ShortcutsController:
         # Modal window / mode / zoom fitting triggers
         self._add_nav_shortcut("m", self.win.toggle_minimap)
         self._add_nav_shortcut("c", self.win.toggle_crop)
+        self._add_nav_shortcut("n", self.win.toggle_night_mode)
         self._add_nav_shortcut("w", self.win.zoom_fit_width)
         self._add_nav_shortcut("f", self.win.zoom_fit_page)
         self._add_nav_shortcut("g", self.win.toggle_gapless)
