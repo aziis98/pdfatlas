@@ -126,3 +126,27 @@ def _contains_text(widget, text: str) -> bool:
             return True
         child = child.get_next_sibling()
     return False
+
+
+def test_note_editor_escape_closes_window():
+    from unittest.mock import MagicMock, patch
+    from gi.repository import Gdk
+    from pdfatlas.ui.notes import NoteEditorWindow
+
+    mock_win = MagicMock()
+    mock_win.notes_layer._editors = {}
+    note = {"id": 1, "page": 0, "markdown": "test content"}
+
+    editor = NoteEditorWindow(mock_win, note)
+    mock_win.notes_layer._editors[1] = editor
+
+    # Simulate pressing Escape key
+    with patch.object(editor, "close") as mock_close:
+        res = editor._on_key_pressed(None, Gdk.KEY_Escape, 0, 0)
+        assert res is True
+        assert mock_close.called
+
+    # Verify close request handler flushes content and unregisters editor
+    editor._on_close_request(editor)
+    mock_win.notes_layer.save_content.assert_called_with(1, "test content")
+    assert 1 not in mock_win.notes_layer._editors

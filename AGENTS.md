@@ -20,15 +20,16 @@ This document outlines project conventions, development workflows, and automated
 
 ## 2. Automated Quality Checks
 
-Whenever making code edits, automatically run the following check commands to ensure code quality:
+Whenever making code edits, run the following check commands to ensure code quality:
 
 ```bash
 uv run pyright
 uv run ruff check .
-uv run pytest
+uv run pytest tests/test_<relevant>.py  # Prefer targeted test execution
 ```
 
-Ensure all check commands report **0 errors** and all tests pass.
+- **Targeted Testing:** Prefer targeting specific test files or test functions (e.g. `uv run pytest tests/test_notes.py`) during iterative development to save time and reduce log overhead. Run the full test suite (`uv run pytest`) when finalizing or touching cross-cutting systems.
+- Ensure all check commands report **0 errors** and relevant tests pass.
 
 ---
 

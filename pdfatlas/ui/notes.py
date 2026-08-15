@@ -683,6 +683,17 @@ class NoteEditorWindow(Adw.Window):
         )
         self.connect("close-request", self._on_close_request)
 
+        key_controller = Gtk.EventControllerKey.new()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(key_controller)
+
+    def _on_key_pressed(self, _controller, keyval, _keycode, _state):
+        if keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
+
     def _build_source_page(self) -> Gtk.Widget:
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
