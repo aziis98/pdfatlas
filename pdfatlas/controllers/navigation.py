@@ -15,6 +15,13 @@ class NavigationController:
     def __init__(self, main_window: Any):
         self.win = main_window
 
+    def _update_page_indicator(self, page_index: int):
+        if hasattr(self.win, "page_input") and self.win.page_input is not None:
+            self.win.page_input.set_text(str(page_index + 1))
+        cb = getattr(self.win, "on_page_changed", None)
+        if callable(cb) and self.win.doc_model:
+            cb(page_index + 1, self.win.doc_model.page_count)
+
     def jump_to_page(self, page_index: int, smooth: bool = True):
         """
         Navigates the viewport directly to the top of the specified page index.
@@ -35,7 +42,7 @@ class NavigationController:
         else:
             self.win.vadjustment.set_value(target_y)
 
-        self.win.page_input.set_text(str(page_index + 1))
+        self._update_page_indicator(page_index)
         self.win.canvas.queue_draw_overlays("jump-to-page")
 
     def jump_to_annotation(self, hl: dict):
@@ -71,7 +78,7 @@ class NavigationController:
         target_y = min(target_y, max(0.0, max_scroll))
 
         self.win.vadjustment.set_value(target_y)
-        self.win.page_input.set_text(str(page_index + 1))
+        self._update_page_indicator(page_index)
         self.win.canvas.queue_draw_overlays("jump-to-annotation")
 
     def jump_to_note(self, note: dict):
@@ -94,7 +101,7 @@ class NavigationController:
         target_y = max(0.0, min(target_y, max(0.0, self.win.vadjustment.get_upper() - viewport_h)))
 
         self.win.vadjustment.set_value(target_y)
-        self.win.page_input.set_text(str(page_index + 1))
+        self._update_page_indicator(page_index)
         self.win.canvas.queue_draw_overlays("jump-to-note")
 
     def set_zoom_level(
@@ -212,9 +219,13 @@ class NavigationController:
         self.win.hadjustment.set_upper(h_upper)
         self.win.hadjustment.set_value(target_h)
 
-        self.win._on_scroll_page_changed(self.win.vadjustment)
+        cb_scroll = getattr(self.win, "_on_scroll_page_changed", None)
+        if callable(cb_scroll):
+            cb_scroll(self.win.vadjustment)
         self.win.canvas._update_visibility()
-        self.win._queue_canvas_redraw()
+        cb_redraw = getattr(self.win, "_queue_canvas_redraw", None)
+        if callable(cb_redraw):
+            cb_redraw()
 
     def zoom_in(self):
         self.set_zoom_level(self.win.zoom * 1.2)
