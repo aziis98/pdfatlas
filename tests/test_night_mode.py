@@ -159,3 +159,46 @@ def test_settings_persistence(tmp_path):
     assert loaded.color_scheme == "dark"
     assert loaded.night_mode_invert == 0.88
     assert loaded.night_mode_hue_rotate is False
+
+
+def test_multi_tab_night_mode_synchronization(tmp_path):
+    import fitz
+    from pdfatlas.core.pdf_source import PdfSource
+
+    pdf_path = tmp_path / "test_tab_night.pdf"
+    doc = fitz.open()
+    doc.new_page(width=500, height=800)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    app = Adw.Application(application_id="com.example.testnighttabs")
+    win = MainWindow(app)
+    win.settings.color_scheme = "light"
+    win._apply_color_scheme()
+
+    # Open first tab
+    source1 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc 1")
+    win.open_document(source1)
+    doc_view1 = win.get_active_doc_view()
+    assert doc_view1.canvas.night_mode is False
+
+    # Open second tab
+    source2 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc 2")
+    win.open_document(source2, new_tab=True)
+    doc_view2 = win.get_active_doc_view()
+    assert doc_view2.canvas.night_mode is False
+
+    # Toggle night mode to dark on MainWindow
+    win.toggle_night_mode()
+    assert win.night_mode is True
+    assert doc_view1.canvas.night_mode is True
+    assert doc_view2.canvas.night_mode is True
+
+    # Toggle back to light
+    win.toggle_night_mode()
+    assert win.night_mode is False
+    assert doc_view1.canvas.night_mode is False
+    assert doc_view2.canvas.night_mode is False
+
+    win.close()
+

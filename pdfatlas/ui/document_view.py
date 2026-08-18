@@ -6,7 +6,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gtk
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gdk, Gtk
 
 from ..controllers.navigation import NavigationController
 from ..core.arxiv_mapper import ArxivDiffMapper
@@ -123,6 +124,9 @@ class PdfDocumentView(Gtk.Box):
         self.vadjustment = self.canvas.vadjustment
         self.hadjustment = self.canvas.hadjustment
         self.vadjustment.connect("value-changed", self._on_scroll_vchanged)
+        self.hadjustment.connect("value-changed", self._on_scroll_hchanged)
+        self.saved_scroll_y: float = 0.0
+        self.saved_scroll_x: float = 0.0
 
         # Gestures and Navigation Controller
         self.nav_controller = NavigationController(self)
@@ -187,6 +191,15 @@ class PdfDocumentView(Gtk.Box):
             self.crop_analyzer,
             self.settings,
         )
+        if self.settings:
+            is_dark = (self.settings.color_scheme == "dark") or (
+                self.settings.color_scheme == "system" and Adw.StyleManager.get_default().get_dark()
+            )
+            self.canvas.set_night_mode(
+                is_dark,
+                invert_amount=self.settings.night_mode_invert,
+                hue_rotate=self.settings.night_mode_hue_rotate,
+            )
         self.notes_layer.prepare()
 
         if self.on_page_changed and self.doc_model:
@@ -443,9 +456,27 @@ class PdfDocumentView(Gtk.Box):
     def _on_scroll_vchanged(self, adj: Gtk.Adjustment):
         if not self.doc_model:
             return
+        self.saved_scroll_y = adj.get_value()
         curr_page = self.get_current_page_index() + 1
         if self.on_page_changed and self.doc_model:
             self.on_page_changed(curr_page, self.doc_model.page_count)
+
+    def _on_scroll_hchanged(self, adj: Gtk.Adjustment):
+        self.saved_scroll_x = adj.get_value()
+
+    def restore_scroll_position(self):
+        if self.saved_scroll_y > 0 and self.vadjustment:
+            upper = self.vadjustment.get_upper()
+            page_size = self.vadjustment.get_page_size()
+            max_y = max(0.0, upper - page_size) if page_size > 0 else upper
+            target_y = min(self.saved_scroll_y, max_y)
+            self.vadjustment.set_value(target_y)
+        if self.saved_scroll_x > 0 and self.hadjustment:
+            upper = self.hadjustment.get_upper()
+            page_size = self.hadjustment.get_page_size()
+            max_x = max(0.0, upper - page_size) if page_size > 0 else upper
+            target_x = min(self.saved_scroll_x, max_x)
+            self.hadjustment.set_value(target_x)
 
     def _handle_link_clicked(self, page_idx: int, link: dict):
         uri = link.get("uri")

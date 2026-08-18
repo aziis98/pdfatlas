@@ -514,6 +514,11 @@ class MainWindow(Adw.ApplicationWindow):
             on_state_changed=self._schedule_state_save,
             on_annotations_changed=self._update_annotations_button,
         )
+        doc_view.canvas.set_night_mode(
+            self.is_effective_dark(),
+            invert_amount=self.settings.night_mode_invert,
+            hue_rotate=self.settings.night_mode_hue_rotate,
+        )
         return doc_view
 
     def get_active_doc_view(self) -> Any:
@@ -555,9 +560,19 @@ class MainWindow(Adw.ApplicationWindow):
         return True
 
     def _on_selected_tab_changed(self, view: Adw.TabView, pspec) -> None:
-        doc_view = self.get_active_doc_view()
         from .welcome import WelcomeView
         from .document_view import PdfDocumentView
+
+        # Save scroll position of previous active doc_view before switching away
+        if hasattr(self, "_active_doc_view_ref") and self._active_doc_view_ref is not None:
+            prev = self._active_doc_view_ref
+            if hasattr(prev, "vadjustment") and prev.vadjustment is not None:
+                prev.saved_scroll_y = prev.vadjustment.get_value()
+            if hasattr(prev, "hadjustment") and prev.hadjustment is not None:
+                prev.saved_scroll_x = prev.hadjustment.get_value()
+
+        doc_view = self.get_active_doc_view()
+        self._active_doc_view_ref = doc_view if isinstance(doc_view, PdfDocumentView) else None
 
         if isinstance(doc_view, WelcomeView):
             doc_view.refresh(self.recent_files)
@@ -585,6 +600,16 @@ class MainWindow(Adw.ApplicationWindow):
             self.notes = doc_view.notes
             self.highlights = doc_view.highlights
 
+            # Sync night mode to the activated tab
+            doc_view.canvas.set_night_mode(
+                self.night_mode,
+                invert_amount=self.settings.night_mode_invert,
+                hue_rotate=self.settings.night_mode_hue_rotate,
+            )
+
+            # Restore scroll position safely
+            doc_view.restore_scroll_position()
+
             curr_page = doc_view.get_current_page_index() + 1
             self.page_input.set_text(str(curr_page))
             self.page_total_label.set_label(f"of {doc_view.doc_model.page_count}")
@@ -596,7 +621,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.entry.set_placeholder_text("Search document...")
             self.annotations_btn.set_visible(True)
             self._update_annotations_button()
-            doc_view.update_layout()
+            doc_view.canvas._update_visibility()
+            doc_view.canvas.gl_canvas.queue_draw()
+            doc_view.canvas.queue_draw_overlays("tab-selected")
         elif view.get_n_pages() == 0:
             self._show_welcome()
 
@@ -2407,6 +2434,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.night_mode = self.is_effective_dark()
         if self.night_mode_action:
             self.night_mode_action.set_state(GLib.Variant.new_boolean(self.night_mode))
+        if hasattr(self, "tab_view") and self.tab_view is not None:
+            for i in range(self.tab_view.get_n_pages()):
+                page = self.tab_view.get_nth_page(i)
+                child = page.get_child()
+                canvas = getattr(child, "canvas", None)
+                if canvas is not None:
+                    canvas.set_night_mode(
+                        self.night_mode,
+                        invert_amount=self.settings.night_mode_invert,
+                        hue_rotate=self.settings.night_mode_hue_rotate,
+                    )
         if self.canvas:
             self.canvas.set_night_mode(
                 self.night_mode,
