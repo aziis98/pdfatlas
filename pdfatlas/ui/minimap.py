@@ -1,11 +1,11 @@
-import gi
+import math
 from typing import Any
+
+import cairo
+import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-import math
-
-import cairo
 from gi.repository import Adw, GLib, Gtk
 
 from ..core.cache import MiniMapCache
@@ -39,6 +39,7 @@ class MiniMap(Gtk.DrawingArea):
     """
     Sidebar Minimap displaying thumbnails in a vertical column-wrapping layout.
     Features:
+      - Dark mode and light mode adaptive rendering.
       - Active page highlighted in purple.
       - Translucent viewport tracker showing current scroll extent.
       - Faint dashed rect showing the cropped area boundary.
@@ -56,13 +57,21 @@ class MiniMap(Gtk.DrawingArea):
         self.crop_analyzer = None
         self.settings = None
         self.main_zoom = 1.0
+        self.page_layout: list[tuple[float, float, float, Any]] | None = None
+        self.page_gap: int = 12
+        self.main_vadjustment: Gtk.Adjustment | None = None
+        self._vadj_handler_id: int | None = None
         self.on_page_clicked: Any = None
         self.current_page = 0
+        self.thumb_scale = 0.15
+        self.thumb_w = 90
         self.thumb_h = 120  # Dynamically calculated
+        self.cell_w = 100
+        self.cell_h = 130
         self.items_per_column = 1
         self.n_cols = 1
         self.n_rows = 1
-        self.in_flight = set()
+        self.in_flight: set[int] = set()
 
         # Set a small natural content size to allow shrinking/resizing the window down
         self.set_content_width(100)
@@ -76,8 +85,6 @@ class MiniMap(Gtk.DrawingArea):
         self.resize_cache_surface = None
 
         self.connect("destroy", self._on_destroy)
-
-        self.on_page_clicked = None  # Callback signature: func(page_index)
 
         # Set up draw callback and resize notifier
         self.set_draw_func(self._draw_func)
@@ -95,12 +102,16 @@ class MiniMap(Gtk.DrawingArea):
         render_worker,
         crop_analyzer: CropAnalyzer,
         settings: CropSettings,
+        page_layout: list[tuple[float, float, float, Any]] | None = None,
+        page_gap: int = 12,
     ):
         self.doc_model = doc_model
         self.cache = cache
         self.render_worker = render_worker
         self.crop_analyzer = crop_analyzer
         self.settings = settings
+        self.page_layout = page_layout
+        self.page_gap = page_gap
         self.in_flight.clear()
 
         # Reset resize tracking on document change
@@ -120,11 +131,22 @@ class MiniMap(Gtk.DrawingArea):
             GLib.source_remove(self.resize_timer_id)
             self.resize_timer_id = None
         self.resize_cache_surface = None
+        if self.main_vadjustment and self._vadj_handler_id is not None:
+            if self.main_vadjustment.handler_is_connected(self._vadj_handler_id):
+                self.main_vadjustment.disconnect(self._vadj_handler_id)
+            self._vadj_handler_id = None
 
     def set_vadjustment(self, vadjustment: Gtk.Adjustment):
+        if self.main_vadjustment and self._vadj_handler_id is not None:
+            if self.main_vadjustment.handler_is_connected(self._vadj_handler_id):
+                self.main_vadjustment.disconnect(self._vadj_handler_id)
+            self._vadj_handler_id = None
+
         self.main_vadjustment = vadjustment
-        # Connect change listener to redraw the viewport strip
-        self.main_vadjustment.connect("value-changed", lambda adj: self.queue_draw())
+        if self.main_vadjustment is not None:
+            self._vadj_handler_id = self.main_vadjustment.connect(
+                "value-changed", lambda adj: self.queue_draw()
+            )
 
     def set_current_page(self, page_index: int):
         if self.current_page != page_index:
@@ -149,6 +171,7 @@ class MiniMap(Gtk.DrawingArea):
         self.last_width = allocated_width
         self.last_height = allocated_height
         self.resize_settled = False
+        self.in_flight.clear()
 
         if self.resize_timer_id is not None:
             GLib.source_remove(self.resize_timer_id)
@@ -160,8 +183,9 @@ class MiniMap(Gtk.DrawingArea):
             return
 
         first_page = self.doc_model.page_rect(0)
-        self.n_cols, self.n_rows, self.thumb_scale, self.thumb_w, self.thumb_h, self.cell_w, self.cell_h = \
+        self.n_cols, self.n_rows, self.thumb_scale, self.thumb_w, self.thumb_h, self.cell_w, self.cell_h = (
             compute_grid(page_count, allocated_width, allocated_height, first_page.width, first_page.height)
+        )
 
         self.queue_draw()
 
@@ -186,8 +210,11 @@ class MiniMap(Gtk.DrawingArea):
         if self.doc_model and (width != self.last_width or height != self.last_height or self.n_cols <= 0):
             self._relayout(width, height)
 
+        is_dark = Adw.StyleManager.get_default().get_dark()
+        bg_rgb = (0.12, 0.12, 0.12) if is_dark else (0.94, 0.94, 0.94)
+
         if not self.doc_model or not self.cache or self.n_cols <= 0 or self.n_rows <= 0:
-            widget_cr.set_source_rgb(0.95, 0.95, 0.95)
+            widget_cr.set_source_rgb(*bg_rgb)
             widget_cr.paint()
             return
 
@@ -205,11 +232,10 @@ class MiniMap(Gtk.DrawingArea):
             widget_cr.restore()
             return
 
-        # Otherwise, render onto a temporary ImageSurface to refresh the cache
         physical_w = int(width * scale_factor)
         physical_h = int(height * scale_factor)
         if physical_w <= 0 or physical_h <= 0:
-            widget_cr.set_source_rgb(0.95, 0.95, 0.95)
+            widget_cr.set_source_rgb(*bg_rgb)
             widget_cr.paint()
             return
 
@@ -219,12 +245,10 @@ class MiniMap(Gtk.DrawingArea):
         cr = cairo.Context(temp_surface)
 
         # Background
-        cr.set_source_rgb(0.95, 0.95, 0.95)
+        cr.set_source_rgb(*bg_rgb)
         cr.paint()
 
         page_count = self.doc_model.page_count
-
-        viewport_strips = []
 
         for i in range(page_count):
             col = i // self.n_rows
@@ -233,7 +257,6 @@ class MiniMap(Gtk.DrawingArea):
             cell_x = col * self.cell_w
             cell_y = row * self.cell_h
 
-            # Scale and center page inside cell preserving aspect ratio
             page_rect = self.doc_model.page_rect(i)
             w_i = page_rect.width * self.thumb_scale
             h_i = page_rect.height * self.thumb_scale
@@ -241,16 +264,22 @@ class MiniMap(Gtk.DrawingArea):
             x = cell_x + (self.cell_w - w_i) / 2
             y = cell_y + (self.cell_h - h_i) / 2
 
-            # 1. ALWAYS draw solid white page background
+            # 1. Subtle drop shadow behind page
+            cr.save()
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.35 if is_dark else 0.10)
+            cr.rectangle(x + 1, y + 2, w_i, h_i)
+            cr.fill()
+            cr.restore()
+
+            # 2. Solid page background
             cr.save()
             cr.set_source_rgb(1.0, 1.0, 1.0)
             cr.rectangle(x, y, w_i, h_i)
             cr.fill()
             cr.restore()
 
+            # 3. Page thumbnail texture
             surface = self.cache.get(i)
-
-            # Check if cached surface size is correct
             is_correct_size = False
             if surface is not None:
                 sw = surface.get_width()
@@ -259,7 +288,6 @@ class MiniMap(Gtk.DrawingArea):
                     is_correct_size = True
 
             if surface is not None:
-                # Paint existing surface (scaled dynamically if needed during window resizing)
                 cr.save()
                 cr.translate(x, y)
                 sw = surface.get_width()
@@ -269,12 +297,11 @@ class MiniMap(Gtk.DrawingArea):
                 cr.paint()
                 cr.restore()
             else:
-                # Render loading placeholder text on the white background
                 cr.save()
                 cr.set_source_rgb(0.5, 0.5, 0.5)
                 cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
                 cr.set_font_size(min(12.0, max(8.0, h_i * 0.2)))
-                text = f"Ld {i + 1}"
+                text = f"{i + 1}"
                 te = cr.text_extents(text)
                 tx = x + (w_i - te.width) / 2 - te.x_bearing
                 ty = y + (h_i - te.height) / 2 - te.y_bearing
@@ -282,7 +309,15 @@ class MiniMap(Gtk.DrawingArea):
                 cr.show_text(text)
                 cr.restore()
 
-            # Queue render job if not in cache or if size is wrong (only when resize has settled)
+            # 4. Page 1px border
+            cr.save()
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.15) if is_dark else cr.set_source_rgba(0.0, 0.0, 0.0, 0.12)
+            cr.set_line_width(1.0)
+            cr.rectangle(x, y, w_i, h_i)
+            cr.stroke()
+            cr.restore()
+
+            # Queue render job if not in cache or if size is wrong
             if (surface is None or not is_correct_size) and self.resize_settled:
                 if i not in self.in_flight and self.render_worker:
                     self.in_flight.add(i)
@@ -292,39 +327,60 @@ class MiniMap(Gtk.DrawingArea):
                         page_index=i,
                         zoom=self.thumb_scale,
                         scale_factor=scale_factor,
-                        crop_rect=None,  # Minimap always renders full page (uncropped)
+                        crop_rect=None,
                         is_minimap=True,
                         target_cache=self.cache,
                         redraw_callback=lambda idx=i: self._on_thumbnail_complete(idx),
                     )
 
-            if i == self.current_page:
+            # 5. Cropped boundary dashed rectangle
+            crop_rect = None
+            if self.settings and self.settings.enabled and self.crop_analyzer:
+                if i < len(self.crop_analyzer.crop_rects):
+                    crop_rect = self.crop_analyzer.crop_rects[i]
+
+            if crop_rect is not None:
                 cr.save()
-                cr.set_source_rgb(0.494, 0.247, 0.949)
-                cr.set_line_width(2.0)
-                cr.rectangle(x - 1, y - 1, w_i + 2, h_i + 2)
+                crop_x = x + (crop_rect.x0 * self.thumb_scale)
+                crop_y = y + (crop_rect.y0 * self.thumb_scale)
+                crop_w = crop_rect.width * self.thumb_scale
+                crop_h = crop_rect.height * self.thumb_scale
+                cr.set_source_rgba(0.2, 0.2, 0.2, 0.45) if not is_dark else cr.set_source_rgba(0.8, 0.8, 0.8, 0.45)
+                cr.set_line_width(1.0)
+                cr.set_dash([3.0, 2.0])
+                cr.rectangle(crop_x, crop_y, crop_w, crop_h)
                 cr.stroke()
                 cr.restore()
 
-            # Viewport strip tracker (on all pages the viewport overlaps)
+            # 6. Active page selection indicator
+            if i == self.current_page:
+                cr.save()
+                cr.set_source_rgb(0.494, 0.247, 0.949)
+                cr.set_line_width(2.5)
+                cr.rectangle(x - 2, y - 2, w_i + 4, h_i + 4)
+                cr.stroke()
+                cr.restore()
+
+            # 7. Viewport strip tracker
             if self.main_vadjustment:
-                main_zoom = self.main_zoom
-                main_page_gap = 12 if (self.settings and self.settings.page_gaps) else 0
-
-                page_canvas_y0 = 0.0
-                for j in range(i):
-                    j_rect = None
-                    if self.settings and self.settings.enabled and self.crop_analyzer:
-                        j_rect = self.crop_analyzer.crop_rects[j]
-                    j_rect = j_rect if j_rect is not None else self.doc_model.page_rect(j)
-                    page_canvas_y0 += j_rect.height * main_zoom + main_page_gap
-
-                main_crop_rect = None
-                if self.settings and self.settings.enabled and self.crop_analyzer:
-                    main_crop_rect = self.crop_analyzer.crop_rects[i]
-
-                active_rect = main_crop_rect if main_crop_rect is not None else page_rect
-                page_canvas_h = active_rect.height * main_zoom
+                if self.page_layout and i < len(self.page_layout):
+                    page_canvas_y0, _dw, page_canvas_h, active_crop = self.page_layout[i]
+                else:
+                    page_gap = self.page_gap
+                    page_canvas_y0 = 0.0
+                    for j in range(i):
+                        j_rect = (
+                            self.crop_analyzer.crop_rects[j]
+                            if (self.settings and self.settings.enabled and self.crop_analyzer and j < len(self.crop_analyzer.crop_rects))
+                            else None
+                        )
+                        if j_rect is None:
+                            j_rect = self.doc_model.page_rect(j)
+                        page_canvas_y0 += (j_rect.height if j_rect is not None else 800.0) * self.main_zoom + page_gap
+                    active_rect = (
+                        crop_rect if (self.settings and self.settings.enabled and crop_rect is not None) else page_rect
+                    )
+                    page_canvas_h = (active_rect.height if active_rect is not None else 800.0) * self.main_zoom
 
                 viewport_val = self.main_vadjustment.get_value()
                 viewport_h = self.main_vadjustment.get_page_size()
@@ -336,41 +392,30 @@ class MiniMap(Gtk.DrawingArea):
                 strip_canvas_y0 = max(page_canvas_y0, viewport_y0)
                 strip_canvas_y1 = min(page_canvas_y1, viewport_y1)
 
-                if strip_canvas_y1 > strip_canvas_y0:
-                    thumb_crop_y = (active_rect.y0 * self.thumb_scale) if main_crop_rect is not None else 0.0
-                    thumb_crop_h = active_rect.height * self.thumb_scale
+                if strip_canvas_y1 > strip_canvas_y0 and page_canvas_h > 0:
+                    thumb_crop_x = (crop_rect.x0 * self.thumb_scale) if crop_rect is not None else 0.0
+                    thumb_crop_y = (crop_rect.y0 * self.thumb_scale) if crop_rect is not None else 0.0
+                    thumb_crop_w = (crop_rect.width * self.thumb_scale) if crop_rect is not None else w_i
+                    thumb_crop_h = (crop_rect.height * self.thumb_scale) if crop_rect is not None else h_i
 
-                    scale = thumb_crop_h / page_canvas_h
-
+                    scale_y = thumb_crop_h / page_canvas_h
                     strip_rel_y = strip_canvas_y0 - page_canvas_y0
 
-                    strip_thumb_y = y + thumb_crop_y + strip_rel_y * scale
-                    strip_thumb_h = (strip_canvas_y1 - strip_canvas_y0) * scale
-
-                    viewport_strips.append((x, strip_thumb_y, strip_thumb_h, w_i))
+                    strip_thumb_x = x + thumb_crop_x
+                    strip_thumb_y = y + thumb_crop_y + (strip_rel_y * scale_y)
+                    strip_thumb_w = thumb_crop_w
+                    strip_thumb_h = (strip_canvas_y1 - strip_canvas_y0) * scale_y
 
                     cr.save()
-                    cr.set_source_rgba(0.494, 0.247, 0.949, 0.15)
-                    cr.rectangle(x, strip_thumb_y, w_i, strip_thumb_h)
+                    cr.set_source_rgba(0.494, 0.247, 0.949, 0.18)
+                    cr.rectangle(strip_thumb_x, strip_thumb_y, strip_thumb_w, strip_thumb_h)
                     cr.fill()
-                    cr.restore()
 
-        # Draw single cohesive outline per column around the combined viewport strips
-        if viewport_strips:
-            col_groups = {}
-            for sx, sy, sh, sw in viewport_strips:
-                col_groups.setdefault(sx, []).append((sy, sh, sw))
-            for col_x, strips in col_groups.items():
-                strips.sort()
-                overall_y0 = strips[0][0]
-                overall_y1 = strips[-1][0] + strips[-1][1]
-                overall_w = strips[0][2]
-                cr.save()
-                cr.set_source_rgba(0.494, 0.247, 0.949, 0.4)
-                cr.set_line_width(1.0)
-                cr.rectangle(col_x, overall_y0, overall_w, overall_y1 - overall_y0)
-                cr.stroke()
-                cr.restore()
+                    cr.set_source_rgba(0.494, 0.247, 0.949, 0.65)
+                    cr.set_line_width(1.5)
+                    cr.rectangle(strip_thumb_x, strip_thumb_y, strip_thumb_w, strip_thumb_h)
+                    cr.stroke()
+                    cr.restore()
 
         # Blit the rendered temporary surface to the actual widget context
         widget_cr.save()
@@ -403,6 +448,8 @@ class MinimapWindow(Adw.Dialog):
         main_vadjustment,
         main_zoom,
         on_page_selected,
+        page_layout: list[tuple[float, float, float, Any]] | None = None,
+        page_gap: int = 12,
     ):
         super().__init__(title="Minimap")
         self.set_content_width(700)
@@ -414,12 +461,14 @@ class MinimapWindow(Adw.Dialog):
         header = Adw.HeaderBar()
         content_box.append(header)
 
-        # Minimap widget (added directly to window, no scrolled window, no scrollbars)
+        # Minimap widget
         self.minimap = MiniMap()
         self.minimap.set_vexpand(True)
         self.minimap.set_hexpand(True)
         self.minimap.main_zoom = main_zoom
-        self.minimap.set_document(doc_model, cache, render_worker, crop_analyzer, settings)
+        self.minimap.set_document(
+            doc_model, cache, render_worker, crop_analyzer, settings, page_layout=page_layout, page_gap=page_gap
+        )
         self.minimap.set_vadjustment(main_vadjustment)
         content_box.append(self.minimap)
 
@@ -434,3 +483,4 @@ class MinimapWindow(Adw.Dialog):
         action = Gtk.CallbackAction.new(lambda w, a: (self.close(), True)[1])
         shortcut_controller.add_shortcut(Gtk.Shortcut.new(trigger, action))
         self.add_controller(shortcut_controller)
+

@@ -814,11 +814,8 @@ class MainWindow(Adw.ApplicationWindow):
             )
 
         try:
-            if self.doc_model:
-                self.doc_model.close()
-
             # Save state for previous document
-            if self.db_service:
+            if self.db_service and self.doc_model and self.current_source:
                 self._save_current_doc_state()
 
             self.doc_model = DocumentModel(filepath)
@@ -1678,6 +1675,8 @@ class MainWindow(Adw.ApplicationWindow):
             main_vadjustment=self.vadjustment,
             main_zoom=self.zoom,
             on_page_selected=self._on_minimap_page_clicked,
+            page_layout=self.canvas.page_layout if self.canvas else None,
+            page_gap=self.canvas.page_gap if self.canvas else 12,
         )
 
         self.minimap_dialog = dialog

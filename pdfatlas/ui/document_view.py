@@ -197,6 +197,8 @@ class PdfDocumentView(Gtk.Box):
     def close(self):
         if self.render_worker and self.doc_model:
             self.render_worker.clear_canvas_render_jobs(self.doc_model.filepath)
+        if self.doc_model:
+            self.doc_model.close()
         self.render_cache.clear()
         self.minimap_cache.clear()
         self.doc_model = None

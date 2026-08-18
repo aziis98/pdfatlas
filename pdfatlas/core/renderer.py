@@ -59,6 +59,7 @@ class RenderWorker:
         self.lock = threading.Lock()
         self._generation = 0
         self._active_filepath = None
+        self._active_filepaths: set[str] = set()
         self._respawn_count = 0
         self._pending: dict[int, dict] = {}
         self._pending_lock = threading.Lock()
@@ -265,20 +266,12 @@ class RenderWorker:
                         del self._pending[seq]
 
     def set_document(self, filepath: str):
-        """Switches the active document: drops queued jobs and pending results so
-        no stale render from the previous document can pollute the new one."""
+        """Registers the active document and pre-warms child worker cache."""
         with self.lock:
             self._generation += 1
             self._active_filepath = filepath
+            self._active_filepaths.add(filepath)
             self._respawn_count = 0
-        with self._pending_lock:
-            self._pending.clear()
-        with self.lock:
-            while not self.queue.empty():
-                try:
-                    self.queue.get_nowait()
-                except queue.Empty:
-                    break
         try:
             self._jobs_q.put({"op": "open", "filepath": filepath}, timeout=1.0)
         except Exception:
@@ -478,7 +471,7 @@ class RenderWorker:
     # --- Result delivery ---
 
     def _is_stale(self, entry: dict) -> bool:
-        if entry["filepath"] != self._active_filepath:
+        if self._active_filepaths and entry["filepath"] not in self._active_filepaths:
             return True
         if entry["gen_sensitive"] and entry["gen"] != self._generation:
             return True
