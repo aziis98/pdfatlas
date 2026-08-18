@@ -87,3 +87,52 @@ def test_existing_plain_file_with_arxiv_like_name_keeps_local(tmp_path, monkeypa
         assert win.current_source is not None
         assert win.current_source.uri == str(local)
         download_mock.assert_not_called()
+
+
+def test_offline_fallback_opens_local_pdf(tmp_path, monkeypatch):
+    import pdfatlas.core.arxiv_mapper as arxiv_mod
+    from pdfatlas.core.pdf_source import PdfSource
+
+    win = _make_window(tmp_path)
+    local = tmp_path / "2603.20268v1.pdf"
+    local.write_bytes(b"%PDF-local-arxiv")
+    source = PdfSource(source_type="arxiv", uri=str(local), display_name="2603.20268v1.pdf")
+
+    # Simulate network down
+    download_mock = MagicMock(side_effect=OSError("Network unreachable"))
+    monkeypatch.setattr(arxiv_mod, "download_arxiv_source", download_mock)
+
+    with _patch_collaborators(win):
+        win.open_document(source)
+
+        cast(MagicMock, win.render_worker).set_document.assert_called_once_with(str(local))
+        assert win.current_source is not None
+        assert win.current_source.uri == str(local)
+
+
+def test_cached_arxiv_paper_opens_when_offline(tmp_path, monkeypatch):
+    import urllib.request
+    import pdfatlas.core.arxiv_mapper as arxiv_mod
+    from pdfatlas.core.pdf_source import PdfSource
+
+    win = _make_window(tmp_path)
+    aid = "2603.20268v1"
+    cache_root = tmp_path / "cache" / "source-arxiv"
+    cache_pdf = cache_root / aid / "paper.pdf"
+    cache_pdf.parent.mkdir(parents=True, exist_ok=True)
+    cache_pdf.write_bytes(b"%PDF-cached")
+
+    monkeypatch.setattr(arxiv_mod, "ARXIV_CACHE_ROOT", cache_root)
+
+    source = PdfSource(source_type="arxiv", uri=f"arxiv:{aid}", display_name=f"arXiv:{aid}")
+
+    # Mock urlopen to simulate offline error if anything attempts network access
+    urlopen_mock = MagicMock(side_effect=OSError("Network unreachable"))
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen_mock)
+
+    with _patch_collaborators(win):
+        win.open_document(source)
+
+        cast(MagicMock, win.render_worker).set_document.assert_called_once_with(str(cache_pdf))
+        assert win.current_source is not None
+        assert win.current_source.uri == str(cache_pdf)

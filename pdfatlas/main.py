@@ -75,13 +75,20 @@ class PDFViewerApplication(Adw.Application):
             raw_arg = self.filepath_to_open.strip()
             from .core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
 
+            expanded = os.path.abspath(os.path.expanduser(raw_arg)) if os.path.exists(os.path.expanduser(raw_arg)) else raw_arg
             aid = extract_arxiv_id_from_raw(raw_arg) or arxiv_id_from_path(raw_arg)
-            existing = win.recent_files.get_by_uri(raw_arg)
+            existing = win.recent_files.get_by_uri(expanded) or win.recent_files.get_by_uri(raw_arg)
             if not existing and aid:
                 existing = win.recent_files.get_by_arxiv_id(aid)
 
             if existing:
                 source = existing
+            elif os.path.exists(os.path.expanduser(raw_arg)):
+                source = PdfSource(
+                    source_type="file",
+                    uri=expanded,
+                    display_name=os.path.basename(expanded),
+                )
             elif aid:
                 source = PdfSource(
                     source_type="arxiv",

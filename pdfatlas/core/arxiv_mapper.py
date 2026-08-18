@@ -75,25 +75,42 @@ def arxiv_id_from_path(path_str: str) -> Optional[str]:
     return None
 
 
-def download_arxiv_source(arxiv_id: str) -> tuple[Path, Path]:
+def download_arxiv_source(arxiv_id: str, download_pdf: bool = True, timeout: float = 15.0) -> tuple[Path, Path]:
     cache_dir = ARXIV_CACHE_ROOT / arxiv_id
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     pdf_path = cache_dir / "paper.pdf"
-    if not pdf_path.exists():
+    if download_pdf and not pdf_path.exists():
         print(f"[ArxivMapper] Downloading PDF for {arxiv_id}...", file=sys.stderr, flush=True)
-        urllib.request.urlretrieve(ARXIV_PDF_URL.format(arxiv_id), pdf_path)
+        req = urllib.request.Request(
+            ARXIV_PDF_URL.format(arxiv_id),
+            headers={"User-Agent": "PDFAtlas/1.0 (PDF Viewer; mailto:support@example.com)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content = resp.read()
+            pdf_path.write_bytes(content)
 
     eprint_path = cache_dir / "source.tar.gz"
     if not any(cache_dir.glob("*.tex")):
-        if not eprint_path.exists():
-            print(f"[ArxivMapper] Downloading source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
-            urllib.request.urlretrieve(ARXIV_EPRINT_URL.format(arxiv_id), eprint_path)
-        print(f"[ArxivMapper] Extracting source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
-        with tarfile.open(eprint_path, "r:gz") as tar:
-            tar.extractall(path=cache_dir)
-        if eprint_path.exists():
-            eprint_path.unlink()
+        try:
+            if not eprint_path.exists():
+                print(f"[ArxivMapper] Downloading source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
+                req = urllib.request.Request(
+                    ARXIV_EPRINT_URL.format(arxiv_id),
+                    headers={"User-Agent": "PDFAtlas/1.0 (PDF Viewer; mailto:support@example.com)"},
+                )
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    content = resp.read()
+                    eprint_path.write_bytes(content)
+            print(f"[ArxivMapper] Extracting source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
+            with tarfile.open(eprint_path, "r:gz") as tar:
+                tar.extractall(path=cache_dir)
+            if eprint_path.exists():
+                eprint_path.unlink()
+        except Exception as e:
+            if not download_pdf:
+                raise
+            print(f"[ArxivMapper] Warning: Could not download/extract LaTeX source for {arxiv_id}: {e}", file=sys.stderr, flush=True)
 
     return pdf_path, cache_dir
 
@@ -231,9 +248,9 @@ class ArxivDiffMapper:
         if progress_callback:
             progress_callback(0.05)
 
-        # 1. Download/extract source tarball if needed
+        # 1. Download/extract source tarball if needed (PDF already exists locally or in cache)
         t0 = time.perf_counter()
-        _, tex_dir = download_arxiv_source(arxiv_id)
+        _, tex_dir = download_arxiv_source(arxiv_id, download_pdf=False)
         t_download = time.perf_counter() - t0
 
         if progress_callback:
@@ -299,10 +316,12 @@ class ArxivDiffMapper:
             tex_idx = j2
 
         t_map = time.perf_counter() - t0
-        t_total = time.perf_counter() - t_start
         self.mapped_pdf_indices = set(self.tex_to_pdf_map.values())
+        t0 = time.perf_counter()
         self.moved_blocks = self._reconcile_moved_edits()
+        t_reconcile = time.perf_counter() - t0
         self.is_ready = True
+        t_total = time.perf_counter() - t_start
 
         if progress_callback:
             progress_callback(1.0)
@@ -314,6 +333,7 @@ class ArxivDiffMapper:
             f"TeX body: {t_tex_extract:.3f}s ({len(self.tex_words)} words), "
             f"Word diff: {t_diff:.3f}s, "
             f"Sourcemap build: {t_map:.3f}s, "
+            f"Reconcile moved: {t_reconcile:.3f}s, "
             f"Moved blocks: {len(self.moved_blocks)} | "
             f"Total: {t_total:.3f}s",
             file=sys.stderr,
@@ -333,27 +353,47 @@ class ArxivDiffMapper:
         del_chunks = [(i1, i2) for tag, i1, i2, j1, j2 in self.diff_opcodes if tag in ("delete", "replace") and (i2 - i1) >= min_words]
         ins_chunks = [(j1, j2) for tag, i1, i2, j1, j2 in self.diff_opcodes if tag in ("insert", "replace") and (j2 - j1) >= min_words]
 
-        moved_blocks: list[tuple[int, int, int, int, float]] = []
-        matched_ins = set()
-
+        # Precompute normalized tokens and inverted token index for fast matching
+        prepared_del: list[tuple[int, int, list[str], set[str]]] = []
         for p1, p2 in del_chunks:
-            p_words = self.pdf_words[p1:p2]
-            p_norm = [_norm_word(w) for w in p_words]
+            p_norm = [_norm_word(w) for w in self.pdf_words[p1:p2]]
             p_norm = [w for w in p_norm if w]
-            if not p_norm:
-                continue
+            if p_norm:
+                prepared_del.append((p1, p2, p_norm, set(p_norm)))
+
+        prepared_ins: list[tuple[int, int, list[str]]] = []
+        word_to_ins_indices: dict[str, list[int]] = {}
+        for idx, (t1, t2) in enumerate(ins_chunks):
+            t_norm = [_norm_word(w) for w in self.tex_words[t1:t2]]
+            t_norm = [w for w in t_norm if w]
+            t_set = set(t_norm)
+            prepared_ins.append((t1, t2, t_norm))
+            for w in t_set:
+                word_to_ins_indices.setdefault(w, []).append(idx)
+
+        moved_blocks: list[tuple[int, int, int, int, float]] = []
+        matched_ins: set[int] = set()
+
+        for p1, p2, p_norm, p_set in prepared_del:
+            # Narrow candidates to ins_chunks that share at least one normalized word
+            candidate_indices: set[int] = set()
+            for w in p_set:
+                for idx in word_to_ins_indices.get(w, []):
+                    if idx not in matched_ins:
+                        candidate_indices.add(idx)
 
             best_match = None
             best_score = 0.0
             best_t_chunk = None
+            len_p = len(p_norm)
 
-            for idx, (t1, t2) in enumerate(ins_chunks):
-                if idx in matched_ins:
-                    continue
-                t_words = self.tex_words[t1:t2]
-                t_norm = [_norm_word(w) for w in t_words]
-                t_norm = [w for w in t_norm if w]
-                if not t_norm:
+            for idx in candidate_indices:
+                t1, t2, t_norm = prepared_ins[idx]
+                len_t = len(t_norm)
+
+                # Fast upper bound: SequenceMatcher ratio cannot exceed (2 * min(Lp, Lt)) / (Lp + Lt)
+                max_possible_ratio = (2.0 * min(len_p, len_t)) / (len_p + len_t)
+                if max_possible_ratio < threshold or max_possible_ratio <= best_score:
                     continue
 
                 score = SequenceMatcher(None, p_norm, t_norm).ratio()
@@ -368,6 +408,7 @@ class ArxivDiffMapper:
                 moved_blocks.append((p1, p2, t1, t2, best_score))
 
                 # Reconcile word mappings for the matched moved block
+                p_words = self.pdf_words[p1:p2]
                 sub_matcher = SequenceMatcher(None, p_words, self.tex_words[t1:t2])
                 for tag, sub_i1, sub_i2, sub_j1, sub_j2 in sub_matcher.get_opcodes():
                     if tag in ("equal", "replace"):

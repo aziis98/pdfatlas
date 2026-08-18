@@ -491,15 +491,18 @@ class MainWindow(Adw.ApplicationWindow):
     # --- Document Loading & Indexing ---
 
     def open_document(self, source: PdfSource):
-        filepath = source.uri
+        raw_path = os.path.expanduser(source.uri)
+        try:
+            filepath = os.path.abspath(raw_path) if os.path.exists(raw_path) else raw_path
+        except OSError:
+            filepath = raw_path
+
         aid = arxiv_id_from_path(filepath)
 
-        # arXiv sources resolve from the app-side arxiv cache (downloaded on
-        # first use) when an ID is known, so stale or moved local paths in the
-        # recents never map to the wrong file. The stored local path is used
-        # only as a fallback when the download fails and that file still
-        # exists on disk.
-        if aid and (source.source_type == "arxiv" or not os.path.exists(filepath)):
+        # If a local file exists, open it directly without requiring internet.
+        # If the file does not exist locally (or is an arXiv source whose local path is gone),
+        # check the local arXiv cache first, and then attempt to download from arXiv if needed.
+        if aid and not os.path.exists(filepath):
             from ..core.arxiv_mapper import download_arxiv_source
 
             try:
@@ -512,7 +515,7 @@ class MainWindow(Adw.ApplicationWindow):
                 )
             except Exception as e:
                 if not os.path.exists(filepath):
-                    self._show_error_dialog(f"Failed to download arXiv paper '{filepath}':\n{e}")
+                    self._show_error_dialog(f"Failed to download arXiv paper '{source.uri}':\n{e}")
                     return
 
         if not os.path.exists(filepath):
