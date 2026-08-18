@@ -25,6 +25,11 @@ from pdfatlas.core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from
         ("math.DG/0101001", "math.DG/0101001"),
         ("2305.12345", "2305.12345"),
         ("2305.12345v2", "2305.12345v2"),
+        # Subdomains and DOIs
+        ("https://export.arxiv.org/abs/2305.12345", "2305.12345"),
+        ("https://doi.org/10.48550/arXiv.2305.12345", "2305.12345"),
+        ("http://dx.doi.org/10.48550/arXiv.2305.12345v1", "2305.12345v1"),
+        ("doi:10.48550/arXiv.2305.12345", "2305.12345"),
     ],
 )
 def test_extract_arxiv_id_from_raw(raw_input: str, expected_id: str):

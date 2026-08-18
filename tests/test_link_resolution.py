@@ -67,3 +67,85 @@ def test_render_portal_pixmap(tmp_path):
     assert pix.height > 0
 
     model.close()
+
+
+def test_arxiv_link_click_opens_new_instance(tmp_path):
+    from unittest.mock import MagicMock, patch
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+    from pdfatlas.ui.window import MainWindow
+
+    app = Adw.Application(application_id="com.example.testlinkclick")
+    app.register(None)
+    win = MainWindow(app)
+    win.doc_model = MagicMock()
+    win.doc_model.page_count = 5
+    win.canvas.page_layout = [(0.0, 600.0, 800.0, None)]
+
+    link_arxiv = {
+        "kind": 2,
+        "page": -1,
+        "uri": "arxiv:2305.12345",
+    }
+
+    with patch.object(win, "_open_new_instance_for_source") as mock_open:
+        win._on_link_clicked(0, link_arxiv)
+        mock_open.assert_called_once_with("arxiv:2305.12345")
+
+
+def test_arxiv_url_link_click_opens_new_instance(tmp_path):
+    from unittest.mock import MagicMock, patch
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+    from pdfatlas.ui.window import MainWindow
+
+    app = Adw.Application(application_id="com.example.testlinkurlclick")
+    app.register(None)
+    win = MainWindow(app)
+    win.doc_model = MagicMock()
+    win.doc_model.page_count = 5
+    win.canvas.page_layout = [(0.0, 600.0, 800.0, None)]
+
+    link_arxiv_url = {
+        "kind": 2,
+        "page": -1,
+        "uri": "https://arxiv.org/abs/2603.20268v1",
+    }
+
+    with patch.object(win, "_open_new_instance_for_source") as mock_open:
+        win._on_link_clicked(0, link_arxiv_url)
+        mock_open.assert_called_once_with("arxiv:2603.20268v1")
+
+
+def test_regular_uri_link_click_launches_external_browser(tmp_path):
+    from unittest.mock import MagicMock, patch
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gtk
+    from pdfatlas.ui.window import MainWindow
+
+    app = Adw.Application(application_id="com.example.testregurlclick")
+    app.register(None)
+    win = MainWindow(app)
+    win.doc_model = MagicMock()
+    win.doc_model.page_count = 5
+    win.canvas.page_layout = [(0.0, 600.0, 800.0, None)]
+
+    link_regular = {
+        "kind": 2,
+        "page": -1,
+        "uri": "https://example.com/some/page",
+    }
+
+    with patch.object(win, "_open_new_instance_for_source") as mock_open, \
+         patch.object(Gtk, "show_uri") as mock_show_uri:
+        win._on_link_clicked(0, link_regular)
+        mock_open.assert_not_called()
+        mock_show_uri.assert_called_once()
+
+

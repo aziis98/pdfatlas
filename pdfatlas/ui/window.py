@@ -17,7 +17,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from ..controllers.navigation import NavigationController
 from ..controllers.search import SearchController
-from ..core.arxiv_mapper import ArxivDiffMapper, arxiv_id_from_path
+from ..core.arxiv_mapper import ArxivDiffMapper, arxiv_id_from_path, extract_arxiv_id_from_raw
 from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
@@ -126,6 +126,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.follow_link = follow_link
         self.debug_mode = debug_mode
         self.debug_note_rect = debug_note_rect
+        self.render_mode = render_mode
+        self.render_workers = render_workers
+        self.use_shm = use_shm
         self._deferred_state_query = None
 
         # 2. Core models & persistent configuration
@@ -1285,6 +1288,14 @@ class MainWindow(Adw.ApplicationWindow):
         target_idx = current_idx + 1 if forward else current_idx - 1
         self.jump_to_page(target_idx)
 
+    def _open_new_instance_for_source(self, target: str):
+        from ..core.process_utils import launch_pdfatlas_process
+        try:
+            return launch_pdfatlas_process(target)
+        except Exception as e:
+            print(f"[MainWindow] Error launching new PDF Atlas instance for {target}: {e}", flush=True)
+            return None
+
     def _on_link_clicked(self, page_index: int, link: dict):
         if not self.doc_model or not self.canvas.page_layout:
             return
@@ -1293,6 +1304,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         if target_page is None or not isinstance(target_page, int) or target_page < 0 or target_page >= self.doc_model.page_count:
             if uri := link.get("uri"):
+                aid = extract_arxiv_id_from_raw(uri) or arxiv_id_from_path(uri)
+                if aid:
+                    self._open_new_instance_for_source(f"arxiv:{aid}")
+                    return
+
                 try:
                     Gtk.show_uri(self, uri, Gdk.CURRENT_TIME)
                 except Exception as e:

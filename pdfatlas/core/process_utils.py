@@ -31,3 +31,25 @@ def init_child_process_prelude() -> None:
                 f.write(f"\n=== render child pid={os.getpid()} at {time.time():.3f} ===\n")
             except Exception:
                 pass
+
+
+def launch_pdfatlas_process(target: str, extra_args: list[str] | None = None):
+    """
+    Launch a standalone, independent PDF Atlas instance in a new process.
+    """
+    import shutil
+    import subprocess
+
+    args = extra_args or []
+    pdfatlas_bin = shutil.which("pdfatlas")
+    if pdfatlas_bin and not sys.argv[0].endswith(".py"):
+        cmd = [pdfatlas_bin] + args + [target]
+    else:
+        cmd = [sys.executable, "-m", "pdfatlas.main"] + args + [target]
+
+    return subprocess.Popen(
+        cmd,
+        close_fds=True,
+        start_new_session=True,
+    )
+

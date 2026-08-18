@@ -52,7 +52,13 @@ class LinkPreviewManager:
             if target_page is not None:
                 lbl = f"Go to Page {target_page + 1}"
             elif link_uri:
-                lbl = f"Link: {link_uri}"
+                from ..core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
+
+                aid = extract_arxiv_id_from_raw(link_uri) or arxiv_id_from_path(link_uri)
+                if aid:
+                    lbl = f"arXiv:{aid} (Click to open in PDF Atlas)"
+                else:
+                    lbl = f"Link: {link_uri}"
             else:
                 lbl = "Internal Link"
 

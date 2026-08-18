@@ -326,7 +326,14 @@ This document records durable technical findings, architectural decisions, mathe
     3. Prune candidate comparisons using upper bounds on maximum possible ratio:
        $$\text{max\_length\_ratio} = \frac{2 \cdot \min(L_p, L_t)}{L_p + L_t} < \text{threshold}$$
        $$\text{max\_overlap\_ratio} = \frac{2 \cdot \min(L_p, L_t, |\text{tokens}_p \cap \text{tokens}_t| \cdot \max(L_p, L_t))}{L_p + L_t} \le \text{best\_score}$$
-  - Reduced `_reconcile_moved_edits` execution time from **23.75s to 0.06s** on 22,000-word papers while preserving 100% diff accuracy.
+### 1.33. arXiv URI Link Interception & Standalone Process Spawning
+
+- **Background:** Academic PDFs frequently include citations with external arXiv links (`arxiv:YYMM.NNNNN`, `https://arxiv.org/abs/...`, `https://arxiv.org/pdf/...`, or `https://doi.org/10.48550/arXiv...`). Default URI handling launched external desktop web browsers (`Gtk.show_uri()`), forcing the user out of PDF Atlas.
+- **Interception & Standalone Process Spawning:**
+  - `MainWindow._on_link_clicked()` inspects URI links and matches them against `extract_arxiv_id_from_raw(uri)` or `arxiv_id_from_path(uri)`.
+  - When an arXiv pattern is detected, it intercepts the link click and invokes `_open_new_instance_for_source(f"arxiv:{aid}")`.
+  - This calls `launch_pdfatlas_process()` in `pdfatlas/core/process_utils.py` to spawn a fully independent, standalone PDF Atlas OS process (`subprocess.Popen([sys.executable, "-m", "pdfatlas.main", target], start_new_session=True)`), with its own isolated memory space, UI loop, and render workers.
+  - Hover tooltips via `LinkPreviewManager.on_link_hovered()` preview `arXiv:{aid} (Click to open in PDF Atlas)`. Non-arXiv URIs continue launching external browsers seamlessly.
 
 ---
 

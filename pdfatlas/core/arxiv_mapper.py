@@ -20,7 +20,9 @@ ARXIV_EPRINT_URL = "https://arxiv.org/e-print/{}"
 ARXIV_ID_PATTERN = r"(?:[a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?"
 
 ARXIV_ID_RE = re.compile(
-    r"(?:https?://arxiv\.org/(?:abs|pdf)/(" + ARXIV_ID_PATTERN + r")(?:\.pdf)?|(?:arxiv:)?(" + ARXIV_ID_PATTERN + r"))",
+    r"(?:https?://(?:[a-zA-Z0-9\-]+\.)?arxiv\.org/(?:abs|pdf)/(" + ARXIV_ID_PATTERN + r")(?:\.pdf)?|"
+    r"(?:https?://(?:dx\.)?doi\.org/10\.48550/arxiv\.|doi:10\.48550/arxiv\.)(" + ARXIV_ID_PATTERN + r")|"
+    r"(?:arxiv:)?(" + ARXIV_ID_PATTERN + r"))",
     re.IGNORECASE,
 )
 
@@ -31,7 +33,7 @@ def extract_arxiv_id_from_raw(raw: str) -> Optional[str]:
         cleaned = cleaned[6:].strip()
     m = ARXIV_ID_RE.fullmatch(cleaned)
     if m:
-        return m.group(1) or m.group(2)
+        return m.group(1) or m.group(2) or m.group(3)
     return None
 
 
