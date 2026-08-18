@@ -404,27 +404,37 @@ class MainWindow(Adw.ApplicationWindow):
         # Centered Loading View (for fetching remote papers)
         self.loading_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=16,
+            spacing=14,
             halign=Gtk.Align.CENTER,
             valign=Gtk.Align.CENTER,
         )
+        self.loading_box.set_size_request(480, -1)
+
         self.loading_spinner = Gtk.Spinner()
         self.loading_spinner.set_size_request(48, 48)
+        self.loading_spinner.set_halign(Gtk.Align.CENTER)
         self.loading_spinner.start()
         self.loading_box.append(self.loading_spinner)
 
         self.loading_title = Gtk.Label()
         self.loading_title.add_css_class("title-2")
+        self.loading_title.set_justify(Gtk.Justification.CENTER)
+        self.loading_title.set_halign(Gtk.Align.CENTER)
+        self.loading_title.set_hexpand(True)
         self.loading_title.set_label("Downloading Paper...")
         self.loading_box.append(self.loading_title)
 
         self.loading_subtitle = Gtk.Label()
         self.loading_subtitle.add_css_class("dim-label")
+        self.loading_subtitle.set_justify(Gtk.Justification.CENTER)
+        self.loading_subtitle.set_halign(Gtk.Align.CENTER)
+        self.loading_subtitle.set_hexpand(True)
+        self.loading_subtitle.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         self.loading_subtitle.set_label("Connecting to arXiv...")
         self.loading_box.append(self.loading_subtitle)
 
         self.loading_progress_bar = Gtk.ProgressBar()
-        self.loading_progress_bar.set_size_request(300, 6)
+        self.loading_progress_bar.set_size_request(360, 6)
         self.loading_progress_bar.set_halign(Gtk.Align.CENTER)
         self.loading_box.append(self.loading_progress_bar)
 

@@ -91,7 +91,7 @@ def download_arxiv_source(
     if download_pdf and not pdf_path.exists():
         print(f"[ArxivMapper] Downloading PDF for {arxiv_id}...", file=sys.stderr, flush=True)
         if progress_callback:
-            progress_callback(0.0, f"Downloading arXiv:{arxiv_id} PDF...")
+            progress_callback(0.0, "Connecting to arXiv...")
         req = urllib.request.Request(
             ARXIV_PDF_URL.format(arxiv_id),
             headers={"User-Agent": "PDFAtlas/1.0 (PDF Viewer; mailto:support@example.com)"},
@@ -112,14 +112,14 @@ def download_arxiv_source(
                         fraction = min(0.99, downloaded / total_size)
                         mb = downloaded / (1024 * 1024)
                         tot_mb = total_size / (1024 * 1024)
-                        progress_callback(fraction, f"Downloading arXiv:{arxiv_id} ({mb:.1f}/{tot_mb:.1f} MB)...")
+                        progress_callback(fraction, f"{mb:.1f} / {tot_mb:.1f} MB ({int(fraction * 100)}%)")
                     else:
                         mb = downloaded / (1024 * 1024)
-                        progress_callback(0.5, f"Downloading arXiv:{arxiv_id} ({mb:.1f} MB)...")
+                        progress_callback(0.5, f"{mb:.1f} MB downloaded")
 
             pdf_path.write_bytes(b"".join(chunks))
             if progress_callback:
-                progress_callback(1.0, f"Downloaded arXiv:{arxiv_id}")
+                progress_callback(1.0, "Opening document...")
 
     if download_source:
         eprint_path = cache_dir / "source.tar.gz"
