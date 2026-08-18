@@ -574,12 +574,15 @@ class MainWindow(Adw.ApplicationWindow):
         doc_view = PdfDocumentView(
             render_worker=self.render_worker,
             settings=self.settings,
+            db_service=self.db_service,
             on_page_changed=self._on_doc_view_page_changed,
             on_zoom_changed=self._on_doc_view_zoom_changed,
             on_link_clicked=self._on_doc_view_link_clicked,
             on_note_create=self._on_canvas_note_create,
             on_selection_changed=self._update_selection_toolbar,
             on_toast=self._show_toast,
+            on_state_changed=self._schedule_state_save,
+            on_annotations_changed=self._update_annotations_button,
         )
         return doc_view
 
@@ -1261,6 +1264,9 @@ class MainWindow(Adw.ApplicationWindow):
         if self.initial_state:
             return
         self.highlights = highlights
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "highlights"):
+            doc_view.highlights = highlights
         self.canvas.set_highlights(highlights)
         self.canvas.queue_draw()
         self._update_annotations_button()
@@ -1276,6 +1282,9 @@ class MainWindow(Adw.ApplicationWindow):
         if self.initial_state:
             return
         self.notes = notes
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "notes"):
+            doc_view.notes = notes
         self.notes_layer.set_notes(notes)
         self._update_annotations_button()
 

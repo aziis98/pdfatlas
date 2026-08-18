@@ -8,6 +8,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gtk
 
+from ..controllers.navigation import NavigationController
 from ..core.arxiv_mapper import ArxivDiffMapper
 from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
@@ -25,8 +26,7 @@ from .notes import NotesLayer
 
 class PdfDocumentView(Gtk.Box):
     """
-    Self-contained document viewer component containing the continuous scroll canvas,
-    OpenGL render pipeline, notes annotation overlay, link hover previews, text selection,
+    Self-contained document view combining canvas layout, notes, link previews,
     and floating overlay toolbars.
     """
 
@@ -34,6 +34,7 @@ class PdfDocumentView(Gtk.Box):
         self,
         render_worker: Any = None,
         settings: CropSettings | None = None,
+        db_service: Any = None,
         on_page_changed: Callable[[int, int], None] | None = None,
         on_zoom_changed: Callable[[float], None] | None = None,
         on_link_clicked: Callable[[str, dict], None] | None = None,
@@ -41,10 +42,13 @@ class PdfDocumentView(Gtk.Box):
         on_note_create: Callable[[int, float, float], None] | None = None,
         on_selection_changed: Callable[[bool], None] | None = None,
         on_toast: Callable[[str], None] | None = None,
+        on_state_changed: Callable[[], None] | None = None,
+        on_annotations_changed: Callable[[], None] | None = None,
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.render_worker = render_worker
         self.settings = settings or CropSettings()
+        self.db_service = db_service
         self.on_page_changed = on_page_changed
         self.on_zoom_changed = on_zoom_changed
         self.on_link_clicked = on_link_clicked
@@ -52,6 +56,8 @@ class PdfDocumentView(Gtk.Box):
         self.on_note_create = on_note_create
         self.on_selection_changed = on_selection_changed
         self.on_toast = on_toast
+        self.on_state_changed = on_state_changed
+        self.on_annotations_changed = on_annotations_changed
 
         self.doc_model: DocumentModel | None = None
         self.current_source: PdfSource | None = None
@@ -63,6 +69,8 @@ class PdfDocumentView(Gtk.Box):
         self.highlights: list[Any] = []
         self.notes: list[Any] = []
         self.zoom: float = 1.0
+        self.zoom_label: Gtk.Label | None = None
+        self.debug_note_rect: bool = False
 
         # Build canvas
         self.canvas = PDFCanvas()
@@ -115,6 +123,13 @@ class PdfDocumentView(Gtk.Box):
         self.vadjustment = self.canvas.vadjustment
         self.hadjustment = self.canvas.hadjustment
         self.vadjustment.connect("value-changed", self._on_scroll_vchanged)
+
+        # Gestures and Navigation Controller
+        self.nav_controller = NavigationController(self)
+        self.pointer_x: float = 0.0
+        self.pointer_y: float = 0.0
+        self._pinch_start_zoom: float = 1.0
+        self._setup_canvas_gestures()
 
         self.append(self.canvas)
 
@@ -189,55 +204,137 @@ class PdfDocumentView(Gtk.Box):
         self.crop_analyzer = None
         self.arxiv_mapper = None
 
+    # --- Canvas Gestures & Interactions ---
+
+    def _setup_canvas_gestures(self):
+        motion_controller = Gtk.EventControllerMotion.new()
+        motion_controller.connect("motion", self._on_canvas_motion)
+        self.canvas.add_controller(motion_controller)
+
+        scroll_controller = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
+        scroll_controller.connect("scroll", self._on_canvas_scroll)
+        self.canvas.add_controller(scroll_controller)
+
+        click_gesture = Gtk.GestureClick.new()
+        click_gesture.connect("released", self._on_canvas_clicked)
+        self.canvas.add_controller(click_gesture)
+
+        pinch_gesture = Gtk.GestureZoom.new()
+        pinch_gesture.connect("begin", self._on_pinch_begin)
+        pinch_gesture.connect("scale-changed", self._on_pinch_scale_changed)
+        pinch_gesture.connect("end", self._on_pinch_end)
+        self.canvas.add_controller(pinch_gesture)
+
+    def _on_pinch_begin(self, gesture, sequence):
+        self._pinch_start_zoom = self.zoom
+        self.canvas.is_pinching = True
+
+    def _on_pinch_scale_changed(self, gesture, scale):
+        new_zoom = self._pinch_start_zoom * gesture.get_scale_delta()
+        success, center_x, center_y = gesture.get_bounding_box_center()
+        if success:
+            self.canvas.pinch_center_x = center_x
+            self.canvas.pinch_center_y = center_y
+            # gesture coords are viewport-relative; convert to document coords for anchoring
+            self.set_zoom_level(
+                new_zoom,
+                center_x=center_x + self.hadjustment.get_value(),
+                center_y=center_y + self.vadjustment.get_value(),
+            )
+        else:
+            self.set_zoom_level(new_zoom)
+
+    def _on_pinch_end(self, gesture, sequence):
+        self.canvas.is_pinching = False
+        self.canvas.set_zoom(self.zoom)
+        self._queue_canvas_redraw()
+
+    def _on_canvas_clicked(self, gesture, n_press, x, y):
+        self.canvas.grab_focus()
+        if self.canvas.highlighted_block is not None:
+            self.canvas.set_highlighted_block(0, None)
+            self.canvas.queue_draw_overlays("clear-highlight")
+
+    def _on_canvas_motion(self, controller, x, y):
+        self.pointer_x = x
+        self.pointer_y = y
+
+    def _on_canvas_scroll(self, controller, dx, dy):
+        modifiers = controller.get_current_event_state()
+        if modifiers & Gdk.ModifierType.CONTROL_MASK:
+            factor = 1.2 if dy < 0 else (1.0 / 1.2)
+            px = self.pointer_x
+            py = self.pointer_y
+            # pointer coords are viewport-relative; convert to document coords for anchoring
+            self.set_zoom_level(
+                self.zoom * factor,
+                center_x=px + self.hadjustment.get_value(),
+                center_y=py + self.vadjustment.get_value(),
+            )
+            return True
+        return False
+
+    def _queue_canvas_redraw(self):
+        self.canvas.gl_canvas.queue_draw()
+
+    def _schedule_state_save(self):
+        if self.on_state_changed:
+            self.on_state_changed()
+
+    def _on_scroll_page_changed(self, adj):
+        if not self.doc_model:
+            return
+        curr_page = self.get_current_page_index() + 1
+        if self.on_page_changed and self.doc_model:
+            self.on_page_changed(curr_page, self.doc_model.page_count)
+
     # --- Zoom Controls ---
 
     def set_zoom(self, zoom: float):
-        zoom = max(0.2, min(zoom, 5.0))
-        self.zoom = zoom
-        self.canvas.set_zoom(zoom)
-        self.zoom_component.update_state(ZoomState(zoom=zoom))
+        self.set_zoom_level(zoom)
+
+    def set_zoom_level(
+        self,
+        new_zoom: float,
+        anchor_x: float | None = None,
+        anchor_y: float | None = None,
+        center_x: float | None = None,
+        center_y: float | None = None,
+    ):
+        self.nav_controller.set_zoom_level(
+            new_zoom,
+            anchor_x=anchor_x,
+            anchor_y=anchor_y,
+            center_x=center_x,
+            center_y=center_y,
+        )
+        self.zoom_component.update_state(ZoomState(zoom=self.zoom))
         if self.on_zoom_changed:
-            self.on_zoom_changed(zoom)
+            self.on_zoom_changed(self.zoom)
 
     def zoom_in(self):
-        self.set_zoom(self.zoom * 1.15)
+        self.nav_controller.zoom_in()
+        self.zoom_component.update_state(ZoomState(zoom=self.zoom))
+        if self.on_zoom_changed:
+            self.on_zoom_changed(self.zoom)
 
     def zoom_out(self):
-        self.set_zoom(self.zoom / 1.15)
+        self.nav_controller.zoom_out()
+        self.zoom_component.update_state(ZoomState(zoom=self.zoom))
+        if self.on_zoom_changed:
+            self.on_zoom_changed(self.zoom)
 
     def zoom_fit_width(self):
-        if not self.doc_model or not self.canvas.page_layout:
-            return
-        viewport_w = (
-            self.canvas.hadjustment.get_page_size()
-            if self.canvas.hadjustment and self.canvas.hadjustment.get_page_size() > 0
-            else float(self.canvas.get_width())
-        )
-        if viewport_w <= 1.0:
-            return
-        curr_page = self.get_current_page_index()
-        curr_page = max(0, min(curr_page, len(self.canvas.page_layout) - 1))
-        _, dw, _, _ = self.canvas.page_layout[curr_page]
-        if dw > 0:
-            ratio = (viewport_w - 40) / dw
-            self.set_zoom(self.zoom * ratio)
+        self.nav_controller.zoom_fit_width()
+        self.zoom_component.update_state(ZoomState(zoom=self.zoom))
+        if self.on_zoom_changed:
+            self.on_zoom_changed(self.zoom)
 
     def zoom_fit_height(self):
-        if not self.doc_model or not self.canvas.page_layout:
-            return
-        viewport_h = (
-            self.canvas.vadjustment.get_page_size()
-            if self.canvas.vadjustment and self.canvas.vadjustment.get_page_size() > 0
-            else float(self.canvas.get_height())
-        )
-        if viewport_h <= 1.0:
-            return
-        curr_page = self.get_current_page_index()
-        curr_page = max(0, min(curr_page, len(self.canvas.page_layout) - 1))
-        _, _, dh, _ = self.canvas.page_layout[curr_page]
-        if dh > 0:
-            ratio = (viewport_h - 40) / dh
-            self.set_zoom(self.zoom * ratio)
+        self.nav_controller.zoom_fit_page()
+        self.zoom_component.update_state(ZoomState(zoom=self.zoom))
+        if self.on_zoom_changed:
+            self.on_zoom_changed(self.zoom)
 
     # --- Navigation & Positioning ---
 
@@ -254,21 +351,23 @@ class PdfDocumentView(Gtk.Box):
         return curr
 
     def jump_to_page(self, page_idx: int, y_offset: float | None = None):
-        if not self.doc_model or not self.canvas.page_layout:
-            return
-        page_idx = max(0, min(page_idx, len(self.canvas.page_layout) - 1))
-        page_y, _, _, crop_rect = self.canvas.page_layout[page_idx]
-
-        if y_offset is not None:
+        if y_offset is not None and self.canvas.page_layout:
+            page_idx = max(0, min(page_idx, len(self.canvas.page_layout) - 1))
+            page_y, _, _, crop_rect = self.canvas.page_layout[page_idx]
             scale = layout_scale(self.zoom, self.canvas.dpi_scale_factor)
             crop_off_y = crop_rect.y0 if crop_rect is not None else 0.0
             target_y = page_y + self.canvas.page_gap + (max(0.0, y_offset - crop_off_y) * scale)
+            self.vadjustment.set_value(target_y)
+            self.canvas.grab_focus()
+            self.canvas.gl_canvas.queue_draw()
         else:
-            target_y = page_y + self.canvas.page_gap
+            self.nav_controller.jump_to_page(page_idx)
 
-        self.vadjustment.set_value(target_y)
-        self.canvas.grab_focus()
-        self.canvas.gl_canvas.queue_draw()
+    def scroll_step(self, direction: int):
+        self.nav_controller.scroll_step(forward=(direction > 0))
+
+    def page_step(self, direction: int):
+        self.nav_controller.scroll_page(forward=(direction > 0))
 
     def set_highlighted_block(self, page_idx: int, bbox: tuple[float, float, float, float] | None):
         self.canvas.set_highlighted_block(page_idx, bbox)

@@ -1,9 +1,6 @@
-from typing import TYPE_CHECKING
+from typing import Any
 
 from ..core.layout import layout_scale
-
-if TYPE_CHECKING:
-    from ..ui.window import MainWindow
 
 
 def clamp(val, min_val, max_val):
@@ -15,7 +12,7 @@ class NavigationController:
     Controller handling document navigation, viewport scroll position, and zoom calculations.
     """
 
-    def __init__(self, main_window: "MainWindow"):
+    def __init__(self, main_window: Any):
         self.win = main_window
 
     def jump_to_page(self, page_index: int, smooth: bool = True):

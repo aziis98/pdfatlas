@@ -286,6 +286,7 @@ class NotesLayer:
             self._render_preview(md)
 
     def set_notes(self, notes: list[dict]):
+        self.win.notes = notes
         self._remove_all_icons()
         for note in notes:
             self._ensure_icon(note)
@@ -320,24 +321,35 @@ class NotesLayer:
             GLib.idle_add(self._on_note_saved, nid, page, x, y)
             return GLib.SOURCE_REMOVE
 
-        self.win.db_service.save_note(page, x, y, "", on_complete=on_complete)
+        db = getattr(self.win, "db_service", None)
+        if db is not None:
+            db.save_note(page, x, y, "", on_complete=on_complete)
+
+    def _notify_annotations_changed(self):
+        if hasattr(self.win, "_update_annotations_button"):
+            self.win._update_annotations_button()
+        cb = getattr(self.win, "on_annotations_changed", None)
+        if callable(cb):
+            cb()
 
     def _on_note_saved(self, nid: int, page: int, x: float, y: float):
         note = {"id": nid, "page": page, "x": x, "y": y, "markdown": ""}
         self.win.notes.append(note)
         self._ensure_icon(note)
-        self.win._update_annotations_button()
+        self._notify_annotations_changed()
         self.open_editor(note)
 
     def delete_note(self, note: dict):
         nid = note["id"]
-        self.win.db_service.delete_note(nid)
+        db = getattr(self.win, "db_service", None)
+        if db is not None:
+            db.delete_note(nid)
         self.win.notes = [n for n in self.win.notes if n.get("id") != nid]
         self._remove_icon(nid)
         ed = self._editors.pop(nid, None)
         if ed is not None:
             ed.close()
-        self.win._update_annotations_button()
+        self._notify_annotations_changed()
         self._preview_popdown()
 
     def save_content(self, note_id: int, markdown: str):
@@ -345,7 +357,9 @@ class NotesLayer:
         if note is None:
             return  # deleted while an editor was still open
         note["markdown"] = markdown
-        self.win.db_service.update_note(note_id, markdown)
+        db = getattr(self.win, "db_service", None)
+        if db is not None:
+            db.update_note(note_id, markdown)
 
     # --- Icons ------------------------------------------------------------
 
