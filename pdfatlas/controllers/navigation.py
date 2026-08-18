@@ -237,20 +237,24 @@ class NavigationController:
         self.set_zoom_level(1.0)
 
     def zoom_fit_width(self):
-        if not self.win.doc_model:
+        if not self.win.doc_model or not self.win.canvas:
             return
-        viewport_w = float(self.win.canvas.viewport_width())
+        if hasattr(self.win.canvas, "_viewport_width"):
+            viewport_w = float(self.win.canvas._viewport_width())
+        else:
+            viewport_w = float(self.win.canvas.viewport_width())
+
         if viewport_w <= 100:
             return
 
         max_page_w = 0.0
         for i in range(self.win.doc_model.page_count):
             rect = None
-            if self.win.settings.enabled and self.win.crop_analyzer:
+            if self.win.settings.enabled and self.win.crop_analyzer and i < len(self.win.crop_analyzer.crop_rects):
                 rect = self.win.crop_analyzer.crop_rects[i]
             if rect is None:
                 rect = self.win.doc_model.page_rect(i)
-            if rect.width > max_page_w:
+            if rect and rect.width > max_page_w:
                 max_page_w = rect.width
 
         if max_page_w > 0:
@@ -258,10 +262,17 @@ class NavigationController:
             self.set_zoom_level(target_zoom)
 
     def zoom_fit_page(self):
-        if not self.win.doc_model:
+        if not self.win.doc_model or not self.win.canvas:
             return
-        viewport_w = float(self.win.canvas.viewport_width())
-        viewport_h = float(self.win.canvas.viewport_height())
+        if hasattr(self.win.canvas, "_viewport_width"):
+            viewport_w = float(self.win.canvas._viewport_width())
+        else:
+            viewport_w = float(self.win.canvas.viewport_width())
+
+        if hasattr(self.win.canvas, "_viewport_height"):
+            viewport_h = float(self.win.canvas._viewport_height())
+        else:
+            viewport_h = float(self.win.canvas.viewport_height())
         if viewport_w <= 100 or viewport_h <= 100:
             return
 
@@ -269,13 +280,13 @@ class NavigationController:
         max_h = 0.0
         for i in range(self.win.doc_model.page_count):
             rect = None
-            if self.win.settings.enabled and self.win.crop_analyzer:
+            if self.win.settings.enabled and self.win.crop_analyzer and i < len(self.win.crop_analyzer.crop_rects):
                 rect = self.win.crop_analyzer.crop_rects[i]
             if rect is None:
                 rect = self.win.doc_model.page_rect(i)
-            if rect.width > max_w:
+            if rect and rect.width > max_w:
                 max_w = rect.width
-            if rect.height > max_h:
+            if rect and rect.height > max_h:
                 max_h = rect.height
 
         if max_w > 0 and max_h > 0:

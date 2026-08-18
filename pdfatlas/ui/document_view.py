@@ -336,11 +336,14 @@ class PdfDocumentView(Gtk.Box):
         if self.on_zoom_changed:
             self.on_zoom_changed(self.zoom)
 
-    def zoom_fit_height(self):
+    def zoom_fit_page(self):
         self.nav_controller.zoom_fit_page()
         self.zoom_component.update_state(ZoomState(zoom=self.zoom))
         if self.on_zoom_changed:
             self.on_zoom_changed(self.zoom)
+
+    def zoom_fit_height(self):
+        self.zoom_fit_page()
 
     # --- Navigation & Positioning ---
 

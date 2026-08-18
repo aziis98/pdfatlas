@@ -254,6 +254,13 @@ class PDFCanvas(Gtk.Overlay):
             return self.hadjustment.get_page_size()
         return float(self.get_width())
 
+    def _viewport_height(self) -> float:
+        """Viewport height, preferring the vertical adjustment page size (robust
+        before the scrolled window is realized and on resize)."""
+        if self.vadjustment and self.vadjustment.get_page_size() > 0:
+            return self.vadjustment.get_page_size()
+        return float(self.get_height())
+
     def _reposition_pages(self, viewport_w: float | None = None):
         """Absolutely position each PageContainer at its float page_layout
         coordinate, snapped to pixels only at the last step (round of the

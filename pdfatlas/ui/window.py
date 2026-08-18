@@ -466,8 +466,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
         self.hadjustment.connect("value-changed", self._on_horizontal_scroll_changed)
 
-        self._setup_canvas_gestures()
-
         self._show_welcome()
 
     def _show_welcome(self):
@@ -495,68 +493,6 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_canvas_note_create(self, page: int, x: float, y: float):
         self.notes_layer.create_note(page, x, y)
-
-    def _setup_canvas_gestures(self):
-        motion_controller = Gtk.EventControllerMotion.new()
-        motion_controller.connect("motion", self._on_canvas_motion)
-        self.canvas.add_controller(motion_controller)
-
-        scroll_controller = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
-        scroll_controller.connect("scroll", self._on_canvas_scroll)
-        self.canvas.add_controller(scroll_controller)
-
-        click_gesture = Gtk.GestureClick.new()
-        click_gesture.connect("released", self._on_canvas_clicked)
-        self.canvas.add_controller(click_gesture)
-
-        pinch_gesture = Gtk.GestureZoom.new()
-        pinch_gesture.connect("begin", self._on_pinch_begin)
-        pinch_gesture.connect("scale-changed", self._on_pinch_scale_changed)
-        pinch_gesture.connect("end", self._on_pinch_end)
-        self.canvas.add_controller(pinch_gesture)
-
-    def _on_pinch_begin(self, gesture, sequence):
-        self._pinch_start_zoom = self.zoom
-        self.canvas.is_pinching = True
-
-    def _on_pinch_scale_changed(self, gesture, scale):
-        new_zoom = self._pinch_start_zoom * gesture.get_scale_delta()
-        success, center_x, center_y = gesture.get_bounding_box_center()
-        if success:
-            self.canvas.pinch_center_x = center_x
-            self.canvas.pinch_center_y = center_y
-            # gesture coords are viewport-relative; convert to document coords for anchoring
-            self.set_zoom_level(new_zoom, center_x=center_x + self.hadjustment.get_value(),
-                                center_y=center_y + self.vadjustment.get_value())
-        else:
-            self.set_zoom_level(new_zoom)
-
-    def _on_pinch_end(self, gesture, sequence):
-        self.canvas.is_pinching = False
-        self.canvas.set_zoom(self.zoom)
-        self._queue_canvas_redraw()
-
-    def _on_canvas_clicked(self, gesture, n_press, x, y):
-        self.canvas.grab_focus()
-        if self.canvas.highlighted_block is not None:
-            self.canvas.set_highlighted_block(0, None)
-            self.canvas.queue_draw_overlays("clear-highlight")
-
-    def _on_canvas_motion(self, controller, x, y):
-        self.pointer_x = x
-        self.pointer_y = y
-
-    def _on_canvas_scroll(self, controller, dx, dy):
-        modifiers = controller.get_current_event_state()
-        if modifiers & Gdk.ModifierType.CONTROL_MASK:
-            factor = 1.2 if dy < 0 else (1.0 / 1.2)
-            px = self.pointer_x
-            py = self.pointer_y
-            # pointer coords are viewport-relative; convert to document coords for anchoring
-            self.set_zoom_level(self.zoom * factor, center_x=px + self.hadjustment.get_value(),
-                                center_y=py + self.vadjustment.get_value())
-            return True
-        return False
 
     def _show_toast(self, message: str):
         self.toast_overlay.add_toast(Adw.Toast.new(message))
@@ -2395,7 +2331,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def zoom_fit_page(self):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "zoom_fit_height"):
+        if doc_view and hasattr(doc_view, "zoom_fit_page"):
+            doc_view.zoom_fit_page()
+        elif doc_view and hasattr(doc_view, "zoom_fit_height"):
             doc_view.zoom_fit_height()
         else:
             self.nav_controller.zoom_fit_page()

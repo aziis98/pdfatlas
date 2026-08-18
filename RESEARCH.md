@@ -386,4 +386,6 @@ This document records durable technical findings, architectural decisions, mathe
 | **Cage (kiosk wlroots compositor) for windowed captures** | Always resizes its single client to fill the output; no floating/windowed mode, so "screen bigger than window" is structurally impossible. | labwc (real desktop shell) or Weston + Xvfb. |
 | **`xdotool search` to find the Weston X11 window** | Depends on a WM publishing EWMH `_NET_CLIENT_LIST`; bare Xvfb runs no WM, so it returned nothing. | Grep the window id from `xwininfo -root -tree` by the fixed title "Weston Compositor". |
 | **Un-anchored note preview popover (`set_has_arrow(False)`, uncentered rect)** | Without an arrow and with the anchor rect whose top-left was the note point (icon is centered), the card hung off the icon with the pointer at the wrong spot. | `set_has_arrow(True)` and center the anchor rect on the note point, sized to the real 34×34 icon. |
+| **Using raw widget height for `zoom_fit_page` instead of `_viewport_height()`** | In un-realized/headless widgets, `get_height()` is 0 or includes hidden scrollbars, causing `zoom_fit_page` calculations to fail or produce horizontal scrollbar overflow. | Use `vadjustment.get_page_size()` (via `_viewport_height()`) for exact scrollbar-aware geometry. |
+
 
