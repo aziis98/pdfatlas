@@ -149,12 +149,10 @@ class PDFCanvas(Gtk.Overlay):
         self._visibility_scan_id: int | None = None
         self._visibility_scan_retries = 0
 
-        # Pinch-to-zoom and pointer tracking state
+        # Pinch-to-zoom state
         self.is_pinching = False
         self.pinch_center_x: float = 0.0
         self.pinch_center_y: float = 0.0
-        self.pointer_x: float | None = None
-        self.pointer_y: float | None = None
 
         # Scroll-aware progressive rendering state: while scrolling a slow
         # document (renders > SLOW_RENDER_MS) pages are rasterized at
@@ -262,15 +260,6 @@ class PDFCanvas(Gtk.Overlay):
         if self.vadjustment and self.vadjustment.get_page_size() > 0:
             return self.vadjustment.get_page_size()
         return float(self.get_height())
-
-    def get_pointer_pos(self) -> tuple[float, float]:
-        """Returns the last known pointer position relative to the visible viewport,
-        or the viewport center if the pointer has not yet moved over the canvas."""
-        vw = self._viewport_width()
-        vh = self._viewport_height()
-        px = self.pointer_x if self.pointer_x is not None else (vw / 2.0)
-        py = self.pointer_y if self.pointer_y is not None else (vh / 2.0)
-        return float(px), float(py)
 
     def _reposition_pages(self, viewport_w: float | None = None):
         """Absolutely position each PageContainer at its float page_layout
@@ -544,8 +533,6 @@ class PDFCanvas(Gtk.Overlay):
         self.gl_canvas.queue_draw()
 
     def _on_motion(self, controller, x, y):
-        self.pointer_x = float(x)
-        self.pointer_y = float(y)
         hit = self._hit_test_link(x, y)
         is_same = (
             self.hovered_link is not None
