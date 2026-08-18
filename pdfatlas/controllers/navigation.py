@@ -147,10 +147,9 @@ class NavigationController:
         if abs(old_zoom - new_zoom) < 1e-4:
             return
 
-        # Halt active GTK 4 kinetic scrolling animations (only when not pinching)
-        if not getattr(self.win.canvas, "is_pinching", False):
-            self.win.canvas.set_kinetic_scrolling(False)
-            self.win.canvas.set_kinetic_scrolling(True)
+        # Halt active GTK 4 kinetic scrolling animations
+        self.win.canvas.set_kinetic_scrolling(False)
+        self.win.canvas.set_kinetic_scrolling(True)
 
         val_v = self.win.vadjustment.get_value()
         viewport_h = self.win.vadjustment.get_page_size()
