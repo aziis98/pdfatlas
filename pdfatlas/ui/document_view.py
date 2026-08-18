@@ -214,6 +214,7 @@ class PdfDocumentView(Gtk.Box):
         self.canvas.add_controller(motion_controller)
 
         scroll_controller = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
+        scroll_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         scroll_controller.connect("scroll", self._on_canvas_scroll)
         self.canvas.add_controller(scroll_controller)
 
@@ -231,24 +232,27 @@ class PdfDocumentView(Gtk.Box):
         self._pinch_start_zoom = self.zoom
         self.canvas.is_pinching = True
         success, center_x, center_y = gesture.get_bounding_box_center()
-        if success:
-            self.canvas.pinch_center_x = center_x
-            self.canvas.pinch_center_y = center_y
+        if not success or (center_x == 0.0 and center_y == 0.0):
+            center_x, center_y = self.canvas.get_pointer_pos()
+        self._pinch_anchor_x = center_x
+        self._pinch_anchor_y = center_y
+        self.canvas.pinch_center_x = center_x
+        self.canvas.pinch_center_y = center_y
 
     def _on_pinch_scale_changed(self, gesture, scale):
         new_zoom = self._pinch_start_zoom * gesture.get_scale_delta()
         success, center_x, center_y = gesture.get_bounding_box_center()
-        if success:
-            self.canvas.pinch_center_x = center_x
-            self.canvas.pinch_center_y = center_y
-            # gesture coords are viewport-relative; convert to document coords for anchoring
-            self.set_zoom_level(
-                new_zoom,
-                center_x=center_x + self.hadjustment.get_value(),
-                center_y=center_y + self.vadjustment.get_value(),
-            )
-        else:
-            self.set_zoom_level(new_zoom)
+        if not success or (center_x == 0.0 and center_y == 0.0):
+            center_x = getattr(self, "_pinch_anchor_x", self.canvas.get_pointer_pos()[0])
+            center_y = getattr(self, "_pinch_anchor_y", self.canvas.get_pointer_pos()[1])
+        self.canvas.pinch_center_x = center_x
+        self.canvas.pinch_center_y = center_y
+        # gesture coords are viewport-relative; convert to document coords for anchoring
+        self.set_zoom_level(
+            new_zoom,
+            center_x=center_x + self.hadjustment.get_value(),
+            center_y=center_y + self.vadjustment.get_value(),
+        )
 
     def _on_pinch_end(self, gesture, sequence):
         self.canvas.is_pinching = False
@@ -269,8 +273,7 @@ class PdfDocumentView(Gtk.Box):
         modifiers = controller.get_current_event_state()
         if modifiers & Gdk.ModifierType.CONTROL_MASK:
             factor = 1.2 if dy < 0 else (1.0 / 1.2)
-            px = self.pointer_x
-            py = self.pointer_y
+            px, py = self.canvas.get_pointer_pos()
             # pointer coords are viewport-relative; convert to document coords for anchoring
             self.set_zoom_level(
                 self.zoom * factor,
