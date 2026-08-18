@@ -151,11 +151,16 @@ class NavigationController:
 
         target_center_y: float = float(anchor_y) if anchor_y is not None else float(val_v + (viewport_h / 2.0))
 
-        # Determine page index at center_y to separate unscaled page_gaps from scaled content height
-        current_page_idx = self.win.get_current_page_index()
-        gap_count = current_page_idx + 1
-        fixed_gaps = gap_count * self.win.canvas.page_gap
+        # Determine page index at target_center_y to separate unscaled page_gaps from scaled content height
+        target_page_idx = 0
+        if self.win.canvas.page_layout:
+            for i, (y0, _dw, dh, _crop) in enumerate(self.win.canvas.page_layout):
+                if target_center_y <= y0 + dh + self.win.canvas.page_gap:
+                    target_page_idx = i
+                    break
+                target_page_idx = i
 
+        fixed_gaps = target_page_idx * self.win.canvas.page_gap
         content_y = max(0.0, target_center_y - fixed_gaps)
         ratio = new_zoom / old_zoom
 

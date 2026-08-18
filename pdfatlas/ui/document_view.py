@@ -228,6 +228,10 @@ class PdfDocumentView(Gtk.Box):
     def _on_pinch_begin(self, gesture, sequence):
         self._pinch_start_zoom = self.zoom
         self.canvas.is_pinching = True
+        success, center_x, center_y = gesture.get_bounding_box_center()
+        if success:
+            self.canvas.pinch_center_x = center_x
+            self.canvas.pinch_center_y = center_y
 
     def _on_pinch_scale_changed(self, gesture, scale):
         new_zoom = self._pinch_start_zoom * gesture.get_scale_delta()
