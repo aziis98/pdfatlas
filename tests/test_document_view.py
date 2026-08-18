@@ -93,3 +93,45 @@ def test_document_view_scroll_restoration(tmp_path):
 
     view.close()
 
+
+def test_drag_tab_to_new_window(tmp_path):
+    import gi
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+    from pdfatlas.ui.window import MainWindow
+
+    doc_path = tmp_path / "sample_drag.pdf"
+    doc = fitz.open()
+    doc.new_page(width=500, height=800)
+    doc.save(str(doc_path))
+    doc.close()
+
+    app = Adw.Application(application_id="com.example.testdragtab")
+    win1 = MainWindow(app)
+    source = PdfSource(source_type="file", uri=str(doc_path), display_name="Dragged Doc")
+    win1.open_document(source)
+    assert win1.stack.get_visible_child_name() == "document-view"
+
+    # Simulate tab drag to new window (Adw.TabView create-window signal)
+    new_tab_view = win1._on_create_window(win1.tab_view)
+    assert new_tab_view is not None
+
+    # Get the newly created window from the tab view
+    win2 = new_tab_view.get_root()
+    assert isinstance(win2, MainWindow)
+    assert win2.stack.get_visible_child_name() == "document-view"
+
+    # Transfer page from win1 to win2
+    page1 = win1.tab_view.get_nth_page(0)
+    win1.tab_view.transfer_page(page1, win2.tab_view, 0)
+
+    # Verify win2 is showing document-view and has the active document
+    assert win2.stack.get_visible_child_name() == "document-view"
+    active_doc = win2.get_active_doc_view()
+    assert active_doc is not None
+    assert active_doc.doc_model is not None
+
+    win1.close()
+    win2.close()
+
+

@@ -343,6 +343,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Tab View & Tab Bar
         self.tab_view = Adw.TabView()
         self.tab_view.connect("create-window", self._on_create_window)
+        self.tab_view.connect("page-attached", self._on_page_attached)
         self.tab_view.connect("page-detached", self._on_page_detached)
         self.tab_view.connect("close-page", self._on_close_page)
         self.tab_view.connect("notify::selected-page", self._on_selected_tab_changed)
@@ -535,11 +536,19 @@ class MainWindow(Adw.ApplicationWindow):
             render_workers=self.render_workers,
             use_shm=self.use_shm,
         )
+        new_win.stack.set_visible_child_name("document-view")
         new_win.present()
         return new_win.tab_view
 
+    def _on_page_attached(self, view: Adw.TabView, page: Adw.TabPage, position: int) -> None:
+        self.stack.set_visible_child_name("document-view")
+        self._on_selected_tab_changed(view, None)
+
     def _on_page_detached(self, view: Adw.TabView, page: Adw.TabPage, position: int) -> None:
         if view.get_n_pages() == 0:
+            self.doc_model = None
+            self.current_source = None
+            self._active_doc_view_ref = None
             windows = self.app.get_windows() if self.app else []
             if len(windows) > 1:
                 self.close()
@@ -575,6 +584,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._active_doc_view_ref = doc_view if isinstance(doc_view, PdfDocumentView) else None
 
         if isinstance(doc_view, WelcomeView):
+            self.stack.set_visible_child_name("document-view")
             doc_view.refresh(self.recent_files)
             self.filename_label.set_label("PDF Atlas")
             self.set_title("PDF Atlas")
@@ -587,6 +597,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.annotations_btn.set_visible(False)
             self.zoom_label.set_label("100%")
         elif isinstance(doc_view, PdfDocumentView) and doc_view.doc_model is not None:
+            self.stack.set_visible_child_name("document-view")
             self.canvas = doc_view.canvas
             self.vadjustment = doc_view.vadjustment
             self.hadjustment = doc_view.hadjustment

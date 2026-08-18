@@ -94,7 +94,8 @@ class DocumentModel:
 
     def close(self):
         """
-        Close the underlying fitz document.
+        Close the underlying fitz document if not already closed.
         """
-        self.doc.close()
+        if self.doc and not getattr(self.doc, "is_closed", False):
+            self.doc.close()
 
