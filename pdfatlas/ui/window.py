@@ -2301,7 +2301,11 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def jump_to_page(self, page_index: int, smooth: bool = True):
-        self.nav_controller.jump_to_page(page_index, smooth=smooth)
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "jump_to_page"):
+            doc_view.jump_to_page(page_index)
+        else:
+            self.nav_controller.jump_to_page(page_index, smooth=smooth)
 
     def set_zoom_level(
         self,
@@ -2311,31 +2315,65 @@ class MainWindow(Adw.ApplicationWindow):
         center_x: float | None = None,
         center_y: float | None = None,
     ):
-        self.nav_controller.set_zoom_level(
-            new_zoom, anchor_x=anchor_x, anchor_y=anchor_y, center_x=center_x, center_y=center_y
-        )
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "set_zoom_level"):
+            doc_view.set_zoom_level(
+                new_zoom, anchor_x=anchor_x, anchor_y=anchor_y, center_x=center_x, center_y=center_y
+            )
+        else:
+            self.nav_controller.set_zoom_level(
+                new_zoom, anchor_x=anchor_x, anchor_y=anchor_y, center_x=center_x, center_y=center_y
+            )
         self._schedule_state_save()
 
     def zoom_in(self):
-        self.nav_controller.zoom_in()
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "zoom_in"):
+            doc_view.zoom_in()
+        else:
+            self.nav_controller.zoom_in()
 
     def zoom_out(self):
-        self.nav_controller.zoom_out()
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "zoom_out"):
+            doc_view.zoom_out()
+        else:
+            self.nav_controller.zoom_out()
 
     def zoom_reset(self):
-        self.nav_controller.zoom_reset()
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "set_zoom_level"):
+            doc_view.set_zoom_level(1.0)
+        else:
+            self.nav_controller.zoom_reset()
 
     def zoom_fit_width(self):
-        self.nav_controller.zoom_fit_width()
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "zoom_fit_width"):
+            doc_view.zoom_fit_width()
+        else:
+            self.nav_controller.zoom_fit_width()
 
     def zoom_fit_page(self):
-        self.nav_controller.zoom_fit_page()
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "zoom_fit_height"):
+            doc_view.zoom_fit_height()
+        else:
+            self.nav_controller.zoom_fit_page()
 
     def scroll_page(self, forward: bool = True):
-        self.nav_controller.scroll_page(forward=forward)
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "page_step"):
+            doc_view.page_step(1 if forward else -1)
+        else:
+            self.nav_controller.scroll_page(forward=forward)
 
     def scroll_step(self, forward: bool = True):
-        self.nav_controller.scroll_step(forward=forward)
+        doc_view = self.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "scroll_step"):
+            doc_view.scroll_step(1 if forward else -1)
+        else:
+            self.nav_controller.scroll_step(forward=forward)
 
     def _on_page_input_activate(self, entry):
         if not self.doc_model or not self.canvas.page_layout:

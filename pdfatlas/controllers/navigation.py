@@ -140,9 +140,10 @@ class NavigationController:
         if abs(old_zoom - new_zoom) < 1e-4:
             return
 
-        # Halt active GTK 4 kinetic scrolling animations
-        self.win.canvas.set_kinetic_scrolling(False)
-        self.win.canvas.set_kinetic_scrolling(True)
+        # Halt active GTK 4 kinetic scrolling animations (only when not pinching)
+        if not getattr(self.win.canvas, "is_pinching", False):
+            self.win.canvas.set_kinetic_scrolling(False)
+            self.win.canvas.set_kinetic_scrolling(True)
 
         val_v = self.win.vadjustment.get_value()
         viewport_h = self.win.vadjustment.get_page_size()
@@ -165,14 +166,14 @@ class NavigationController:
         ratio = new_zoom / old_zoom
 
         # Horizontal anchor (content-space x): cursor position or viewport center.
-        # Pages are centered within a content box that is as wide as the widest
-        # page (or the viewport when everything fits).
+        # Pages are centered within a content box that is max(viewport_w, max_page_w).
         val_h = self.win.hadjustment.get_value()
         viewport_w_h = self.win.hadjustment.get_page_size()
         if viewport_w_h <= 1.0:
             viewport_w_h = 800.0
         target_center_x: float = float(anchor_x) if anchor_x is not None else float(val_h + (viewport_w_h / 2.0))
-        box_w_old = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
+        max_dw_old = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
+        box_w_old = max(viewport_w_h, max_dw_old)
 
         self.win.zoom = new_zoom
         if self.win.zoom_label is not None:
@@ -194,18 +195,17 @@ class NavigationController:
 
         self.win.vadjustment.set_value(target_v)
 
-        # Keep the horizontal anchor at the same screen position: the page stays
-        # centered when zooming at its middle, and the point under the cursor
-        # stays put otherwise. When everything fits, scroll_x collapses to 0.
-        box_w_new = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
-        if box_w_old > 0.0:
+        # Keep the horizontal anchor at the same screen position
+        max_dw_new = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
+        box_w_new = max(viewport_w_h, max_dw_new)
+        if max_dw_old > 0.0:
             new_center_x = (box_w_new / 2.0) + (target_center_x - (box_w_old / 2.0)) * ratio
         else:
             new_center_x = box_w_new / 2.0
         old_screen_x = target_center_x - val_h
         new_val_h = new_center_x - old_screen_x
 
-        h_upper = max(box_w_new, viewport_w_h)
+        h_upper = box_w_new
         max_x = max(0.0, h_upper - viewport_w_h)
         target_h = clamp(0.0, new_val_h, max_x)
 
