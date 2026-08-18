@@ -14,7 +14,6 @@ from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
 from ..core.layout import layout_scale
 from ..core.pdf_source import PdfSource
-from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
 from .canvas import PDFCanvas
 from .components.selection_toolbar import SelectionToolbarComponent, SelectionToolbarState
@@ -33,7 +32,7 @@ class PdfDocumentView(Gtk.Box):
 
     def __init__(
         self,
-        render_worker: RenderWorker | None = None,
+        render_worker: Any = None,
         settings: CropSettings | None = None,
         on_page_changed: Callable[[int, int], None] | None = None,
         on_zoom_changed: Callable[[float], None] | None = None,
@@ -125,7 +124,7 @@ class PdfDocumentView(Gtk.Box):
         self,
         doc_model: DocumentModel,
         source: PdfSource,
-        render_worker: RenderWorker | None = None,
+        render_worker: Any = None,
     ):
         if render_worker:
             self.render_worker = render_worker

@@ -28,7 +28,8 @@ from .ui.window import MainWindow
 class PDFViewerApplication(Adw.Application):
     """
     Main Adw.Application entry point for the PDF viewer.
-    Handles startup, activation, and loading initial command-line documents.
+    Handles startup, activation, and loading initial/subsequent documents as tabs
+    within a single process.
     """
 
     def __init__(
@@ -42,7 +43,10 @@ class PDFViewerApplication(Adw.Application):
         render_workers: int = 2,
         use_shm: bool = True,
     ):
-        super().__init__(application_id="com.aziis98.pdfatlas", flags=Gio.ApplicationFlags.NON_UNIQUE)
+        super().__init__(
+            application_id="com.aziis98.pdfatlas",
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
+        )
         self.filepath_to_open = filepath_to_open
         self.state = state
         self.follow_link = follow_link
@@ -51,13 +55,83 @@ class PDFViewerApplication(Adw.Application):
         self.render_mode = render_mode
         self.render_workers = render_workers
         self.use_shm = use_shm
+        self.connect("window-removed", self._on_window_removed)
+
+    def _on_window_removed(self, app, win):
+        if not app.get_windows():
+            self.quit()
+
+    def _resolve_source(self, win: MainWindow, raw_arg: str) -> PdfSource:
+        from .core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
+
+        expanded = os.path.abspath(os.path.expanduser(raw_arg)) if os.path.exists(os.path.expanduser(raw_arg)) else raw_arg
+        aid = extract_arxiv_id_from_raw(raw_arg) or arxiv_id_from_path(raw_arg)
+        existing = win.recent_files.get_by_uri(expanded) or win.recent_files.get_by_uri(raw_arg)
+        if not existing and aid:
+            existing = win.recent_files.get_by_arxiv_id(aid)
+
+        if existing:
+            return existing
+        elif os.path.exists(os.path.expanduser(raw_arg)):
+            return PdfSource(
+                source_type="file",
+                uri=expanded,
+                display_name=os.path.basename(expanded),
+            )
+        elif aid:
+            return PdfSource(
+                source_type="arxiv",
+                uri=raw_arg,
+                display_name=f"arXiv:{aid}",
+            )
+        else:
+            return PdfSource(
+                source_type="file",
+                uri=raw_arg,
+                display_name=os.path.basename(raw_arg),
+            )
+
+    def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
+        args = command_line.get_arguments()[1:]
+        raw_target = args[0] if args else self.filepath_to_open
+
+        windows = self.get_windows()
+        win = self.get_active_window() or (windows[0] if windows else None)
+
+        if not win or not isinstance(win, MainWindow):
+            from .core.installation import get_installation_mode_info
+            mode, reason = get_installation_mode_info()
+            print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
+
+            win = MainWindow(
+                self,
+                state=self.state,
+                follow_link=self.follow_link,
+                debug_mode=self.debug,
+                debug_note_rect=self.debug_note_rect,
+                render_mode=self.render_mode,
+                render_workers=self.render_workers,
+                use_shm=self.use_shm,
+            )
+            win.present()
+
+        if raw_target:
+            source = self._resolve_source(win, raw_target.strip())
+            win.open_document(source, new_tab=True)
+
+        win.present()
+        return 0
 
     def do_activate(self):
+        windows = self.get_windows()
+        if windows:
+            windows[0].present()
+            return
+
         from .core.installation import get_installation_mode_info
         mode, reason = get_installation_mode_info()
         print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
 
-        # Create and present the main application window
         win = MainWindow(
             self,
             state=self.state,
@@ -70,39 +144,9 @@ class PDFViewerApplication(Adw.Application):
         )
         win.present()
 
-        # Load document if passed via command line
         if self.filepath_to_open:
-            raw_arg = self.filepath_to_open.strip()
-            from .core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
-
-            expanded = os.path.abspath(os.path.expanduser(raw_arg)) if os.path.exists(os.path.expanduser(raw_arg)) else raw_arg
-            aid = extract_arxiv_id_from_raw(raw_arg) or arxiv_id_from_path(raw_arg)
-            existing = win.recent_files.get_by_uri(expanded) or win.recent_files.get_by_uri(raw_arg)
-            if not existing and aid:
-                existing = win.recent_files.get_by_arxiv_id(aid)
-
-            if existing:
-                source = existing
-            elif os.path.exists(os.path.expanduser(raw_arg)):
-                source = PdfSource(
-                    source_type="file",
-                    uri=expanded,
-                    display_name=os.path.basename(expanded),
-                )
-            elif aid:
-                source = PdfSource(
-                    source_type="arxiv",
-                    uri=raw_arg,
-                    display_name=f"arXiv:{aid}",
-                )
-            else:
-                source = PdfSource(
-                    source_type="file",
-                    uri=raw_arg,
-                    display_name=os.path.basename(raw_arg),
-                )
-            win.open_document(source)
-
+            source = self._resolve_source(win, self.filepath_to_open.strip())
+            win.open_document(source, new_tab=True)
 
     def do_startup(self):
         Adw.Application.do_startup(self)

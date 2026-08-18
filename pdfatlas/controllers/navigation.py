@@ -152,14 +152,14 @@ class NavigationController:
         if viewport_h <= 1.0:
             viewport_h = 700.0
 
-        center_y = anchor_y if anchor_y is not None else (val_v + (viewport_h / 2.0))
+        target_center_y: float = float(anchor_y) if anchor_y is not None else float(val_v + (viewport_h / 2.0))
 
         # Determine page index at center_y to separate unscaled page_gaps from scaled content height
         current_page_idx = self.win.get_current_page_index()
         gap_count = current_page_idx + 1
         fixed_gaps = gap_count * self.win.canvas.page_gap
 
-        content_y = max(0.0, center_y - fixed_gaps)
+        content_y = max(0.0, target_center_y - fixed_gaps)
         ratio = new_zoom / old_zoom
 
         # Horizontal anchor (content-space x): cursor position or viewport center.
@@ -169,7 +169,7 @@ class NavigationController:
         viewport_w_h = self.win.hadjustment.get_page_size()
         if viewport_w_h <= 1.0:
             viewport_w_h = 800.0
-        center_x = anchor_x if anchor_x is not None else (val_h + (viewport_w_h / 2.0))
+        target_center_x: float = float(anchor_x) if anchor_x is not None else float(val_h + (viewport_w_h / 2.0))
         box_w_old = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
 
         self.win.zoom = new_zoom
@@ -182,7 +182,7 @@ class NavigationController:
         # Re-accumulate new center_y: unscaled fixed_gaps + scaled content_y
         new_center_y = fixed_gaps + content_y * ratio
         # Keep the anchor point at the same screen position it was before zoom
-        old_screen_pos = center_y - val_v
+        old_screen_pos = target_center_y - val_v
         new_val_v = new_center_y - old_screen_pos
 
         lower = self.win.vadjustment.get_lower()
@@ -197,10 +197,10 @@ class NavigationController:
         # stays put otherwise. When everything fits, scroll_x collapses to 0.
         box_w_new = max((dw for _, dw, _, _ in self.win.canvas.page_layout), default=0.0)
         if box_w_old > 0.0:
-            new_center_x = (box_w_new / 2.0) + (center_x - (box_w_old / 2.0)) * ratio
+            new_center_x = (box_w_new / 2.0) + (target_center_x - (box_w_old / 2.0)) * ratio
         else:
             new_center_x = box_w_new / 2.0
-        old_screen_x = center_x - val_h
+        old_screen_x = target_center_x - val_h
         new_val_h = new_center_x - old_screen_x
 
         h_upper = max(box_w_new, viewport_w_h)

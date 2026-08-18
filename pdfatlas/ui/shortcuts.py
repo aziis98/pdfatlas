@@ -24,8 +24,22 @@ class ShortcutsController:
         self._setup_nav_key_capture()
 
     def _setup_shortcuts(self):
-        # File operations
+        # File & Tab operations
         self._add_shortcut("<Control>o", self.win._open_file_dialog)
+        self._add_shortcut("<Control>t", self.win.new_tab)
+        self._add_shortcut("<Control>w", self.win.close_current_tab)
+        self._add_shortcut("<Control>n", self.win.new_window)
+        self._add_shortcut("<Control>Page_Down", self.win.next_tab)
+        self._add_shortcut("<Control>Tab", self.win.next_tab)
+        self._add_shortcut("<Control>Page_Up", self.win.prev_tab)
+        self._add_shortcut("<Control><Shift>Tab", self.win.prev_tab)
+        self._add_shortcut("<Control><Shift>ISO_Left_Tab", self.win.prev_tab)
+
+        for i in range(1, 10):
+            def make_tab_select(idx):
+                return lambda: self.win.select_tab(idx)
+            self._add_shortcut(f"<Alt>{i}", make_tab_select(i - 1))
+
         self._add_shortcut("<Control>q", self.win.close)
         self._add_nav_shortcut("q", self.win.close)
 

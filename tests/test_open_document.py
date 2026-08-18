@@ -28,13 +28,21 @@ def _patch_collaborators(win) -> ExitStack:
     """Patch the heavy/networkful collaborators used by open_document."""
     doc_mock = MagicMock()
     doc_mock.doc.metadata = None
+    doc_mock.page_count = 1
+    doc_mock.filepath = "/tmp/fake.pdf"
+    doc_mock.page_rect = MagicMock(return_value=MagicMock(width=612, height=792, y0=0, x0=0, x1=612, y1=792))
+    doc_mock.get_page_links = MagicMock(return_value=[])
+    doc_mock.get_toc = MagicMock(return_value=[])
     stack = ExitStack()
+    stack.enter_context(patch("pdfatlas.core.document.DocumentModel", return_value=doc_mock))
     stack.enter_context(patch("pdfatlas.ui.window.DocumentModel", return_value=doc_mock))
+    stack.enter_context(patch("pdfatlas.core.crop.CropAnalyzer", return_value=MagicMock()))
+    stack.enter_context(patch("pdfatlas.ui.document_view.CropAnalyzer", return_value=MagicMock()))
     stack.enter_context(patch("pdfatlas.ui.window.CropAnalyzer", return_value=MagicMock()))
+    stack.enter_context(patch("pdfatlas.ui.canvas.PDFCanvas.set_document", MagicMock()))
+    stack.enter_context(patch("pdfatlas.ui.notes.NotesLayer.prepare", MagicMock()))
     stack.enter_context(patch.object(win, "_save_current_doc_state", MagicMock()))
     stack.enter_context(patch.object(win, "_arxiv_diff_worker", MagicMock()))
-    stack.enter_context(patch.object(win.canvas, "set_document", MagicMock()))
-    stack.enter_context(patch.object(win.notes_layer, "prepare", MagicMock()))
     stack.enter_context(patch.object(win, "render_worker", MagicMock()))
     stack.enter_context(patch.object(win.db_service, "open_db", MagicMock()))
 

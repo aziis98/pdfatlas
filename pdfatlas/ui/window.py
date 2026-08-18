@@ -13,6 +13,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Graphene", "1.0")
 gi.require_version("Pango", "1.0")
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
@@ -246,13 +247,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
 
-        main_layout = box()
-        self.toast_overlay.set_child(main_layout)
-
         header = Adw.HeaderBar()
-        main_layout.append(header)
 
-        # Left: Open Button & Filename Label
+        # Left: Open Button, New Tab, New Window & Filename Label
         self.open_btn = Adw.SplitButton()
         self.open_btn.set_icon_name("document-open-symbolic")
         self.open_btn.set_tooltip_text("Open PDF [Ctrl+O]")
@@ -260,10 +257,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.open_btn.connect("clicked", lambda b: self._open_file_dialog())
         self._rebuild_open_menu()
 
+        self.new_tab_btn = Gtk.Button.new_from_icon_name("list-add-symbolic")
+        self.new_tab_btn.set_tooltip_text("New Tab [Ctrl+T]")
+        self.new_tab_btn.connect("clicked", lambda b: self.new_tab())
+
+        self.new_window_btn = Gtk.Button.new_from_icon_name("window-new-symbolic")
+        self.new_window_btn.set_tooltip_text("New Window [Ctrl+N]")
+        self.new_window_btn.connect("clicked", lambda b: self.new_window())
+
         self.filename_label = label(text="No document loaded", css_class="caption",
                                     ellipsize=Pango.EllipsizeMode.END, max_width_chars=40, xalign=0)
         left_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
-                       children=[self.open_btn, self.filename_label])
+                       children=[self.open_btn, self.new_tab_btn, self.new_window_btn, self.filename_label])
         header.pack_start(left_box)
 
         # Center: Search Entry
@@ -340,7 +345,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_overlay = Gtk.Overlay()
         self.content_overlay.set_hexpand(True)
         self.content_overlay.set_vexpand(True)
-        main_layout.append(self.content_overlay)
+
+        # Tab View & Tab Bar
+        self.tab_view = Adw.TabView()
+        self.tab_view.connect("create-window", self._on_create_window)
+        self.tab_view.connect("page-detached", self._on_page_detached)
+        self.tab_view.connect("close-page", self._on_close_page)
+        self.tab_view.connect("notify::selected-page", self._on_selected_tab_changed)
+
+        self.tab_bar = Adw.TabBar(view=self.tab_view)
+        self.tab_bar.set_autohide(True)
+
+        self.toolbar_view = Adw.ToolbarView()
+        self.toolbar_view.add_top_bar(header)
+        self.toolbar_view.add_top_bar(self.tab_bar)
+        self.toolbar_view.set_content(self.content_overlay)
+        self.toast_overlay.set_child(self.toolbar_view)
 
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
@@ -363,7 +383,7 @@ class MainWindow(Adw.ApplicationWindow):
                 display, self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
 
-        # Document View
+        # Fallback Document Canvas
         self.canvas = PDFCanvas()
         self.canvas.win = self
         self.canvas.debug_mode = self.debug_mode
@@ -388,7 +408,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.add_overlay(self.link_preview_manager.portal_card)
         if self.debug_mode:
             self._build_debug_cache_box()
-        self.stack.add_named(self.canvas, "document-view")
+
+        self.stack.add_named(self.tab_view, "document-view")
 
         # Search View
         from .components.search_results_view import SearchResultsView
@@ -543,9 +564,152 @@ class MainWindow(Adw.ApplicationWindow):
             return True
         return False
 
+    def _show_toast(self, message: str):
+        self.toast_overlay.add_toast(Adw.Toast.new(message))
+
+    # --- Multi-Tab Management ---
+
+    def _create_doc_view(self) -> Any:
+        from .document_view import PdfDocumentView
+        doc_view = PdfDocumentView(
+            render_worker=self.render_worker,
+            settings=self.settings,
+            on_page_changed=self._on_doc_view_page_changed,
+            on_zoom_changed=self._on_doc_view_zoom_changed,
+            on_link_clicked=self._on_doc_view_link_clicked,
+            on_note_create=self._on_canvas_note_create,
+            on_selection_changed=self._update_selection_toolbar,
+            on_toast=self._show_toast,
+        )
+        return doc_view
+
+    def get_active_doc_view(self) -> Any:
+        page = self.tab_view.get_selected_page()
+        if page is not None:
+            child = page.get_child()
+            return child
+        return None
+
+    def _on_create_window(self, view: Adw.TabView) -> Adw.TabView:
+        new_win = MainWindow(
+            self.app,
+            render_mode=self.render_mode,
+            render_workers=self.render_workers,
+            use_shm=self.use_shm,
+        )
+        new_win.present()
+        return new_win.tab_view
+
+    def _on_page_detached(self, view: Adw.TabView, page: Adw.TabPage, position: int) -> None:
+        if view.get_n_pages() == 0:
+            windows = self.app.get_windows() if self.app else []
+            if len(windows) > 1:
+                self.close()
+            else:
+                self._show_welcome()
+
+    def _on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
+        child = page.get_child()
+        if hasattr(child, "close"):
+            getattr(child, "close")()
+        view.close_page_finish(page, True)
+        if view.get_n_pages() == 0:
+            windows = self.app.get_windows() if self.app else []
+            if len(windows) > 1:
+                self.close()
+            else:
+                self._show_welcome()
+        return True
+
+    def _on_selected_tab_changed(self, view: Adw.TabView, pspec) -> None:
+        doc_view = self.get_active_doc_view()
+        if doc_view is not None and hasattr(doc_view, "canvas"):
+            self.canvas = doc_view.canvas
+            self.vadjustment = doc_view.vadjustment
+            self.hadjustment = doc_view.hadjustment
+            self.doc_model = doc_view.doc_model
+            self.current_source = doc_view.current_source
+            self.zoom = doc_view.zoom
+            self.zoom_label.set_label(f"{int(self.zoom * 100)}%")
+            self.arxiv_mapper = doc_view.arxiv_mapper
+            self.crop_analyzer = doc_view.crop_analyzer
+            self.notes_layer = doc_view.notes_layer
+            self.notes = doc_view.notes
+            self.highlights = doc_view.highlights
+
+            if doc_view.doc_model:
+                curr_page = doc_view.get_current_page_index() + 1
+                self.page_input.set_text(str(curr_page))
+                self.page_total_label.set_label(f"of {doc_view.doc_model.page_count}")
+                self.page_input.set_sensitive(True)
+                title = doc_view.current_source.display_name if doc_view.current_source else "PDF Viewer"
+                self.set_title(f"PDF Viewer — {title}")
+                self.filename_label.set_label(title)
+                self.entry.set_sensitive(True)
+                self.entry.set_placeholder_text("Search document...")
+                self.annotations_btn.set_visible(True)
+                self._update_annotations_button()
+                doc_view.update_layout()
+        elif view.get_n_pages() == 0:
+            self._show_welcome()
+
+    def _on_doc_view_page_changed(self, current: int, total: int):
+        self.page_input.set_text(str(current))
+        self.page_total_label.set_label(f"of {total}")
+
+    def _on_doc_view_zoom_changed(self, zoom: float):
+        self.zoom = zoom
+        self.zoom_label.set_label(f"{int(zoom * 100)}%")
+
+    def _on_doc_view_link_clicked(self, uri: str, link: dict):
+        self._on_link_clicked(0, link)
+
+    def new_tab(self):
+        """Open a new empty tab or launch the open file dialog."""
+        self._open_file_dialog()
+
+    def close_current_tab(self):
+        """Close the currently active tab."""
+        page = self.tab_view.get_selected_page()
+        if page is not None:
+            self.tab_view.close_page(page)
+
+    def new_window(self):
+        """Open a new PDF Atlas window."""
+        win = MainWindow(
+            self.app,
+            render_mode=self.render_mode,
+            render_workers=self.render_workers,
+            use_shm=self.use_shm,
+        )
+        win.present()
+        return win
+
+    def next_tab(self):
+        n = self.tab_view.get_n_pages()
+        if n > 1:
+            curr_page = self.tab_view.get_selected_page()
+            if curr_page is not None:
+                idx = self.tab_view.get_page_position(curr_page)
+                next_page = self.tab_view.get_nth_page((idx + 1) % n)
+                self.tab_view.set_selected_page(next_page)
+
+    def prev_tab(self):
+        n = self.tab_view.get_n_pages()
+        if n > 1:
+            curr_page = self.tab_view.get_selected_page()
+            if curr_page is not None:
+                idx = self.tab_view.get_page_position(curr_page)
+                prev_page = self.tab_view.get_nth_page((idx - 1 + n) % n)
+                self.tab_view.set_selected_page(prev_page)
+
+    def select_tab(self, index: int):
+        if 0 <= index < self.tab_view.get_n_pages():
+            self.tab_view.set_selected_page(self.tab_view.get_nth_page(index))
+
     # --- Document Loading & Indexing ---
 
-    def open_document(self, source: PdfSource):
+    def open_document(self, source: PdfSource, new_tab: bool = True):
         raw_path = os.path.expanduser(source.uri)
         try:
             filepath = os.path.abspath(raw_path) if os.path.exists(raw_path) else raw_path
@@ -598,7 +762,7 @@ class MainWindow(Adw.ApplicationWindow):
                         )
 
                         def _on_success():
-                            self.open_document(new_source)
+                            self.open_document(new_source, new_tab=new_tab)
                             return False
 
                         GLib.idle_add(_on_success)
@@ -662,71 +826,50 @@ class MainWindow(Adw.ApplicationWindow):
             if self.progress_bar:
                 self.progress_bar.set_visible(False)
 
-            self.highlights = []
-            self.canvas.set_highlights([])
-            self._update_annotations_button()
+            # Create or reuse TabPage with PdfDocumentView
+            from .document_view import PdfDocumentView
 
-            self.notes = []
-            self.notes_layer.clear()
-            self._update_annotations_button()
-
-            self.render_cache.clear()
-            self.minimap_cache.clear()
-            self.pinned.clear()
-
-            self.zoom = 1.0
-            self.zoom_label.set_label("100%")
-
-            # Calculate display DPI scale factors based on monitor properties
-            display = Gdk.Display.get_default()
-            monitors = display.get_monitors() if display is not None else None
-            monitor = (
-                monitors.get_item(0)
-                if (monitors is not None and monitors.get_n_items() > 0)
-                else None
-            )
-
-            if monitor:
-                geom = monitor.get_geometry()
-                w_mm = monitor.get_width_mm()
-                scale = monitor.get_scale_factor()
-                if w_mm > 0:
-                    logical_dpi = (geom.width * 25.4) / w_mm
-                    physical_dpi = logical_dpi * scale
+            if self.tab_view.get_n_pages() == 0 or not new_tab:
+                if self.tab_view.get_n_pages() == 0:
+                    doc_view = self._create_doc_view()
+                    doc_view.set_document(self.doc_model, source, self.render_worker)
+                    page = self.tab_view.append(doc_view)
                 else:
-                    logical_dpi = 96.0
-                    physical_dpi = 96.0 * scale
+                    selected = self.tab_view.get_selected_page()
+                    page = selected if selected else self.tab_view.get_nth_page(0)
+                    child = page.get_child()
+                    doc_view = child if isinstance(child, PdfDocumentView) else self._create_doc_view()
+                    doc_view.set_document(self.doc_model, source, self.render_worker)
             else:
-                logical_dpi = 96.0
-                physical_dpi = 192.0
+                doc_view = self._create_doc_view()
+                doc_view.set_document(self.doc_model, source, self.render_worker)
+                page = self.tab_view.append(doc_view)
 
-            self.canvas.dpi_scale_factor = 1.0
-            self.canvas.screen_physical_dpi = physical_dpi
+            page.props.title = source.display_name
+            self.tab_view.set_selected_page(page)
 
-            print(
-                f"[MainWindow] Screen logical DPI: {logical_dpi:.1f}, physical DPI: {physical_dpi:.1f}, "
-                f"layout scale multiplier: {self.canvas.dpi_scale_factor:.3f}",
-                flush=True,
-            )
-
-            self.canvas.set_document(
-                self.doc_model, self.render_cache, self.render_worker, self.crop_analyzer, self.settings
-            )
-
-            self.notes_layer.prepare()
+            self.canvas = doc_view.canvas
+            self.vadjustment = doc_view.vadjustment
+            self.hadjustment = doc_view.hadjustment
+            self.zoom = doc_view.zoom
+            self.notes_layer = doc_view.notes_layer
+            self.notes = doc_view.notes
+            self.highlights = doc_view.highlights
 
             self.set_title(f"PDF Viewer — {source.display_name}")
             self.filename_label.set_label(source.display_name)
-            self.page_total_label.set_label(f"of {self.doc_model.page_count}")
+            if self.doc_model:
+                self.page_total_label.set_label(f"of {self.doc_model.page_count}")
             self.page_input.set_text("1")
             self.page_input.set_sensitive(True)
 
             if source.is_arxiv and aid and source.display_name in ("paper.pdf", f"arXiv:{aid}"):
-                def _bg_fetch(paper_aid: str, paper_uri: str):
+                def _bg_fetch(paper_aid: str, paper_uri: str, target_page: Any):
                     from .arxiv_dialog import _fetch_arxiv_title
                     title = _fetch_arxiv_title(paper_aid)
                     if title:
                         def _update():
+                            target_page.props.title = title
                             if self.current_source and self.current_source.uri == paper_uri:
                                 self.current_source.display_name = title
                                 self.current_source.source_type = "arxiv"
@@ -735,7 +878,7 @@ class MainWindow(Adw.ApplicationWindow):
                                 self.set_title(f"PDF Viewer — {title}")
                                 self.filename_label.set_label(title)
                         GLib.idle_add(_update)
-                threading.Thread(target=_bg_fetch, args=(aid, filepath), daemon=True).start()
+                threading.Thread(target=_bg_fetch, args=(aid, filepath, page), daemon=True).start()
 
             self.arxiv_mapper = None
             if source.is_arxiv:
@@ -893,6 +1036,8 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.timeout_add(400, lambda: self._follow_link_by_index(follow_idx))
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self._show_error_dialog(f"Failed to open PDF document:\n{e}")
 
     def _index_worker(self, filepath):
@@ -1404,7 +1549,12 @@ class MainWindow(Adw.ApplicationWindow):
                     if getattr(self, "_last_link_click_time", 0.0) + 0.5 > now:
                         return
                     self._last_link_click_time = now
-                    self._open_new_instance_for_source(f"arxiv:{aid}")
+                    source = PdfSource(
+                        source_type="arxiv",
+                        uri=f"arxiv:{aid}",
+                        display_name=f"arXiv:{aid}",
+                    )
+                    self.open_document(source, new_tab=True)
                     return
 
                 try:

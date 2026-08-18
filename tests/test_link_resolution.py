@@ -90,9 +90,13 @@ def test_arxiv_link_click_opens_new_instance(tmp_path):
         "uri": "arxiv:2305.12345",
     }
 
-    with patch.object(win, "_open_new_instance_for_source") as mock_open:
+    with patch.object(win, "open_document") as mock_open:
         win._on_link_clicked(0, link_arxiv)
-        mock_open.assert_called_once_with("arxiv:2305.12345")
+        assert mock_open.call_count == 1
+        source_arg = mock_open.call_args[0][0]
+        assert source_arg.is_arxiv
+        assert source_arg.uri == "arxiv:2305.12345"
+        assert mock_open.call_args[1].get("new_tab") is True
 
 
 def test_arxiv_url_link_click_opens_new_instance(tmp_path):
@@ -116,9 +120,13 @@ def test_arxiv_url_link_click_opens_new_instance(tmp_path):
         "uri": "https://arxiv.org/abs/2603.20268v1",
     }
 
-    with patch.object(win, "_open_new_instance_for_source") as mock_open:
+    with patch.object(win, "open_document") as mock_open:
         win._on_link_clicked(0, link_arxiv_url)
-        mock_open.assert_called_once_with("arxiv:2603.20268v1")
+        assert mock_open.call_count == 1
+        source_arg = mock_open.call_args[0][0]
+        assert source_arg.is_arxiv
+        assert source_arg.uri == "arxiv:2603.20268v1"
+        assert mock_open.call_args[1].get("new_tab") is True
 
 
 def test_regular_uri_link_click_launches_external_browser(tmp_path):
