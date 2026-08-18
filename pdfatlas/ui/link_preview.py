@@ -3,12 +3,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk
 
+from typing import Any
 from ..core.cache import LinkPortalCache
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .window import MainWindow
-
 from .portal_preview import LinkPortalPreviewCard
 
 
@@ -17,7 +13,7 @@ class LinkPreviewManager:
     Manager for link hover previews, popup positioning, and snippet rendering callbacks.
     """
 
-    def __init__(self, main_window: "MainWindow"):
+    def __init__(self, main_window: Any):
         self.win = main_window
         self.portal_cache = LinkPortalCache(max_size=50)
         self.portal_card = LinkPortalPreviewCard()

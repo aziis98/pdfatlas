@@ -86,20 +86,28 @@ ChildResult = RenderResult | OpenResult | ErrorResult
 
 
 class _ChildRenderer:
-    """Serial renderer owned by the child process, lazily keyed by filepath."""
+    """Serial renderer owned by the child process, caching open fitz.Document instances by filepath."""
 
-    def __init__(self):
-        self._doc = None
-        self._filepath = None
+    def __init__(self, max_cached_docs: int = 16):
+        self._docs: dict[str, fitz.Document] = {}
+        self._max_cached_docs = max_cached_docs
         self._shm_objects = {}
 
     def _ensure_doc(self, filepath: str):
-        if self._doc is None or self._filepath != filepath:
-            if self._doc is not None:
-                self._doc.close()
-            self._doc = fitz.open(filepath)
-            self._filepath = filepath
-        return self._doc
+        if filepath in self._docs:
+            return self._docs[filepath]
+
+        if len(self._docs) >= self._max_cached_docs:
+            oldest_path, oldest_doc = next(iter(self._docs.items()))
+            try:
+                oldest_doc.close()
+            except Exception:
+                pass
+            del self._docs[oldest_path]
+
+        doc = fitz.open(filepath)
+        self._docs[filepath] = doc
+        return doc
 
     def _ensure_shm(self, name: str):
         if name not in self._shm_objects:
@@ -203,8 +211,11 @@ def child_main(input_q, result_q):
             result_q.put(result)
         except (BrokenPipeError, EOFError, OSError):
             break
-    if renderer._doc is not None:
-        renderer._doc.close()
+    for doc in renderer._docs.values():
+        try:
+            doc.close()
+        except Exception:
+            pass
     for shm in renderer._shm_objects.values():
         try:
             shm.close()

@@ -31,7 +31,7 @@ from ..core.state import CliState
 from .arxiv_dialog import ArxivDialog
 from .cairo_utils import hsl_to_hex
 from .canvas import PDFCanvas
-from .gui import box, button, label, scrolled_window, search_entry, spacer
+from .gui import box, button, label, search_entry, spacer
 from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
 from .notes import NotesLayer
@@ -391,11 +391,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack.add_named(self.canvas, "document-view")
 
         # Search View
-        self.search_scrolled = scrolled_window()
-        self.results_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                               margin_top=16, margin_bottom=24)
-        self.search_scrolled.set_child(self.results_box)
-        self.stack.add_named(self.search_scrolled, "search-view")
+        from .components.search_results_view import SearchResultsView
+
+        self.search_results_view = SearchResultsView(
+            on_row_clicked=self.search_controller.on_row_clicked,
+            on_toggle_pin=self.search_controller.on_toggle_pin,
+        )
+        self.search_scrolled = self.search_results_view.scrolled
+        self.results_box = self.search_results_view.results_box
+        self.stack.add_named(self.search_results_view, "search-view")
 
         # Welcome View (empty-window landing screen)
         self.welcome_view = WelcomeView(self)

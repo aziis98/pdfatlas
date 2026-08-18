@@ -233,9 +233,12 @@ class RenderWorker:
             (2, cnt, "portal", (seq, filepath, page_index, target_y, target_w, target_h, scale_factor))
         )
 
-    def clear_canvas_render_jobs(self):
+    def clear_canvas_render_jobs(self, target_filepath: str | None = None):
         """Removes queued page renders (keeps minimap and crop scans), bumping the
-        generation so stale in-flight results are discarded."""
+        generation so stale in-flight results are discarded.
+
+        If target_filepath is provided, only jobs matching that document are cleared.
+        """
         with self.lock:
             temp_list = []
             dropped_seqs = []
@@ -244,7 +247,10 @@ class RenderWorker:
                     item = self.queue.get_nowait()
                 except queue.Empty:
                     break
-                if item[0] >= 3:
+                # item format: (priority, counter, op_name, (seq, filepath, ...))
+                item_filepath = item[3][1] if (len(item) > 3 and isinstance(item[3], tuple) and len(item[3]) > 1) else None
+                should_drop = (item[0] < 3) and (target_filepath is None or item_filepath == target_filepath)
+                if not should_drop:
                     temp_list.append(item)
                 else:
                     dropped_seqs.append(item[3][0])

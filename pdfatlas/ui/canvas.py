@@ -716,7 +716,7 @@ class PDFCanvas(Gtk.Overlay):
         self.in_flight.clear()
         self._render_started.clear()
         if self.render_worker:
-            self.render_worker.clear_canvas_render_jobs()
+            self.render_worker.clear_canvas_render_jobs(self.doc_model.filepath if self.doc_model else None)
         if self.hovered_link is not None:
             self.hovered_link = None
             if self.on_link_hovered:
@@ -729,7 +729,7 @@ class PDFCanvas(Gtk.Overlay):
         self.in_flight.clear()
         self._render_started.clear()
         if self.render_worker:
-            self.render_worker.clear_canvas_render_jobs()
+            self.render_worker.clear_canvas_render_jobs(self.doc_model.filepath if self.doc_model else None)
         if self.cache:
             self.cache.clear()
         self.update_layout()

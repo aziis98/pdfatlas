@@ -337,8 +337,21 @@ This document records durable technical findings, architectural decisions, mathe
 - **Immediate Presentation, Centered Loading View & Zero-Scroll Rendering:**
   - When opening an uncached arXiv paper, the window presents immediately and displays a centered `loading-view` in `self.stack` featuring a spinner, dynamic title, and centered progress bar (`Downloading arXiv:YYMM.NNNNN (X.X/Y.Y MB)...`).
   - To prevent freezes on large papers, `open_document` downloads the PDF (`download_source=False`) first and opens the document on screen immediately; $\LaTeX$ source tarball downloading and diff analysis run strictly asynchronously in the background.
-  - Resolved initial blank frame issue: `_visibility_scan_timeout` now explicitly calls `self.gl_canvas.queue_draw()` and `self.queue_draw_overlays()` upon viewport allocation, and `self.stack` signals layout update and rendering when transitioning to `document-view`, rendering the initial page with zero user scroll required.
-  - Eliminated duplicate `_setup_link_controllers()` on `PDFCanvas` (which previously caused both `self.scrolled_window` and overlay `self` to receive clicks, double-triggering link actions). Added a 500ms click debounce on `_on_link_clicked`.
+### 1.34. Self-Contained Component Architecture & Pluggable Search Abstraction
+
+- **Background:** Preparing for unified multi-window and tabbed workflows (`Adw.TabView` / `Adw.TabBar`) required decoupling document-level rendering, annotation, and navigation logic from top-level window coordination.
+- **Self-Contained `PdfDocumentView` Component:**
+  - Encapsulates `PDFCanvas`, `NotesLayer`, `LinkPreviewManager`, local `RenderCache` / `MiniMapCache`, `SelectionToolbarComponent`, `ZoomControlsComponent`, and `CropAnalyzer` into an embeddable widget (`pdfatlas/ui/document_view.py`).
+  - Exposes a clean, reactive API: `open_source(source)`, `jump_to_page(page_idx, y_offset)`, `set_highlighted_block(page_idx, bbox)`, `set_zoom(zoom)`, `zoom_fit_width()`, `zoom_fit_height()`, and clipboard operations.
+  - Automatically manages display physical DPI calculation and local cache lifecycle.
+- **Pluggable Search Architecture:**
+  - **`SearchProvider` Protocol:** Defines `search(query, limit, search_id, on_results)` returning `SearchResult` models. `SingleDocumentSearchProvider` wraps the active document's SQLite FTS5 index, while allowing multi-document search providers across open tabs.
+  - **`SearchHeaderEntry` Component:** Encapsulates the header bar search entry, keyboard shortcuts (`Ctrl+F`), clear triggers, and debounced query dispatching (`pdfatlas/ui/components/search_header_entry.py`).
+  - **`SearchResultsView` Component:** Encapsulates the scrolled results card list, pinned portals section, list/grid layout rendering, and portal preview thread pool (`pdfatlas/ui/components/search_results_view.py`).
+  - **`SearchCoordinator`:** Connects header search input, the active search provider, and the results view with asynchronous lifecycle coordination.
+- **Multi-Document `RenderWorker` Child Process Cache:**
+  - Child rendering processes in `pdfatlas/core/render_child.py` now cache multiple open `fitz.Document` instances (`self._docs: dict[str, fitz.Document]`) with LRU eviction, avoiding repeated file opens across multi-document and tab switching.
+  - `RenderWorker.clear_canvas_render_jobs(target_filepath)` allows target document filtering to isolate job cancellations.
 
 ---
 
