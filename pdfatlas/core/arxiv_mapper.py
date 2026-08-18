@@ -77,20 +77,48 @@ def arxiv_id_from_path(path_str: str) -> Optional[str]:
     return None
 
 
-def download_arxiv_source(arxiv_id: str, download_pdf: bool = True, timeout: float = 15.0) -> tuple[Path, Path]:
+def download_arxiv_source(
+    arxiv_id: str,
+    download_pdf: bool = True,
+    timeout: float = 15.0,
+    progress_callback: Optional[Callable[[float, str], None]] = None,
+) -> tuple[Path, Path]:
     cache_dir = ARXIV_CACHE_ROOT / arxiv_id
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     pdf_path = cache_dir / "paper.pdf"
     if download_pdf and not pdf_path.exists():
         print(f"[ArxivMapper] Downloading PDF for {arxiv_id}...", file=sys.stderr, flush=True)
+        if progress_callback:
+            progress_callback(0.0, f"Downloading arXiv:{arxiv_id}...")
         req = urllib.request.Request(
             ARXIV_PDF_URL.format(arxiv_id),
             headers={"User-Agent": "PDFAtlas/1.0 (PDF Viewer; mailto:support@example.com)"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            content = resp.read()
-            pdf_path.write_bytes(content)
+            total_size_header = resp.headers.get("Content-Length")
+            total_size = int(total_size_header) if (total_size_header and total_size_header.isdigit()) else None
+            downloaded = 0
+            chunks = []
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                downloaded += len(chunk)
+                if progress_callback:
+                    if total_size and total_size > 0:
+                        fraction = min(0.99, downloaded / total_size)
+                        mb = downloaded / (1024 * 1024)
+                        tot_mb = total_size / (1024 * 1024)
+                        progress_callback(fraction, f"Downloading arXiv:{arxiv_id} ({mb:.1f}/{tot_mb:.1f} MB)...")
+                    else:
+                        mb = downloaded / (1024 * 1024)
+                        progress_callback(0.5, f"Downloading arXiv:{arxiv_id} ({mb:.1f} MB)...")
+
+            pdf_path.write_bytes(b"".join(chunks))
+            if progress_callback:
+                progress_callback(1.0, f"Downloaded arXiv:{arxiv_id}")
 
     eprint_path = cache_dir / "source.tar.gz"
     if not any(cache_dir.glob("*.tex")):

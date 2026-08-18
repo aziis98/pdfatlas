@@ -31,37 +31,50 @@ def _patch_collaborators(win) -> ExitStack:
     stack = ExitStack()
     stack.enter_context(patch("pdfatlas.ui.window.DocumentModel", return_value=doc_mock))
     stack.enter_context(patch("pdfatlas.ui.window.CropAnalyzer", return_value=MagicMock()))
+    stack.enter_context(patch.object(win, "_save_current_doc_state", MagicMock()))
     stack.enter_context(patch.object(win, "_arxiv_diff_worker", MagicMock()))
     stack.enter_context(patch.object(win.canvas, "set_document", MagicMock()))
     stack.enter_context(patch.object(win.notes_layer, "prepare", MagicMock()))
     stack.enter_context(patch.object(win, "render_worker", MagicMock()))
     stack.enter_context(patch.object(win.db_service, "open_db", MagicMock()))
+
+    def _immediate_idle_add(func, *args, **kwargs):
+        func(*args, **kwargs)
+        return False
+
+    stack.enter_context(patch("pdfatlas.ui.window.GLib.idle_add", side_effect=_immediate_idle_add))
     return stack
 
 
 def test_arxiv_recent_with_missing_path_resolves_to_download(tmp_path, monkeypatch):
+    import threading
     from pdfatlas.core.pdf_source import PdfSource
     import pdfatlas.core.arxiv_mapper as arxiv_mod
 
     win = _make_window(tmp_path)
-    # Simulate the stale recents entry (arxiv source, local path gone).
+    aid = "9999.99999v1"
+    cache_root = tmp_path / "cache" / "source-arxiv"
+    fake_pdf = cache_root / aid / "paper.pdf"
+    monkeypatch.setattr(arxiv_mod, "ARXIV_CACHE_ROOT", cache_root)
+
     source = PdfSource(
         source_type="arxiv",
-        uri=str(tmp_path / "gone" / "2507.09369v1.pdf"),
+        uri=str(tmp_path / "gone" / f"{aid}.pdf"),
         display_name="A Taxonomy of Omnicidal Futures",
     )
     win.recent_files.add(source)
 
-    fake_pdf = tmp_path / "downloaded.pdf"
-    fake_pdf.write_bytes(b"%PDF-fake")
-    monkeypatch.setattr(
-        arxiv_mod, "download_arxiv_source", lambda aid: (fake_pdf, tmp_path)
-    )
+    def mock_download(aid, download_pdf=True, progress_callback=None):
+        fake_pdf.parent.mkdir(parents=True, exist_ok=True)
+        fake_pdf.write_bytes(b"%PDF-fake")
+        return fake_pdf, fake_pdf.parent
+
+    monkeypatch.setattr(arxiv_mod, "download_arxiv_source", mock_download)
+    monkeypatch.setattr(threading.Thread, "start", lambda self: self.run())
 
     with _patch_collaborators(win):
         win.open_document(source)
 
-        # The arxiv cache path is the file actually opened, not the stale local one.
         cast(MagicMock, win.render_worker).set_document.assert_called_once_with(str(fake_pdf))
         assert win.current_source is not None
         assert win.current_source.uri == str(fake_pdf)
@@ -136,3 +149,42 @@ def test_cached_arxiv_paper_opens_when_offline(tmp_path, monkeypatch):
         cast(MagicMock, win.render_worker).set_document.assert_called_once_with(str(cache_pdf))
         assert win.current_source is not None
         assert win.current_source.uri == str(cache_pdf)
+
+
+def test_uncached_arxiv_paper_async_download(tmp_path, monkeypatch):
+    import threading
+    import pdfatlas.core.arxiv_mapper as arxiv_mod
+    from pdfatlas.core.pdf_source import PdfSource
+
+    win = _make_window(tmp_path)
+    aid = "2603.20268v1"
+    cache_root = tmp_path / "cache" / "source-arxiv"
+    cache_pdf = cache_root / aid / "paper.pdf"
+
+    monkeypatch.setattr(arxiv_mod, "ARXIV_CACHE_ROOT", cache_root)
+
+    source = PdfSource(source_type="arxiv", uri=f"arxiv:{aid}", display_name=f"arXiv:{aid}")
+
+    started_threads = []
+
+    def mock_start(self):
+        started_threads.append(self)
+        # Execute synchronously for test determinism
+        self.run()
+
+    monkeypatch.setattr(threading.Thread, "start", mock_start)
+
+    def mock_download(aid, download_pdf=True, progress_callback=None):
+        cache_pdf.parent.mkdir(parents=True, exist_ok=True)
+        cache_pdf.write_bytes(b"%PDF-downloaded")
+        if progress_callback:
+            progress_callback(0.5, "Downloading...")
+            progress_callback(1.0, "Done")
+        return cache_pdf, cache_pdf.parent
+
+    monkeypatch.setattr(arxiv_mod, "download_arxiv_source", mock_download)
+
+    with _patch_collaborators(win):
+        win.open_document(source)
+        assert any("_download_worker" in str(t) for t in started_threads)
+        assert cache_pdf.exists()

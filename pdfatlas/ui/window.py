@@ -1,6 +1,7 @@
 import os
 import re
 import threading
+import time
 from bisect import bisect_right
 from pathlib import Path
 
@@ -506,20 +507,51 @@ class MainWindow(Adw.ApplicationWindow):
         # If the file does not exist locally (or is an arXiv source whose local path is gone),
         # check the local arXiv cache first, and then attempt to download from arXiv if needed.
         if aid and not os.path.exists(filepath):
-            from ..core.arxiv_mapper import download_arxiv_source
+            from ..core.arxiv_mapper import ARXIV_CACHE_ROOT, download_arxiv_source
 
-            try:
-                pdf_path, _ = download_arxiv_source(aid)
-                filepath = str(pdf_path)
+            cached_pdf = ARXIV_CACHE_ROOT / aid / "paper.pdf"
+            if cached_pdf.exists():
+                filepath = str(cached_pdf)
                 source = PdfSource(
                     source_type="arxiv",
                     uri=filepath,
                     display_name=source.display_name or f"arXiv:{aid}",
                 )
-            except Exception as e:
-                if not os.path.exists(filepath):
-                    self._show_error_dialog(f"Failed to download arXiv paper '{source.uri}':\n{e}")
-                    return
+            else:
+                # Asynchronously download paper in background with progress bar while window is responsive
+                self.set_title(f"Downloading arXiv:{aid} — PDF Viewer")
+                self._show_progress("arxiv-download", f"Downloading arXiv:{aid}...", 0.0)
+
+                def _download_worker():
+                    def _on_progress(fraction: float, message: str):
+                        GLib.idle_add(self._show_progress, "arxiv-download", message, fraction)
+
+                    try:
+                        download_arxiv_source(aid, download_pdf=True, progress_callback=_on_progress)
+                        new_source = PdfSource(
+                            source_type="arxiv",
+                            uri=str(cached_pdf),
+                            display_name=source.display_name or f"arXiv:{aid}",
+                        )
+
+                        def _on_success():
+                            self._hide_progress("arxiv-download")
+                            self.open_document(new_source)
+                            return False
+
+                        GLib.idle_add(_on_success)
+                    except Exception as e:
+                        err_msg = str(e)
+
+                        def _on_fail():
+                            self._hide_progress("arxiv-download")
+                            self._show_error_dialog(f"Failed to download arXiv paper '{source.uri}':\n{err_msg}")
+                            return False
+
+                        GLib.idle_add(_on_fail)
+
+                threading.Thread(target=_download_worker, daemon=True).start()
+                return
 
         if not os.path.exists(filepath):
             self._show_error_dialog(f"File not found: {filepath}")
@@ -1306,6 +1338,10 @@ class MainWindow(Adw.ApplicationWindow):
             if uri := link.get("uri"):
                 aid = extract_arxiv_id_from_raw(uri) or arxiv_id_from_path(uri)
                 if aid:
+                    now = time.monotonic()
+                    if getattr(self, "_last_link_click_time", 0.0) + 0.5 > now:
+                        return
+                    self._last_link_click_time = now
                     self._open_new_instance_for_source(f"arxiv:{aid}")
                     return
 

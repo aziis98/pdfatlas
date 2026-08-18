@@ -196,7 +196,6 @@ class PDFCanvas(Gtk.Overlay):
         self.set_focusable(False)
 
         self._setup_scroll_input_controllers()
-        self._setup_link_controllers()
         self._setup_context_menu()
 
     def set_highlights(self, highlights: list[dict]):
@@ -286,17 +285,6 @@ class PDFCanvas(Gtk.Overlay):
     def texture_bytes(self) -> int:
         """Total bytes currently held by the OpenGL texture cache."""
         return self.gl_canvas.texture_bytes()
-
-    def _setup_link_controllers(self):
-        motion_controller = Gtk.EventControllerMotion.new()
-        motion_controller.connect("motion", self._on_motion)
-        motion_controller.connect("leave", self._on_leave)
-        self.add_controller(motion_controller)
-
-        click_gesture = Gtk.GestureClick.new()
-        click_gesture.set_button(1)
-        click_gesture.connect("pressed", self._on_click)
-        self.add_controller(click_gesture)
 
     def _setup_context_menu(self):
         """Attach a right-click (button 3) context menu to the page area."""
