@@ -839,6 +839,8 @@ class PDFCanvas(Gtk.Overlay):
             return GLib.SOURCE_REMOVE
         self._visibility_scan_retries = 0
         self._update_visibility()
+        self.gl_canvas.queue_draw()
+        self.queue_draw_overlays("visibility-scan-complete")
         return GLib.SOURCE_REMOVE
 
     def render_zoom(self) -> float:

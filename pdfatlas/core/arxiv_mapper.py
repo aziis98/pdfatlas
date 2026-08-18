@@ -80,6 +80,7 @@ def arxiv_id_from_path(path_str: str) -> Optional[str]:
 def download_arxiv_source(
     arxiv_id: str,
     download_pdf: bool = True,
+    download_source: bool = True,
     timeout: float = 15.0,
     progress_callback: Optional[Callable[[float, str], None]] = None,
 ) -> tuple[Path, Path]:
@@ -90,7 +91,7 @@ def download_arxiv_source(
     if download_pdf and not pdf_path.exists():
         print(f"[ArxivMapper] Downloading PDF for {arxiv_id}...", file=sys.stderr, flush=True)
         if progress_callback:
-            progress_callback(0.0, f"Downloading arXiv:{arxiv_id}...")
+            progress_callback(0.0, f"Downloading arXiv:{arxiv_id} PDF...")
         req = urllib.request.Request(
             ARXIV_PDF_URL.format(arxiv_id),
             headers={"User-Agent": "PDFAtlas/1.0 (PDF Viewer; mailto:support@example.com)"},
@@ -120,27 +121,32 @@ def download_arxiv_source(
             if progress_callback:
                 progress_callback(1.0, f"Downloaded arXiv:{arxiv_id}")
 
-    eprint_path = cache_dir / "source.tar.gz"
-    if not any(cache_dir.glob("*.tex")):
-        try:
-            if not eprint_path.exists():
-                print(f"[ArxivMapper] Downloading source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
-                req = urllib.request.Request(
-                    ARXIV_EPRINT_URL.format(arxiv_id),
-                    headers={"User-Agent": "PDFAtlas/1.0 (PDF Viewer; mailto:support@example.com)"},
-                )
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    content = resp.read()
-                    eprint_path.write_bytes(content)
-            print(f"[ArxivMapper] Extracting source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
-            with tarfile.open(eprint_path, "r:gz") as tar:
-                tar.extractall(path=cache_dir)
-            if eprint_path.exists():
-                eprint_path.unlink()
-        except Exception as e:
-            if not download_pdf:
-                raise
-            print(f"[ArxivMapper] Warning: Could not download/extract LaTeX source for {arxiv_id}: {e}", file=sys.stderr, flush=True)
+    if download_source:
+        eprint_path = cache_dir / "source.tar.gz"
+        if not any(cache_dir.glob("*.tex")):
+            try:
+                if not eprint_path.exists():
+                    print(f"[ArxivMapper] Downloading source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
+                    if progress_callback:
+                        progress_callback(0.5, f"Downloading LaTeX sources for {arxiv_id}...")
+                    req = urllib.request.Request(
+                        ARXIV_EPRINT_URL.format(arxiv_id),
+                        headers={"User-Agent": "PDFAtlas/1.0 (PDF Viewer; mailto:support@example.com)"},
+                    )
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        content = resp.read()
+                        eprint_path.write_bytes(content)
+                print(f"[ArxivMapper] Extracting source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
+                if progress_callback:
+                    progress_callback(0.9, f"Extracting LaTeX sources for {arxiv_id}...")
+                with tarfile.open(eprint_path, "r:gz") as tar:
+                    tar.extractall(path=cache_dir)
+                if eprint_path.exists():
+                    eprint_path.unlink()
+            except Exception as e:
+                if not download_pdf:
+                    raise
+                print(f"[ArxivMapper] Warning: Could not download/extract LaTeX source for {arxiv_id}: {e}", file=sys.stderr, flush=True)
 
     return pdf_path, cache_dir
 

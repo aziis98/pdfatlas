@@ -401,6 +401,36 @@ class MainWindow(Adw.ApplicationWindow):
         self.welcome_view = WelcomeView(self)
         self.stack.add_named(self.welcome_view, "welcome-view")
 
+        # Centered Loading View (for fetching remote papers)
+        self.loading_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=16,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+        )
+        self.loading_spinner = Gtk.Spinner()
+        self.loading_spinner.set_size_request(48, 48)
+        self.loading_spinner.start()
+        self.loading_box.append(self.loading_spinner)
+
+        self.loading_title = Gtk.Label()
+        self.loading_title.add_css_class("title-2")
+        self.loading_title.set_label("Downloading Paper...")
+        self.loading_box.append(self.loading_title)
+
+        self.loading_subtitle = Gtk.Label()
+        self.loading_subtitle.add_css_class("dim-label")
+        self.loading_subtitle.set_label("Connecting to arXiv...")
+        self.loading_box.append(self.loading_subtitle)
+
+        self.loading_progress_bar = Gtk.ProgressBar()
+        self.loading_progress_bar.set_size_request(300, 6)
+        self.loading_progress_bar.set_halign(Gtk.Align.CENTER)
+        self.loading_box.append(self.loading_progress_bar)
+
+        self.stack.add_named(self.loading_box, "loading-view")
+        self.stack.connect("notify::visible-child-name", self._on_stack_visible_child_changed)
+
         # Adjustments wiring (owned by the canvas)
         self.vadjustment = self.canvas.vadjustment
         self.hadjustment = self.canvas.hadjustment
@@ -415,6 +445,13 @@ class MainWindow(Adw.ApplicationWindow):
         """Show the empty-window welcome screen with fresh recents and a tip."""
         self.welcome_view.refresh(self.recent_files)
         self.stack.set_visible_child_name("welcome-view")
+
+    def _on_stack_visible_child_changed(self, stack, param):
+        if stack.get_visible_child_name() == "document-view" and self.doc_model:
+            self.canvas.update_layout()
+            self.canvas._update_visibility()
+            self.canvas.gl_canvas.queue_draw()
+            self.canvas.queue_draw_overlays("stack-shown")
 
     def _on_window_realized(self, widget):
         # Screenshot/debug-only: hide the cursor on a headless capture. When
@@ -518,16 +555,28 @@ class MainWindow(Adw.ApplicationWindow):
                     display_name=source.display_name or f"arXiv:{aid}",
                 )
             else:
-                # Asynchronously download paper in background with progress bar while window is responsive
+                # Asynchronously download paper in background while displaying centered loading-view
                 self.set_title(f"Downloading arXiv:{aid} — PDF Viewer")
-                self._show_progress("arxiv-download", f"Downloading arXiv:{aid}...", 0.0)
+                self.loading_title.set_label(f"Downloading arXiv:{aid}")
+                self.loading_subtitle.set_label("Connecting to arXiv...")
+                self.loading_progress_bar.set_fraction(0.0)
+                self.stack.set_visible_child_name("loading-view")
 
                 def _download_worker():
                     def _on_progress(fraction: float, message: str):
-                        GLib.idle_add(self._show_progress, "arxiv-download", message, fraction)
+                        def _update():
+                            self.loading_progress_bar.set_fraction(fraction)
+                            self.loading_subtitle.set_label(message)
+                            return False
+                        GLib.idle_add(_update)
 
                     try:
-                        download_arxiv_source(aid, download_pdf=True, progress_callback=_on_progress)
+                        download_arxiv_source(
+                            aid,
+                            download_pdf=True,
+                            download_source=False,
+                            progress_callback=_on_progress,
+                        )
                         new_source = PdfSource(
                             source_type="arxiv",
                             uri=str(cached_pdf),
@@ -535,7 +584,6 @@ class MainWindow(Adw.ApplicationWindow):
                         )
 
                         def _on_success():
-                            self._hide_progress("arxiv-download")
                             self.open_document(new_source)
                             return False
 
@@ -544,7 +592,7 @@ class MainWindow(Adw.ApplicationWindow):
                         err_msg = str(e)
 
                         def _on_fail():
-                            self._hide_progress("arxiv-download")
+                            self._show_welcome()
                             self._show_error_dialog(f"Failed to download arXiv paper '{source.uri}':\n{err_msg}")
                             return False
 

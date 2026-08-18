@@ -64,7 +64,7 @@ def test_arxiv_recent_with_missing_path_resolves_to_download(tmp_path, monkeypat
     )
     win.recent_files.add(source)
 
-    def mock_download(aid, download_pdf=True, progress_callback=None):
+    def mock_download(aid, download_pdf=True, progress_callback=None, **kwargs):
         fake_pdf.parent.mkdir(parents=True, exist_ok=True)
         fake_pdf.write_bytes(b"%PDF-fake")
         return fake_pdf, fake_pdf.parent
@@ -174,7 +174,7 @@ def test_uncached_arxiv_paper_async_download(tmp_path, monkeypatch):
 
     monkeypatch.setattr(threading.Thread, "start", mock_start)
 
-    def mock_download(aid, download_pdf=True, progress_callback=None):
+    def mock_download(aid, download_pdf=True, progress_callback=None, **kwargs):
         cache_pdf.parent.mkdir(parents=True, exist_ok=True)
         cache_pdf.write_bytes(b"%PDF-downloaded")
         if progress_callback:

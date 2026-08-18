@@ -334,8 +334,10 @@ This document records durable technical findings, architectural decisions, mathe
   - When an arXiv pattern is detected, it intercepts the link click and invokes `_open_new_instance_for_source(f"arxiv:{aid}")`.
   - This calls `launch_pdfatlas_process()` in `pdfatlas/core/process_utils.py` to spawn a fully independent, standalone PDF Atlas OS process (`subprocess.Popen([sys.executable, "-m", "pdfatlas.main", target], start_new_session=True)`), with its own isolated memory space, UI loop, and render workers.
   - Hover tooltips via `LinkPreviewManager.on_link_hovered()` preview `arXiv:{aid} (Click to open in PDF Atlas)`. Non-arXiv URIs continue launching external browsers seamlessly.
-- **Immediate Presentation & Streamed Async Progress:**
-  - When a newly spawned window opens an uncached arXiv paper, it does not block the UI thread. The window presents immediately, displaying a live download progress bar (`Downloading arXiv:YYMM.NNNNN (X.X/Y.Y MB)...`) streamed via background chunk downloads and `GLib.idle_add()`.
+- **Immediate Presentation, Centered Loading View & Zero-Scroll Rendering:**
+  - When opening an uncached arXiv paper, the window presents immediately and displays a centered `loading-view` in `self.stack` featuring a spinner, dynamic title, and centered progress bar (`Downloading arXiv:YYMM.NNNNN (X.X/Y.Y MB)...`).
+  - To prevent freezes on large papers, `open_document` downloads the PDF (`download_source=False`) first and opens the document on screen immediately; $\LaTeX$ source tarball downloading and diff analysis run strictly asynchronously in the background.
+  - Resolved initial blank frame issue: `_visibility_scan_timeout` now explicitly calls `self.gl_canvas.queue_draw()` and `self.queue_draw_overlays()` upon viewport allocation, and `self.stack` signals layout update and rendering when transitioning to `document-view`, rendering the initial page with zero user scroll required.
   - Eliminated duplicate `_setup_link_controllers()` on `PDFCanvas` (which previously caused both `self.scrolled_window` and overlay `self` to receive clicks, double-triggering link actions). Added a 500ms click debounce on `_on_link_clicked`.
 
 ---
