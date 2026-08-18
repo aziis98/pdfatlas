@@ -220,6 +220,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("install-app", lambda act, param: self._on_install_app_action_activated()),
             ("open-file", lambda act, param: self._open_file_dialog()),
             ("open-arxiv", lambda act, param: self._open_arxiv_dialog()),
+            ("new-tab", lambda act, param: self.new_tab()),
+            ("new-window", lambda act, param: self.new_window()),
         ]
         for name, callback in actions:
             action = Gio.SimpleAction.new(name, None)
@@ -249,7 +251,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
 
-        # Left: Open Button, New Tab, New Window & Filename Label
+        # Left: Open Button & Filename Label
         self.open_btn = Adw.SplitButton()
         self.open_btn.set_icon_name("document-open-symbolic")
         self.open_btn.set_tooltip_text("Open PDF [Ctrl+O]")
@@ -257,18 +259,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.open_btn.connect("clicked", lambda b: self._open_file_dialog())
         self._rebuild_open_menu()
 
-        self.new_tab_btn = Gtk.Button.new_from_icon_name("list-add-symbolic")
-        self.new_tab_btn.set_tooltip_text("New Tab [Ctrl+T]")
-        self.new_tab_btn.connect("clicked", lambda b: self.new_tab())
-
-        self.new_window_btn = Gtk.Button.new_from_icon_name("window-new-symbolic")
-        self.new_window_btn.set_tooltip_text("New Window [Ctrl+N]")
-        self.new_window_btn.connect("clicked", lambda b: self.new_window())
-
         self.filename_label = label(text="No document loaded", css_class="caption",
                                     ellipsize=Pango.EllipsizeMode.END, max_width_chars=40, xalign=0)
         left_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
-                       children=[self.open_btn, self.new_tab_btn, self.new_window_btn, self.filename_label])
+                       children=[self.open_btn, self.filename_label])
         header.pack_start(left_box)
 
         # Center: Search Entry
@@ -626,7 +620,22 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_selected_tab_changed(self, view: Adw.TabView, pspec) -> None:
         doc_view = self.get_active_doc_view()
-        if doc_view is not None and hasattr(doc_view, "canvas"):
+        from .welcome import WelcomeView
+        from .document_view import PdfDocumentView
+
+        if isinstance(doc_view, WelcomeView):
+            doc_view.refresh(self.recent_files)
+            self.filename_label.set_label("PDF Atlas")
+            self.set_title("PDF Atlas")
+            self.entry.set_sensitive(False)
+            self.entry.set_text("")
+            self.entry.set_placeholder_text("No document loaded")
+            self.page_input.set_text("")
+            self.page_total_label.set_label("")
+            self.page_input.set_sensitive(False)
+            self.annotations_btn.set_visible(False)
+            self.zoom_label.set_label("100%")
+        elif isinstance(doc_view, PdfDocumentView) and doc_view.doc_model is not None:
             self.canvas = doc_view.canvas
             self.vadjustment = doc_view.vadjustment
             self.hadjustment = doc_view.hadjustment
@@ -640,19 +649,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.notes = doc_view.notes
             self.highlights = doc_view.highlights
 
-            if doc_view.doc_model:
-                curr_page = doc_view.get_current_page_index() + 1
-                self.page_input.set_text(str(curr_page))
-                self.page_total_label.set_label(f"of {doc_view.doc_model.page_count}")
-                self.page_input.set_sensitive(True)
-                title = doc_view.current_source.display_name if doc_view.current_source else "PDF Viewer"
-                self.set_title(f"PDF Viewer — {title}")
-                self.filename_label.set_label(title)
-                self.entry.set_sensitive(True)
-                self.entry.set_placeholder_text("Search document...")
-                self.annotations_btn.set_visible(True)
-                self._update_annotations_button()
-                doc_view.update_layout()
+            curr_page = doc_view.get_current_page_index() + 1
+            self.page_input.set_text(str(curr_page))
+            self.page_total_label.set_label(f"of {doc_view.doc_model.page_count}")
+            self.page_input.set_sensitive(True)
+            title = doc_view.current_source.display_name if doc_view.current_source else "PDF Viewer"
+            self.set_title(f"PDF Viewer — {title}")
+            self.filename_label.set_label(title)
+            self.entry.set_sensitive(True)
+            self.entry.set_placeholder_text("Search document...")
+            self.annotations_btn.set_visible(True)
+            self._update_annotations_button()
+            doc_view.update_layout()
         elif view.get_n_pages() == 0:
             self._show_welcome()
 
@@ -668,8 +676,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._on_link_clicked(0, link)
 
     def new_tab(self):
-        """Open a new empty tab or launch the open file dialog."""
-        self._open_file_dialog()
+        """Open a new tab with the welcome view."""
+        from .welcome import WelcomeView
+        welcome = WelcomeView(self)
+        welcome.refresh(self.recent_files)
+        page = self.tab_view.append(welcome)
+        page.props.title = "New Tab"
+        self.tab_view.set_selected_page(page)
+        self.stack.set_visible_child_name("document-view")
 
     def close_current_tab(self):
         """Close the currently active tab."""
@@ -831,18 +845,35 @@ class MainWindow(Adw.ApplicationWindow):
 
             # Create or reuse TabPage with PdfDocumentView
             from .document_view import PdfDocumentView
+            from .welcome import WelcomeView
 
-            if self.tab_view.get_n_pages() == 0 or not new_tab:
+            selected = self.tab_view.get_selected_page()
+            current_child = selected.get_child() if selected else None
+            is_empty_tab = isinstance(current_child, WelcomeView)
+
+            if is_empty_tab and selected is not None:
+                pos = self.tab_view.get_page_position(selected)
+                doc_view = self._create_doc_view()
+                doc_view.set_document(self.doc_model, source, self.render_worker)
+                page = self.tab_view.insert(doc_view, pos)
+                self.tab_view.close_page(selected)
+            elif self.tab_view.get_n_pages() == 0 or not new_tab:
                 if self.tab_view.get_n_pages() == 0:
                     doc_view = self._create_doc_view()
                     doc_view.set_document(self.doc_model, source, self.render_worker)
                     page = self.tab_view.append(doc_view)
                 else:
-                    selected = self.tab_view.get_selected_page()
                     page = selected if selected else self.tab_view.get_nth_page(0)
                     child = page.get_child()
-                    doc_view = child if isinstance(child, PdfDocumentView) else self._create_doc_view()
-                    doc_view.set_document(self.doc_model, source, self.render_worker)
+                    if isinstance(child, PdfDocumentView):
+                        doc_view = child
+                        doc_view.set_document(self.doc_model, source, self.render_worker)
+                    else:
+                        pos = self.tab_view.get_page_position(page)
+                        doc_view = self._create_doc_view()
+                        doc_view.set_document(self.doc_model, source, self.render_worker)
+                        page = self.tab_view.insert(doc_view, pos)
+                        self.tab_view.close_page(selected if selected else page)
             else:
                 doc_view = self._create_doc_view()
                 doc_view.set_document(self.doc_model, source, self.render_worker)
@@ -850,6 +881,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             page.props.title = source.display_name
             self.tab_view.set_selected_page(page)
+            self.stack.set_visible_child_name("document-view")
 
             self.canvas = doc_view.canvas
             self.vadjustment = doc_view.vadjustment
@@ -1357,20 +1389,28 @@ class MainWindow(Adw.ApplicationWindow):
     def _rebuild_open_menu(self):
         menu = Gio.Menu.new()
 
+        tab_section = Gio.Menu.new()
+        tab_section.append("New Tab", "win.new-tab")
+        tab_section.append("New Window", "win.new-window")
+        menu.append_section(None, tab_section)
+
         open_file_section = Gio.Menu.new()
         open_file_section.append("Open File\u2026", "win.open-file")
         menu.append_section(None, open_file_section)
+
+        arxiv_section = Gio.Menu.new()
+        arxiv_section.append("Open from arXiv\u2026", "win.open-arxiv")
+        menu.append_section(None, arxiv_section)
 
         recent = self.recent_files.get_recent(5)
         if recent:
             recent_section = Gio.Menu.new()
             for source in recent:
-                recent_section.append(source.display_name.replace("_", "__"), f"win.open-recent::{source.uri}")
+                display_name = source.display_name
+                if len(display_name) > 36:
+                    display_name = display_name[:34] + "\u2026"
+                recent_section.append(display_name.replace("_", "__"), f"win.open-recent::{source.uri}")
             menu.append_section(None, recent_section)
-
-        arxiv_section = Gio.Menu.new()
-        arxiv_section.append("Open from arXiv\u2026", "win.open-arxiv")
-        menu.append_section(None, arxiv_section)
 
         self.open_btn.set_menu_model(menu)
 
