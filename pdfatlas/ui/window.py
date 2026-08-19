@@ -35,7 +35,7 @@ from ..core.document import DocumentModel
 from ..core.index import DatabaseService
 from ..core.installation import ensure_app_installed, is_app_installed
 from ..core.pdf_source import PdfSource, RecentFilesManager
-from ..core.renderer import create_render_worker
+from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
 from .arxiv_dialog import ArxivDialog
 from .canvas import PDFCanvas
@@ -87,7 +87,6 @@ class MainWindow(Adw.ApplicationWindow):
         follow_link=None,
         debug_mode=False,
         debug_note_rect=False,
-        render_mode="mp",
         render_workers=2,
         use_shm=True,
     ):
@@ -101,7 +100,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.follow_link = follow_link
         self.debug_mode = debug_mode
         self.debug_note_rect = debug_note_rect
-        self.render_mode = render_mode
         self.render_workers = render_workers
         self.use_shm = use_shm
         self._deferred_state_query: str | None = None
@@ -117,11 +115,11 @@ class MainWindow(Adw.ApplicationWindow):
         # 3. LRU Caches and background rendering worker
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
-        self.render_worker = create_render_worker(
-            render_mode, num_workers=render_workers, use_shm=use_shm
+        self.render_worker = RenderWorker(
+            num_workers=render_workers, use_shm=use_shm
         )
 
-        print(f"[PDFAtlas] render backend: {render_mode} x{render_workers}", flush=True)
+        print(f"[PDFAtlas] render workers: {render_workers}", flush=True)
         if use_shm:
             print("[PDFAtlas] Zero-copy SHM IPC enabled", flush=True)
 

@@ -69,7 +69,6 @@ class TabController:
 
         new_win = MainWindow(
             self.win.app,
-            render_mode=self.win.render_mode,
             render_workers=self.win.render_workers,
             use_shm=self.win.use_shm,
         )
@@ -256,7 +255,6 @@ class TabController:
 
         win = MainWindow(
             self.win.app,
-            render_mode=self.win.render_mode,
             render_workers=self.win.render_workers,
             use_shm=self.win.use_shm,
         )

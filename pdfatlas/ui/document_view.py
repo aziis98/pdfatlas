@@ -18,7 +18,6 @@ from ..core.index import DatabaseService
 from ..core.layout import layout_scale
 from ..core.pdf_source import PdfSource
 from ..core.renderer import RenderWorker
-from ..core.renderer_mt import RenderWorkerMT
 from ..core.settings import CropSettings
 from .canvas import PDFCanvas
 from .components.selection_toolbar import SelectionToolbarComponent, SelectionToolbarState
@@ -36,7 +35,7 @@ class PdfDocumentView(Gtk.Box):
 
     def __init__(
         self,
-        render_worker: RenderWorker | RenderWorkerMT | None = None,
+        render_worker: RenderWorker | None = None,
         settings: CropSettings | None = None,
         db_service: DatabaseService | None = None,
         on_page_changed: Callable[[int, int], None] | None = None,
@@ -216,7 +215,7 @@ class PdfDocumentView(Gtk.Box):
         self,
         doc_model: DocumentModel,
         source: PdfSource,
-        render_worker: RenderWorker | RenderWorkerMT | None = None,
+        render_worker: RenderWorker | None = None,
     ):
         self.hide_loading()
         if render_worker:

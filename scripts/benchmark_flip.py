@@ -32,7 +32,7 @@ from gi.repository import Gdk, Gtk
 
 from pdfatlas.core.cache import RenderCache
 from pdfatlas.core.document import DocumentModel
-from pdfatlas.core.renderer import create_render_worker
+from pdfatlas.core.renderer import RenderWorker
 from pdfatlas.ui.texture_uploader import TextureUploader
 
 BURST = 5
@@ -43,7 +43,7 @@ NOTABLE_MS = 0.5
 
 def rasterize(pdf_path: str, count: int) -> list:
     """Rasterize the first ``count`` pages via the child-process renderer."""
-    worker = create_render_worker("mp")
+    worker = RenderWorker()
     doc = DocumentModel(pdf_path)
     cache = RenderCache(count + 4)
     worker.set_document(pdf_path)

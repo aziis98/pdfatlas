@@ -589,22 +589,3 @@ class RenderWorker:
             self._abandon(entry)
         self._respawn_child("unexpected death")
 
-
-def create_render_worker(mode: str, num_workers: int = 2, use_shm: bool = True):
-    """Instantiate a background render backend.
-
-    ``mode`` selects the rasterization backend:
-      - ``"mp"``: multiprocessing — rasterization runs in a pool of ``num_workers``
-        spawn child processes (``render_child.py``) so PyMuPDF's GIL bursts can
-        never stall the UI thread. This is the default and recommended backend.
-      - ``"mt"``: multithreaded — ``num_workers`` daemon threads each own their
-        own ``fitz.Document`` and rasterize pages in parallel. Kept for
-        benchmarking and comparison; see RESEARCH.md 1.16.
-    """
-    if mode == "mp":
-        return RenderWorker(num_workers=num_workers, use_shm=use_shm)
-    if mode == "mt":
-        from .renderer_mt import RenderWorkerMT
-
-        return RenderWorkerMT(num_workers=num_workers)
-    raise ValueError(f"Unknown render mode: {mode!r} (expected 'mt' or 'mp')")

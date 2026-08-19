@@ -39,7 +39,6 @@ class PDFViewerApplication(Adw.Application):
         follow_link: int | None = None,
         debug: bool = False,
         debug_note_rect: bool = False,
-        render_mode: str = "mp",
         render_workers: int = 2,
         use_shm: bool = True,
         application_id: str = "com.aziis98.pdfatlas",
@@ -53,7 +52,6 @@ class PDFViewerApplication(Adw.Application):
         self.follow_link = follow_link
         self.debug = debug
         self.debug_note_rect = debug_note_rect
-        self.render_mode = render_mode
         self.render_workers = render_workers
         self.use_shm = use_shm
         self.connect("window-removed", self._on_window_removed)
@@ -110,7 +108,7 @@ class PDFViewerApplication(Adw.Application):
             if skip_next:
                 skip_next = False
                 continue
-            if a in ("--state", "--follow-link", "--render-mode", "--render-workers"):
+            if a in ("--state", "--follow-link", "--render-workers"):
                 skip_next = True
                 continue
             if a.startswith("--") or a.startswith("-"):
@@ -134,7 +132,6 @@ class PDFViewerApplication(Adw.Application):
                 follow_link=self.follow_link,
                 debug_mode=self.debug,
                 debug_note_rect=self.debug_note_rect,
-                render_mode=self.render_mode,
                 render_workers=self.render_workers,
                 use_shm=self.use_shm,
             )
@@ -164,7 +161,6 @@ class PDFViewerApplication(Adw.Application):
             follow_link=self.follow_link,
             debug_mode=self.debug,
             debug_note_rect=self.debug_note_rect,
-            render_mode=self.render_mode,
             render_workers=self.render_workers,
             use_shm=self.use_shm,
         )
@@ -192,12 +188,6 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug overlay for page layout values")
     parser.add_argument("--debug-note-rect", action="store_true",
                         help="Draw a red overlay at the note preview anchor rect")
-    parser.add_argument(
-        "--render-mode",
-        choices=["mt", "mp"],
-        default="mp",
-        help="Rasterization backend: 'mp' = multiprocessing child processes (default), 'mt' = multithreaded",
-    )
     parser.add_argument(
         "--render-workers",
         type=int,
@@ -228,7 +218,6 @@ def main():
         follow_link=args.follow_link,
         debug=args.debug,
         debug_note_rect=args.debug_note_rect,
-        render_mode=args.render_mode,
         render_workers=args.render_workers,
         use_shm=args.use_shm,
     )

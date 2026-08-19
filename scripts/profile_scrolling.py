@@ -24,11 +24,9 @@ def profile(
     from_page: int = 8,
     to_page: int = 9,
     output_svg: Path = DEFAULT_OUTPUT,
-    render_mode: str = "mt",
     rate: int = 100,
     steps: int = 40,
     repeat: int = 3,
-    subprocesses: bool = False,
     fmt: str = "all",
     use_shm: bool = True,
     zoom: float = 1.0,
@@ -56,11 +54,10 @@ def profile(
     # Construct the python main command
     shm_flag = "" if use_shm else " --no-shm"
     target_cmd = (
-        f"{sys.executable} -m pdfatlas.main {shlex.quote(str(pdf_path))} "
-        f"--render-mode {shlex.quote(render_mode)}{shm_flag} --state {shlex.quote(state_json)}"
+        f"{sys.executable} -m pdfatlas.main {shlex.quote(str(pdf_path))}{shm_flag} --state {shlex.quote(state_json)}"
     )
 
-    subproc_flag = " --subprocesses" if (subprocesses or render_mode == "mp") else ""
+    subproc_flag = " --subprocesses"
 
     # Determine py-spy format
     spy_format = "raw" if fmt == "all" else fmt
@@ -75,7 +72,7 @@ def profile(
 
     print(f"[Profiler] Target PDF: {pdf_path}")
     print(f"[Profiler] Benchmark: Page {from_page} -> {to_page} ({steps} steps x {repeat} repeats)")
-    print(f"[Profiler] Render mode: {render_mode}{shm_flag} (subprocesses profiling: {bool(subproc_flag)})")
+    print(f"[Profiler] Render backend: mp{shm_flag} (subprocesses profiling enabled)")
     print(f"[Profiler] Output files: {output_svg} / {output_raw}")
     print("[Profiler] Launching profiler harness via Wayland script...")
 
@@ -125,15 +122,9 @@ if __name__ == "__main__":
         default=DEFAULT_OUTPUT,
         help="Output SVG flame graph file path (default: sandbox.local/scroll_profile.svg)",
     )
-    parser.add_argument("--render-mode", choices=["mt", "mp"], default="mt", help="Render mode (default: mt)")
     parser.add_argument("--rate", type=int, default=100, help="py-spy sampling frequency in Hz (default: 100)")
     parser.add_argument("--steps", type=int, default=40, help="Scroll interpolation steps (default: 40)")
     parser.add_argument("--repeat", type=int, default=3, help="Number of benchmark repeat passes (default: 3)")
-    parser.add_argument(
-        "--subprocesses",
-        action="store_true",
-        help="Profile subprocesses spawned by the app (automatically enabled for mp mode)",
-    )
     parser.add_argument(
         "--no-shm",
         action="store_false",
@@ -154,11 +145,9 @@ if __name__ == "__main__":
         from_page=args.from_page,
         to_page=args.to_page,
         output_svg=args.output,
-        render_mode=args.render_mode,
         rate=args.rate,
         steps=args.steps,
         repeat=args.repeat,
-        subprocesses=args.subprocesses,
         fmt=args.format,
         use_shm=args.use_shm,
         zoom=args.zoom,
