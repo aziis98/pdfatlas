@@ -196,3 +196,44 @@ def test_uncached_arxiv_paper_async_download(tmp_path, monkeypatch):
         win.open_document(source)
         assert any("_download_worker" in str(t) for t in started_threads)
         assert cache_pdf.exists()
+
+
+def test_cli_command_line_second_document_opens_in_tab(tmp_path):
+    from unittest.mock import MagicMock, patch
+    from pdfatlas.main import PDFViewerApplication
+    from pdfatlas.ui.window import MainWindow
+
+    pdf1 = tmp_path / "doc1.pdf"
+    pdf1.write_bytes(b"%PDF-1")
+    pdf2 = tmp_path / "doc2.pdf"
+    pdf2.write_bytes(b"%PDF-2")
+
+    app = PDFViewerApplication(application_id=f"com.example.testdbuscmd{next(_APP_IDS)}")
+    app.register(None)
+
+    win = MainWindow(app)
+    win.present()
+
+    with patch.object(win, "open_document") as mock_open:
+        # First invocation opens doc1
+        cmd1 = MagicMock()
+        cmd1.get_arguments.return_value = ["pdfatlas", str(pdf1)]
+        cmd1.get_cwd.return_value = str(tmp_path)
+        app.do_command_line(cmd1)
+
+        assert mock_open.call_count == 1
+        source1 = mock_open.call_args[0][0]
+        assert source1.uri == str(pdf1)
+
+        # Second invocation opens doc2
+        cmd2 = MagicMock()
+        cmd2.get_arguments.return_value = ["pdfatlas", "doc2.pdf"]
+        cmd2.get_cwd.return_value = str(tmp_path)
+        app.do_command_line(cmd2)
+
+        assert mock_open.call_count == 2
+        source2 = mock_open.call_args[0][0]
+        assert source2.uri == str(pdf2)
+        assert mock_open.call_args[1].get("new_tab") is True
+
+    win.close()

@@ -42,9 +42,10 @@ class PDFViewerApplication(Adw.Application):
         render_mode: str = "mp",
         render_workers: int = 2,
         use_shm: bool = True,
+        application_id: str = "com.aziis98.pdfatlas",
     ):
         super().__init__(
-            application_id="com.aziis98.pdfatlas",
+            application_id=application_id,
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
         )
         self.filepath_to_open = filepath_to_open
@@ -61,18 +62,26 @@ class PDFViewerApplication(Adw.Application):
         if not app.get_windows():
             self.quit()
 
-    def _resolve_source(self, win: MainWindow, raw_arg: str) -> PdfSource:
+    def _resolve_source(self, win: MainWindow, raw_arg: str, cwd: str | None = None) -> PdfSource:
         from .core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
 
-        expanded = os.path.abspath(os.path.expanduser(raw_arg)) if os.path.exists(os.path.expanduser(raw_arg)) else raw_arg
-        aid = extract_arxiv_id_from_raw(raw_arg) or arxiv_id_from_path(raw_arg)
-        existing = win.recent_files.get_by_uri(expanded) or win.recent_files.get_by_uri(raw_arg)
+        raw_str = raw_arg.strip()
+        aid = extract_arxiv_id_from_raw(raw_str) or arxiv_id_from_path(raw_str)
+
+        expanded_candidate = (
+            os.path.normpath(os.path.join(cwd, os.path.expanduser(raw_str)))
+            if cwd and not os.path.isabs(os.path.expanduser(raw_str))
+            else os.path.abspath(os.path.expanduser(raw_str))
+        )
+        expanded = expanded_candidate if os.path.exists(expanded_candidate) else raw_str
+
+        existing = win.recent_files.get_by_uri(expanded) or win.recent_files.get_by_uri(raw_str)
         if not existing and aid:
             existing = win.recent_files.get_by_arxiv_id(aid)
 
         if existing:
             return existing
-        elif os.path.exists(os.path.expanduser(raw_arg)):
+        elif os.path.exists(expanded_candidate):
             return PdfSource(
                 source_type="file",
                 uri=expanded,
@@ -81,24 +90,40 @@ class PDFViewerApplication(Adw.Application):
         elif aid:
             return PdfSource(
                 source_type="arxiv",
-                uri=raw_arg,
+                uri=raw_str,
                 display_name=f"arXiv:{aid}",
             )
         else:
             return PdfSource(
                 source_type="file",
-                uri=raw_arg,
-                display_name=os.path.basename(raw_arg),
+                uri=expanded,
+                display_name=os.path.basename(expanded),
             )
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
-        args = command_line.get_arguments()[1:]
-        raw_target = args[0] if args else self.filepath_to_open
+        raw_args = command_line.get_arguments()[1:]
+        cwd = command_line.get_cwd()
+
+        raw_target = None
+        skip_next = False
+        for a in raw_args:
+            if skip_next:
+                skip_next = False
+                continue
+            if a in ("--state", "--follow-link", "--render-mode", "--render-workers"):
+                skip_next = True
+                continue
+            if a.startswith("--") or a.startswith("-"):
+                continue
+            raw_target = a
+            break
 
         windows = self.get_windows()
         win = self.get_active_window() or (windows[0] if windows else None)
+        is_first_window = False
 
         if not win or not isinstance(win, MainWindow):
+            is_first_window = True
             from .core.installation import get_installation_mode_info
             mode, reason = get_installation_mode_info()
             print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
@@ -115,9 +140,10 @@ class PDFViewerApplication(Adw.Application):
             )
             win.present()
 
-        if raw_target:
-            source = self._resolve_source(win, raw_target.strip())
-            win.open_document(source, new_tab=True)
+        target_to_open = raw_target if raw_target else (self.filepath_to_open if is_first_window else None)
+        if target_to_open:
+            source = self._resolve_source(win, target_to_open.strip(), cwd=cwd)
+            win.open_document(source, new_tab=not is_first_window)
 
         win.present()
         return 0
@@ -207,7 +233,7 @@ def main():
         use_shm=args.use_shm,
     )
 
-    sys.exit(app.run([sys.argv[0]]))
+    sys.exit(app.run(sys.argv))
 
 
 if __name__ == "__main__":
