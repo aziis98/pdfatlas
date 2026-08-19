@@ -273,6 +273,35 @@ class ArxivDiffMapper:
         self.moved_blocks: list[tuple[int, int, int, int, float]] = []
         self.is_ready: bool = False
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize word diff and sourcemap bijection for database storage."""
+        return {
+            "pdf_text": self.pdf_text,
+            "tex_text": self.tex_text,
+            "pdf_words": self.pdf_words,
+            "tex_words": self.tex_words,
+            "word_metadata": self.word_metadata,
+            "diff_opcodes": self.diff_opcodes,
+            "pdf_to_tex_map": {str(k): v for k, v in self.pdf_to_tex_map.items()},
+            "tex_to_pdf_map": {str(k): v for k, v in self.tex_to_pdf_map.items()},
+            "mapped_pdf_indices": list(self.mapped_pdf_indices),
+            "moved_blocks": self.moved_blocks,
+        }
+
+    def from_dict(self, data: dict[str, Any]):
+        """Load word diff and sourcemap bijection from database dictionary."""
+        self.pdf_text = data.get("pdf_text", "")
+        self.tex_text = data.get("tex_text", "")
+        self.pdf_words = data.get("pdf_words", [])
+        self.tex_words = data.get("tex_words", [])
+        self.word_metadata = [tuple(m) for m in data.get("word_metadata", [])]
+        self.diff_opcodes = [tuple(op) for op in data.get("diff_opcodes", [])]
+        self.pdf_to_tex_map = {int(k): int(v) for k, v in data.get("pdf_to_tex_map", {}).items()}
+        self.tex_to_pdf_map = {int(k): int(v) for k, v in data.get("tex_to_pdf_map", {}).items()}
+        self.mapped_pdf_indices = set(data.get("mapped_pdf_indices", []))
+        self.moved_blocks = [tuple(b) for b in data.get("moved_blocks", [])]
+        self.is_ready = True
+
     def process(
         self,
         arxiv_id: str,

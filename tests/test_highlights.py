@@ -205,3 +205,66 @@ def test_remove_matching_highlights():
     win._remove_matching_highlights()
     assert [h["id"] for h in win.highlights] == [2, 3]
     assert not sel.has_selection()
+
+
+def test_crop_bboxes_db_operations(tmp_path):
+    import fitz
+    from pdfatlas.core.index import (
+        ensure_crop_table,
+        save_crop_bboxes_to_db,
+        load_crop_bboxes_from_db,
+    )
+
+    db_path = tmp_path / "crop_test.db"
+    conn = sqlite3.connect(str(db_path))
+    ensure_crop_table(conn)
+
+    bboxes = [
+        fitz.Rect(10.0, 20.0, 500.0, 700.0),
+        None,
+        fitz.Rect(15.5, 25.5, 490.0, 680.0),
+    ]
+
+    save_crop_bboxes_to_db(conn, bboxes)
+
+    loaded = load_crop_bboxes_from_db(conn, page_count=3)
+    assert loaded is not None
+    assert len(loaded) == 3
+    assert loaded[0] == fitz.Rect(10.0, 20.0, 500.0, 700.0)
+    assert loaded[1] is None
+    assert loaded[2] == fitz.Rect(15.5, 25.5, 490.0, 680.0)
+
+    # If page_count doesn't match, returns None
+    assert load_crop_bboxes_from_db(conn, page_count=5) is None
+    conn.close()
+
+
+def test_arxiv_diff_db_operations(tmp_path):
+    from pdfatlas.core.index import (
+        ensure_arxiv_diff_table,
+        save_arxiv_diff_to_db,
+        load_arxiv_diff_from_db,
+    )
+
+    db_path = tmp_path / "arxiv_diff_test.db"
+    conn = sqlite3.connect(str(db_path))
+    ensure_arxiv_diff_table(conn)
+
+    sample_data = {
+        "pdf_text": "sample text",
+        "tex_text": "sample \\textbf{text}",
+        "pdf_words": ["sample", "text"],
+        "tex_words": ["sample", "\\textbf{text}"],
+        "word_metadata": [[0, 0, 6], [0, 7, 11]],
+        "diff_opcodes": [["equal", 0, 1, 0, 1]],
+        "pdf_to_tex_map": {"0": 0, "1": 1},
+        "tex_to_pdf_map": {"0": 0, "1": 1},
+        "mapped_pdf_indices": [0, 1],
+        "moved_blocks": [],
+    }
+
+    save_arxiv_diff_to_db(conn, sample_data)
+    loaded = load_arxiv_diff_from_db(conn)
+    assert loaded == sample_data
+    conn.close()
+

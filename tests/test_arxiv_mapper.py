@@ -149,3 +149,44 @@ def test_reconcile_moved_table_float_edits():
     # PDF Table 1 word 'Maximum' (index 5) should be reconciled to TeX 'Maximum' (index 9)
     assert 5 in mapper.mapped_pdf_indices
     assert mapper.pdf_to_tex_map[5] == 8
+
+
+def test_arxiv_mapper_sqlite_save_load(tmp_path):
+    import sqlite3
+    from pdfatlas.core.arxiv_mapper import ArxivDiffMapper
+    from pdfatlas.core.index import save_arxiv_diff_to_db, load_arxiv_diff_from_db, ensure_arxiv_diff_table
+
+    db_path = tmp_path / "test_arxiv.db"
+    conn = sqlite3.connect(str(db_path))
+    ensure_arxiv_diff_table(conn)
+
+    mapper = ArxivDiffMapper()
+    mapper.pdf_text = "Hello world"
+    mapper.tex_text = "Hello \\textbf{world}"
+    mapper.pdf_words = ["Hello", "world"]
+    mapper.tex_words = ["Hello", "\\textbf{world}"]
+    mapper.word_metadata = [(0, 0, 5), (0, 6, 11)]
+    mapper.pdf_to_tex_map = {0: 0, 1: 1}
+    mapper.tex_to_pdf_map = {0: 0, 1: 1}
+    mapper.mapped_pdf_indices = {0, 1}
+    mapper.diff_opcodes = [("equal", 0, 1, 0, 1), ("replace", 1, 2, 1, 2)]
+    mapper.moved_blocks = []
+    mapper.is_ready = True
+
+    data = mapper.to_dict()
+    save_arxiv_diff_to_db(conn, data)
+
+    loaded_data = load_arxiv_diff_from_db(conn)
+    assert loaded_data is not None
+
+    loaded_mapper = ArxivDiffMapper()
+    assert loaded_mapper.is_ready is False
+    loaded_mapper.from_dict(loaded_data)
+    assert loaded_mapper.is_ready is True
+    assert loaded_mapper.pdf_words == ["Hello", "world"]
+    assert loaded_mapper.pdf_to_tex_map == {0: 0, 1: 1}
+    assert loaded_mapper.tex_to_pdf_map == {0: 0, 1: 1}
+    assert loaded_mapper.mapped_pdf_indices == {0, 1}
+    assert loaded_mapper.word_metadata == [(0, 0, 5), (0, 6, 11)]
+    conn.close()
+

@@ -1120,6 +1120,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _arxiv_diff_worker(self, arxiv_id: str, filepath: str):
         try:
+            from ..core.index import get_db_for_pdf, load_arxiv_diff_from_db, save_arxiv_diff_to_db
+
+            conn = get_db_for_pdf(filepath)
+            cached_data = load_arxiv_diff_from_db(conn)
+            if cached_data is not None:
+                mapper = ArxivDiffMapper()
+                mapper.from_dict(cached_data)
+                GLib.idle_add(self._on_arxiv_diff_complete, mapper)
+                return
+
             def progress_cb(f: float) -> None:
                 GLib.idle_add(self._on_arxiv_diff_progress, f)
 
@@ -1129,6 +1139,7 @@ class MainWindow(Adw.ApplicationWindow):
                 Path(filepath),
                 progress_callback=progress_cb,
             )
+            save_arxiv_diff_to_db(conn, mapper.to_dict())
             GLib.idle_add(self._on_arxiv_diff_complete, mapper)
         except Exception as e:
             print(f"[MainWindow] Arxiv diff calculation failed: {e}", flush=True)
@@ -1802,6 +1813,27 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         page_count = self.doc_model.page_count
+
+        if not force and self.db_service:
+            def _on_loaded(cached_bboxes):
+                if not self.crop_analyzer or not self.doc_model:
+                    return
+                if cached_bboxes is not None and len(cached_bboxes) == page_count:
+                    self.crop_analyzer.raw_bboxes = cached_bboxes
+                    self.crop_analyzer.scanned = [True] * page_count
+                    self.crop_analyzer.compute_crop_rects(self.settings)
+                    self.canvas.on_crop_changed()
+                    return
+                self._run_crop_scan()
+
+            self.db_service.load_crop_bboxes(page_count, _on_loaded)
+        else:
+            self._run_crop_scan()
+
+    def _run_crop_scan(self):
+        if not self.doc_model or not self.crop_analyzer:
+            return
+        page_count = self.doc_model.page_count
         self.crop_analyzer.scanned = [False] * page_count
         self.crop_analyzer.raw_bboxes = [None] * page_count
 
@@ -1827,6 +1859,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_crop_analysis_complete(self):
         self._hide_progress("crop_analysis")
+        if self.db_service and self.crop_analyzer:
+            self.db_service.save_crop_bboxes(self.crop_analyzer.raw_bboxes)
         self.canvas.on_crop_changed()
 
     def _show_progress(self, task_id: str, description: str, fraction: float):

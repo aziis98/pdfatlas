@@ -352,6 +352,101 @@ def load_notes_from_db(conn: sqlite3.Connection) -> list[dict]:
         return []
 
 
+def ensure_crop_table(conn: sqlite3.Connection):
+    """Ensure the crop_bboxes table exists in the database."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS crop_bboxes (
+            page        INTEGER PRIMARY KEY,
+            x0          REAL,
+            y0          REAL,
+            x1          REAL,
+            y1          REAL
+        );
+    """)
+    conn.commit()
+
+
+def save_crop_bboxes_to_db(conn: sqlite3.Connection, bboxes: list[fitz.Rect | None]):
+    """Save raw crop bounding boxes for each page."""
+    try:
+        ensure_crop_table(conn)
+        rows = []
+        for i, rect in enumerate(bboxes):
+            if rect is not None:
+                rows.append((i, float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)))
+            else:
+                rows.append((i, None, None, None, None))
+        conn.executemany(
+            """INSERT INTO crop_bboxes (page, x0, y0, x1, y1)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(page) DO UPDATE SET
+                   x0=excluded.x0, y0=excluded.y0, x1=excluded.x1, y1=excluded.y1""",
+            rows,
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[Index] Error saving crop bboxes: {e}", flush=True)
+
+
+def load_crop_bboxes_from_db(conn: sqlite3.Connection, page_count: int) -> list[fitz.Rect | None] | None:
+    """Load cached crop bounding boxes if all pages have been analyzed."""
+    try:
+        ensure_crop_table(conn)
+        rows = conn.execute("SELECT page, x0, y0, x1, y1 FROM crop_bboxes ORDER BY page").fetchall()
+        if len(rows) != page_count:
+            return None
+        bboxes: list[fitz.Rect | None] = []
+        for r in rows:
+            if r[1] is not None and r[2] is not None and r[3] is not None and r[4] is not None:
+                bboxes.append(fitz.Rect(float(r[1]), float(r[2]), float(r[3]), float(r[4])))
+            else:
+                bboxes.append(None)
+        return bboxes
+    except Exception as e:
+        print(f"[Index] Error loading crop bboxes: {e}", flush=True)
+        return None
+
+
+def ensure_arxiv_diff_table(conn: sqlite3.Connection):
+    """Ensure the arxiv_diff_cache table exists in the database."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS arxiv_diff_cache (
+            key         TEXT PRIMARY KEY,
+            data        TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+
+
+def save_arxiv_diff_to_db(conn: sqlite3.Connection, mapper_data: dict[str, Any]):
+    """Save serialized arXiv diff data to the SQLite database."""
+    import json
+    try:
+        ensure_arxiv_diff_table(conn)
+        serialized = json.dumps(mapper_data)
+        conn.execute(
+            "INSERT INTO arxiv_diff_cache (key, data) VALUES ('diff_map', ?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
+            (serialized,),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[Index] Error saving arxiv diff data: {e}", flush=True)
+
+
+def load_arxiv_diff_from_db(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """Load serialized arXiv diff data from the SQLite database."""
+    import json
+    try:
+        ensure_arxiv_diff_table(conn)
+        row = conn.execute("SELECT data FROM arxiv_diff_cache WHERE key='diff_map'").fetchone()
+        if not row:
+            return None
+        return json.loads(row[0])
+    except Exception as e:
+        print(f"[Index] Error loading arxiv diff data: {e}", flush=True)
+        return None
+
+
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 import gi
@@ -522,8 +617,39 @@ class DatabaseService:
         if self._conn:
             notes = load_notes_from_db(self._conn)
             GLib.idle_add(on_complete, notes)
+    def load_crop_bboxes(self, page_count: int, on_complete: Callable[[list[fitz.Rect | None] | None], None]):
+        self._executor.submit(self._bg_load_crop_bboxes, page_count, on_complete)
+
+    def _bg_load_crop_bboxes(self, page_count: int, on_complete: Callable[[list[fitz.Rect | None] | None], None]):
+        if self._conn:
+            bboxes = load_crop_bboxes_from_db(self._conn, page_count)
+            GLib.idle_add(on_complete, bboxes)
         else:
-            GLib.idle_add(on_complete, [])
+            GLib.idle_add(on_complete, None)
+
+    def save_crop_bboxes(self, bboxes: list[fitz.Rect | None]):
+        self._executor.submit(self._bg_save_crop_bboxes, bboxes)
+
+    def _bg_save_crop_bboxes(self, bboxes: list[fitz.Rect | None]):
+        if self._conn:
+            save_crop_bboxes_to_db(self._conn, bboxes)
+
+    def load_arxiv_diff(self, on_complete: Callable[[dict[str, Any] | None], None]):
+        self._executor.submit(self._bg_load_arxiv_diff, on_complete)
+
+    def _bg_load_arxiv_diff(self, on_complete: Callable[[dict[str, Any] | None], None]):
+        if self._conn:
+            data = load_arxiv_diff_from_db(self._conn)
+            GLib.idle_add(on_complete, data)
+        else:
+            GLib.idle_add(on_complete, None)
+
+    def save_arxiv_diff(self, mapper_data: dict[str, Any]):
+        self._executor.submit(self._bg_save_arxiv_diff, mapper_data)
+
+    def _bg_save_arxiv_diff(self, mapper_data: dict[str, Any]):
+        if self._conn:
+            save_arxiv_diff_to_db(self._conn, mapper_data)
 
     def close(self):
         """Close database connection on the DB thread and shutdown executor."""
