@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
+
+if TYPE_CHECKING:
+    from .index import DatabaseService
 
 
 @dataclass(slots=True)
@@ -70,7 +73,7 @@ class SearchProvider(Protocol):
 class SingleDocumentSearchProvider:
     """SearchProvider implementation querying a single active PDF's FTS5 index via DatabaseService."""
 
-    def __init__(self, db_service: Any, filepath: str = "", doc_title: str = ""):
+    def __init__(self, db_service: DatabaseService, filepath: str = "", doc_title: str = ""):
         self.db_service = db_service
         self.filepath = filepath
         self.doc_title = doc_title

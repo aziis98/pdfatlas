@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import math
-from typing import Any
+from typing import Callable
 
 import cairo
+import fitz
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -57,11 +60,11 @@ class MiniMap(Gtk.DrawingArea):
         self.crop_analyzer = None
         self.settings = None
         self.main_zoom = 1.0
-        self.page_layout: list[tuple[float, float, float, Any]] | None = None
+        self.page_layout: list[tuple[float, float, float, fitz.Rect | None]] | None = None
         self.page_gap: int = 12
         self.main_vadjustment: Gtk.Adjustment | None = None
         self._vadj_handler_id: int | None = None
-        self.on_page_clicked: Any = None
+        self.on_page_clicked: Callable[[int], None] | None = None
         self.current_page = 0
         self.thumb_scale = 0.15
         self.thumb_w = 90
@@ -102,7 +105,7 @@ class MiniMap(Gtk.DrawingArea):
         render_worker,
         crop_analyzer: CropAnalyzer,
         settings: CropSettings,
-        page_layout: list[tuple[float, float, float, Any]] | None = None,
+        page_layout: list[tuple[float, float, float, fitz.Rect | None]] | None = None,
         page_gap: int = 12,
     ):
         self.doc_model = doc_model
@@ -448,7 +451,7 @@ class MinimapWindow(Adw.Dialog):
         main_vadjustment,
         main_zoom,
         on_page_selected,
-        page_layout: list[tuple[float, float, float, Any]] | None = None,
+        page_layout: list[tuple[float, float, float, fitz.Rect | None]] | None = None,
         page_gap: int = 12,
     ):
         super().__init__(title="Minimap")
@@ -475,7 +478,11 @@ class MinimapWindow(Adw.Dialog):
         self.set_child(content_box)
 
         # Connect callback to scroll and close the window
-        self.minimap.on_page_clicked = lambda idx: (on_page_selected(idx), self.close())
+        def _handle_page_clicked(idx: int) -> None:
+            on_page_selected(idx)
+            self.close()
+
+        self.minimap.on_page_clicked = _handle_page_clicked
 
         # Close on Escape key
         shortcut_controller = Gtk.ShortcutController.new()

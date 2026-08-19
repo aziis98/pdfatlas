@@ -1,4 +1,21 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import Protocol, runtime_checkable
+import fitz
+
+
+@runtime_checkable
+class PointCropRect(Protocol):
+    x0: float
+    y0: float
+
+
+@runtime_checkable
+class CropRect(Protocol):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
 
 
 def layout_scale(zoom: float, dpi_scale_factor: float) -> float:
@@ -76,7 +93,7 @@ def pdf_rect_to_screen(
     pdf_y0: float,
     pdf_x1: float,
     pdf_y1: float,
-    crop_rect: Any,
+    crop_rect: CropRect | fitz.Rect | None,
 ) -> tuple[float, float, float, float] | None:
     if page_index < 0 or page_index >= len(layout):
         return None
@@ -94,8 +111,13 @@ def pdf_rect_to_screen(
 
 
 def pdf_point_to_page_margin(
-    scale: float, pdf_x: float, pdf_y: float, crop_rect: Any,
-    page_w: float, page_h: float, icon_size: float = 24.0,
+    scale: float,
+    pdf_x: float,
+    pdf_y: float,
+    crop_rect: PointCropRect | fitz.Rect | None,
+    page_w: float,
+    page_h: float,
+    icon_size: float = 24.0,
 ) -> tuple[float, float]:
     """Margin (mx, my) from the top-left of a page container that places an
     icon centered on a PDF point, clamped inside the page box."""
@@ -131,7 +153,7 @@ def link_screen_rect(
     scale: float,
     viewport_w: float,
     scroll_y: float,
-    pdf_rect: Any,
+    pdf_rect: fitz.Rect | dict | None,
     scroll_x: float = 0.0,
 ) -> tuple[float, float, float, float] | None:
     if not layout or page_index < 0 or page_index >= len(layout):

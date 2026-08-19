@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -8,6 +8,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw
 
 if TYPE_CHECKING:
+    from ..ui.document_view import PdfDocumentView
     from ..ui.window import MainWindow
 
 
@@ -22,7 +23,7 @@ class TabController:
         self.tab_view: Adw.TabView = Adw.TabView()
         self.tab_bar: Adw.TabBar = Adw.TabBar(view=self.tab_view)
         self.tab_bar.set_autohide(True)
-        self._active_doc_view_ref: Any | None = None
+        self._active_doc_view_ref: PdfDocumentView | None = None
 
         self.tab_view.connect("create-window", self.on_create_window)
         self.tab_view.connect("page-attached", self.on_page_attached)
@@ -30,7 +31,7 @@ class TabController:
         self.tab_view.connect("close-page", self.on_close_page)
         self.tab_view.connect("notify::selected-page", self.on_selected_tab_changed)
 
-    def create_doc_view(self) -> Any:
+    def create_doc_view(self) -> PdfDocumentView:
         from ..ui.document_view import PdfDocumentView
 
         doc_view = PdfDocumentView(
@@ -53,10 +54,14 @@ class TabController:
         )
         return doc_view
 
-    def get_active_doc_view(self) -> Any:
+    def get_active_doc_view(self) -> PdfDocumentView | None:
+        from ..ui.document_view import PdfDocumentView
+
         page = self.tab_view.get_selected_page()
         if page is not None:
-            return page.get_child()
+            child = page.get_child()
+            if isinstance(child, PdfDocumentView):
+                return child
         return None
 
     def on_create_window(self, view: Adw.TabView) -> Adw.TabView:
@@ -245,7 +250,7 @@ class TabController:
         if page is not None:
             self.tab_view.close_page(page)
 
-    def new_window(self) -> Any:
+    def new_window(self) -> MainWindow:
         """Open a new PDF Atlas window."""
         from ..ui.window import MainWindow
 

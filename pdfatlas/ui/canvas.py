@@ -1,8 +1,10 @@
 
-import gi
+from __future__ import annotations
+
 from collections import deque
-from typing import Any, Callable
 import time
+from typing import TYPE_CHECKING, Callable
+import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -11,9 +13,23 @@ from gi.repository import Gdk, GLib, Gtk
 from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
 from ..core.document import DocumentModel
-from ..core.layout import layout_scale, texture_zoom, MAX_TEXTURE_ZOOM, screen_to_pdf, page_at_point, link_screen_rect, anchor_before, anchor_after
+from ..core.layout import (
+    MAX_TEXTURE_ZOOM,
+    anchor_after,
+    anchor_before,
+    layout_scale,
+    link_screen_rect,
+    page_at_point,
+    screen_to_pdf,
+    texture_zoom,
+)
 from ..core.text_selection import TextSelection
 from .gl_canvas import GLCanvas
+
+if TYPE_CHECKING:
+    from .document_view import PdfDocumentView
+    from .notes import NotesLayer
+    from .window import MainWindow
 
 #: Milliseconds of silence after the last scroll event before the viewport is
 #: considered settled and full-resolution renders are requested.
@@ -117,26 +133,26 @@ class PDFCanvas(Gtk.Overlay):
 
         # Interactive link state
         self.hovered_link: tuple[int, dict] | None = None
-        self.on_link_clicked: Any = None
-        self.on_note_create: Any = None
-        self.notes_layer: Any = None
-        self.on_link_hovered: Any = None
-        self.on_page_hovered: Any = None
+        self.on_link_clicked: Callable[[int, dict], None] | None = None
+        self.on_note_create: Callable[[int, float, float], None] | None = None
+        self.notes_layer: NotesLayer | None = None
+        self.on_link_hovered: Callable[[int | None, dict | None], None] | None = None
+        self.on_page_hovered: Callable[[int | None, float, float], None] | None = None
         self.on_selection_changed: Callable[[bool], None] | None = None
         self.text_selection: TextSelection | None = None
-        self.debug_arxiv_data: dict[str, Any] | None = None
+        self.debug_arxiv_data: dict | None = None
         self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
         self._pending_drag_start: tuple[int, int] | None = None
         self._suppress_drag_clear: bool = False
         self._is_word_drag_mode: bool = False
-        self.win: Any = None
+        self.win: MainWindow | PdfDocumentView | None = None
 
         # Reusable right-click context menu anchored to the canvas. Coordinates
         # from the scrolled-window gesture are in canvas space (the scrolled
         # window fills the overlay). The note callback is stored at press time.
         # Created lazily on first right-click: parenting a popover before the
         # canvas is realized can leave its grab state wedged (GTK4).
-        self._context_note_callback: Any = None
+        self._context_note_callback: Callable[[], None] | None = None
         self._context_popover: Gtk.Popover | None = None
         self._context_button: Gtk.Button | None = None
 
@@ -334,8 +350,9 @@ class PDFCanvas(Gtk.Overlay):
             self._context_popover = popover
             self._context_button = button
         self._context_note_callback = None
-        if self.on_note_create is not None:
-            self._context_note_callback = lambda: self.on_note_create(page_idx, pt[0], pt[1])
+        cb = self.on_note_create
+        if cb is not None:
+            self._context_note_callback = lambda: cb(page_idx, pt[0], pt[1])
         # NOTE: Gdk.Rectangle() is a Boxed struct — positional ctor args are
         # silently ignored (deprecated), leaving a (0,0,0,0) rect that anchors
         # the popover at the parent's top-left. Set fields explicitly.
@@ -523,7 +540,7 @@ class PDFCanvas(Gtk.Overlay):
 
 
     def get_link_screen_rect(
-        self, page_index: int, link: dict, overlay_widget: Any = None
+        self, page_index: int, link: dict, overlay_widget: Gtk.Widget | None = None
     ) -> tuple[float, float, float, float] | None:
         from_rect = link.get("from")
         if not from_rect or not self.page_layout:

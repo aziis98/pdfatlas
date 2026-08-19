@@ -2,7 +2,6 @@
 Pydantic model for validating and parsing initial application state passed via --state CLI flag.
 """
 
-from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -56,10 +55,10 @@ class CliState(BaseModel):
     query: str | None = None
     minimap: bool = False
     hover_link: int | None = None
-    scroll_benchmark: dict[str, Any] | None = None
+    scroll_benchmark: dict[str, object] | None = None
     selection: SelectionState | None = None
-    highlights: list[dict[str, Any]] | None = None
-    notes: list[dict[str, Any]] | None = None
+    highlights: list[dict[str, object]] | None = None
+    notes: list[dict[str, object]] | None = None
     annotations_popover: bool = False
     open_note_preview: int | None = None
     page: int | None = None

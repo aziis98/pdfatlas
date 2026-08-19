@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ..core.layout import layout_scale
+
+if TYPE_CHECKING:
+    from ..ui.document_view import PdfDocumentView
+    from ..ui.window import MainWindow
 
 
 def clamp(val, min_val, max_val):
@@ -14,11 +18,13 @@ class NavigationController:
     Controller handling document navigation, viewport scroll position, and zoom calculations.
     """
 
-    def __init__(self, main_window: Any):
+    def __init__(self, main_window: MainWindow | PdfDocumentView):
         self.win = main_window
 
     def _update_page_indicator(self, page_index: int):
-        if self.win.page_input is not None:
+        from ..ui.window import MainWindow
+
+        if isinstance(self.win, MainWindow) and self.win.page_input is not None:
             self.win.page_input.set_text(str(page_index + 1))
         if callable(self.win.on_page_changed) and self.win.doc_model:
             self.win.on_page_changed(page_index + 1, self.win.doc_model.page_count)

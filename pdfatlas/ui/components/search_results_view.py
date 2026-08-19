@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import string
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable
+from typing import Callable
 
 import gi
 
@@ -29,7 +29,7 @@ class SearchResultsView(Gtk.Box):
         self.on_toggle_pin = on_toggle_pin
 
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
-        self.pinned: dict[int, dict[str, Any]] = {}
+        self.pinned: dict[int, dict] = {}
 
         self.scrolled = scrolled_window()
         self.results_box = box(

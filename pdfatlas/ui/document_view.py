@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
 import gi
 
@@ -14,8 +14,11 @@ from ..core.arxiv_mapper import ArxivDiffMapper
 from ..core.cache import MiniMapCache, RenderCache
 from ..core.crop import CropAnalyzer
 from ..core.document import DocumentModel
+from ..core.index import DatabaseService
 from ..core.layout import layout_scale
 from ..core.pdf_source import PdfSource
+from ..core.renderer import RenderWorker
+from ..core.renderer_mt import RenderWorkerMT
 from ..core.settings import CropSettings
 from .canvas import PDFCanvas
 from .components.selection_toolbar import SelectionToolbarComponent, SelectionToolbarState
@@ -33,13 +36,13 @@ class PdfDocumentView(Gtk.Box):
 
     def __init__(
         self,
-        render_worker: Any = None,
+        render_worker: RenderWorker | RenderWorkerMT | None = None,
         settings: CropSettings | None = None,
-        db_service: Any = None,
+        db_service: DatabaseService | None = None,
         on_page_changed: Callable[[int, int], None] | None = None,
         on_zoom_changed: Callable[[float], None] | None = None,
         on_link_clicked: Callable[[str, dict], None] | None = None,
-        on_note_clicked: Callable[[Any], None] | None = None,
+        on_note_clicked: Callable[[dict], None] | None = None,
         on_note_create: Callable[[int, float, float], None] | None = None,
         on_selection_changed: Callable[[bool], None] | None = None,
         on_toast: Callable[[str], None] | None = None,
@@ -67,8 +70,8 @@ class PdfDocumentView(Gtk.Box):
 
         self.render_cache = RenderCache()
         self.minimap_cache = MiniMapCache()
-        self.highlights: list[Any] = []
-        self.notes: list[Any] = []
+        self.highlights: list[dict] = []
+        self.notes: list[dict] = []
         self.zoom: float = 1.0
         self.debug_note_rect: bool = False
         self._pinch_anchor_x: float = 0.0
@@ -213,7 +216,7 @@ class PdfDocumentView(Gtk.Box):
         self,
         doc_model: DocumentModel,
         source: PdfSource,
-        render_worker: Any = None,
+        render_worker: RenderWorker | RenderWorkerMT | None = None,
     ):
         self.hide_loading()
         if render_worker:

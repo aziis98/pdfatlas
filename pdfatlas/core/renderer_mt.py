@@ -154,7 +154,7 @@ class RenderWorkerMT:
             )
         )
 
-    def clear_canvas_render_jobs(self):
+    def clear_canvas_render_jobs(self, target_filepath: str | None = None):
         """Removes queued page renders (keeps minimap and crop scans), bumping
         the generation so stale in-flight page renders are dropped on arrival."""
         with self.lock:

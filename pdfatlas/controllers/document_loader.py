@@ -3,7 +3,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import threading
-from typing import TYPE_CHECKING, Any
+import sqlite3
+from typing import TYPE_CHECKING
+import gi
+
+gi.require_version("Adw", "1")
+from gi.repository import Adw
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -258,7 +263,7 @@ class DocumentLoader:
             self.win.page_input.set_sensitive(True)
 
             if source.is_arxiv and aid and source.display_name in ("paper.pdf", f"arXiv:{aid}"):
-                def _bg_fetch(paper_aid: str, paper_uri: str, target_page: Any):
+                def _bg_fetch(paper_aid: str, paper_uri: str, target_page: Adw.TabPage):
                     from ..ui.arxiv_dialog import _fetch_arxiv_title
 
                     title = _fetch_arxiv_title(paper_aid)
@@ -494,7 +499,7 @@ class DocumentLoader:
         if self.win.selection_toolbar and self.win.selection_toolbar.get_visible():
             self.win._update_selection_toolbar(True)
 
-    def _on_indexing_complete(self, conn: Any):
+    def _on_indexing_complete(self, conn: sqlite3.Connection | None):
         self.win._hide_progress("indexing")
         self.win.index_conn = conn
         self.win.entry.set_sensitive(True)

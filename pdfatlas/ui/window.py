@@ -1,9 +1,15 @@
-import os
-import time
+from __future__ import annotations
+
 from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+import os
+import sqlite3
+import time
+from typing import TYPE_CHECKING, Callable
 import gi
+
+if TYPE_CHECKING:
+    from .document_view import PdfDocumentView
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -122,7 +128,7 @@ class MainWindow(Adw.ApplicationWindow):
         # 4. Search indexing & database persistence
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
         self.db_service = DatabaseService()
-        self.index_conn = None
+        self.index_conn: sqlite3.Connection | None = None
         self.pinned = {}  # id -> {"result": ..., "query_terms": ...}
         self._debounce_source_id = None
         self._last_query = ""
@@ -138,8 +144,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._last_link_click_time: float = 0.0
         self.crop_scanned_count: int = 0
         self.notes_layer: NotesLayer | None = None
-        self.on_annotations_changed: Any = None
-        self.on_page_changed: Any = None
+        self.on_annotations_changed: Callable[[], None] | None = None
+        self.on_page_changed: Callable[[int, int], None] | None = None
 
         # Optional / on-demand widgets
         self.minimap_dialog: MinimapWindow | None = None
@@ -650,10 +656,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- Multi-Tab Management Delegations ---
 
-    def _create_doc_view(self) -> Any:
+    def _create_doc_view(self) -> PdfDocumentView:
         return self.tab_controller.create_doc_view()
 
-    def get_active_doc_view(self) -> Any:
+    def get_active_doc_view(self) -> PdfDocumentView | None:
         return self.tab_controller.get_active_doc_view()
 
     def _on_create_window(self, view: Adw.TabView) -> Adw.TabView:
@@ -1285,18 +1291,15 @@ class MainWindow(Adw.ApplicationWindow):
         print(f"[MainWindow] Link #{link_index} not found (total links: {current_count})", flush=True)
         return False
 
-    def _run_scroll_benchmark(self, config: dict[str, Any] | str) -> bool:
+    def _run_scroll_benchmark(self, config: dict[str, object] | str) -> bool:
         try:
             if isinstance(config, dict):
-                y_start = float(config.get("y_start", 0.0))
-                y_end = float(
-                    config.get(
-                        "y_end", self.vadjustment.get_upper() if self.vadjustment else 2000.0
-                    )
-                )
-                interval_ms = int(config.get("interval_ms", 16))
-                steps = int(config.get("steps", 60))
-                repeat_count = int(config.get("repeat_count", 1))
+                y_start = float(str(config.get("y_start", 0.0)))
+                default_y_end = self.vadjustment.get_upper() if self.vadjustment else 2000.0
+                y_end = float(str(config.get("y_end", default_y_end)))
+                interval_ms = int(str(config.get("interval_ms", 16)))
+                steps = int(str(config.get("steps", 60)))
+                repeat_count = int(str(config.get("repeat_count", 1)))
                 auto_quit = bool(config.get("auto_quit", False))
             else:
                 parts = [p.strip() for p in config.split(",") if p.strip()]

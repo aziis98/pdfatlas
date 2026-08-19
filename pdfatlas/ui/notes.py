@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -11,6 +11,10 @@ from gi.repository import Adw, Gdk, GLib, Gtk, WebKit
 
 from ..core.layout import layout_scale, pdf_point_to_page_margin
 from ..core.resources import get_assets_dir
+
+if TYPE_CHECKING:
+    from .document_view import PdfDocumentView
+    from .window import MainWindow
 
 #: Debounce before showing the hover preview after entering an icon.
 PREVIEW_SHOW_MS = 120
@@ -252,7 +256,7 @@ def _assets_base_uri() -> str:
 class NotesLayer:
     """Owns note icons over the canvas, the shared hover preview, and editors."""
 
-    def __init__(self, win: Any):
+    def __init__(self, win: MainWindow | PdfDocumentView):
         self.win = win
         self._icons: dict[int, Gtk.Button] = {}
         self._icon_menus: dict[int, Gtk.Popover] = {}
@@ -318,7 +322,10 @@ class NotesLayer:
             self.win.db_service.save_note(page, x, y, "", on_complete=on_complete)
 
     def _notify_annotations_changed(self):
-        self.win._update_annotations_button()
+        from .window import MainWindow
+
+        if isinstance(self.win, MainWindow):
+            self.win._update_annotations_button()
         if callable(self.win.on_annotations_changed):
             self.win.on_annotations_changed()
 

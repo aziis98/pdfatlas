@@ -1,11 +1,17 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk
 
-from typing import Any
 from ..core.cache import LinkPortalCache
 from .portal_preview import LinkPortalPreviewCard
+
+if TYPE_CHECKING:
+    from .document_view import PdfDocumentView
+    from .window import MainWindow
 
 
 class LinkPreviewManager:
@@ -13,7 +19,7 @@ class LinkPreviewManager:
     Manager for link hover previews, popup positioning, and snippet rendering callbacks.
     """
 
-    def __init__(self, main_window: Any):
+    def __init__(self, main_window: MainWindow | PdfDocumentView):
         self.win = main_window
         self.portal_cache = LinkPortalCache(max_size=50)
         self.portal_card = LinkPortalPreviewCard()
@@ -113,7 +119,7 @@ class LinkPreviewManager:
         cached_surface = self.portal_cache.get(target_page, target_y, render_w, render_h)
         if cached_surface:
             self.portal_card.set_surface(cached_surface)
-        else:
+        elif self.win.render_worker and self.win.doc_model:
             self.portal_card.set_loading()
             self.win.render_worker.queue_portal_job(
                 self.win.doc_model,

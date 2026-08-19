@@ -180,12 +180,14 @@ def test_multi_tab_night_mode_synchronization(tmp_path):
     source1 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc 1")
     win.open_document(source1)
     doc_view1 = win.get_active_doc_view()
+    assert doc_view1 is not None
     assert doc_view1.canvas.night_mode is False
 
     # Open second tab
     source2 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc 2")
     win.open_document(source2, new_tab=True)
     doc_view2 = win.get_active_doc_view()
+    assert doc_view2 is not None
     assert doc_view2.canvas.night_mode is False
 
     # Toggle night mode to dark on MainWindow
@@ -226,10 +228,12 @@ def test_multi_window_night_mode_synchronization(tmp_path):
     source1 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc Win1")
     win1.open_document(source1)
     doc_view1 = win1.get_active_doc_view()
+    assert doc_view1 is not None
 
     source2 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc Win2")
     win2.open_document(source2)
     doc_view2 = win2.get_active_doc_view()
+    assert doc_view2 is not None
 
     assert win1.night_mode is False
     assert win2.night_mode is False
