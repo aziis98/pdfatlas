@@ -7,7 +7,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gtk
+from gi.repository import Adw, Gdk, Gtk, Pango
 
 from ..controllers.navigation import NavigationController
 from ..core.arxiv_mapper import ArxivDiffMapper
@@ -28,7 +28,7 @@ from .notes import NotesLayer
 class PdfDocumentView(Gtk.Box):
     """
     Self-contained document view combining canvas layout, notes, link previews,
-    and floating overlay toolbars.
+    floating toolbars, gestures, and per-tab loading/downloading state.
     """
 
     def __init__(
@@ -135,7 +135,75 @@ class PdfDocumentView(Gtk.Box):
         self._pinch_start_zoom: float = 1.0
         self._setup_canvas_gestures()
 
-        self.append(self.canvas)
+        # Stack for Canvas vs In-Tab Loading View
+        self.stack = Gtk.Stack()
+        self.stack.set_vexpand(True)
+        self.stack.set_hexpand(True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(150)
+        self.stack.add_named(self.canvas, "canvas")
+
+        # Centered In-Tab Loading View
+        self.loading_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=14,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
+            hexpand=True,
+            vexpand=True,
+        )
+        self.loading_box.set_size_request(480, -1)
+
+        self.loading_spinner = Gtk.Spinner()
+        self.loading_spinner.set_size_request(48, 48)
+        self.loading_spinner.set_halign(Gtk.Align.CENTER)
+        self.loading_box.append(self.loading_spinner)
+
+        self.loading_title = Gtk.Label()
+        self.loading_title.add_css_class("title-2")
+        self.loading_title.set_justify(Gtk.Justification.CENTER)
+        self.loading_title.set_halign(Gtk.Align.CENTER)
+        self.loading_title.set_hexpand(True)
+        self.loading_title.set_label("Downloading Paper...")
+        self.loading_box.append(self.loading_title)
+
+        self.loading_subtitle = Gtk.Label()
+        self.loading_subtitle.add_css_class("dim-label")
+        self.loading_subtitle.set_justify(Gtk.Justification.CENTER)
+        self.loading_subtitle.set_halign(Gtk.Align.CENTER)
+        self.loading_subtitle.set_hexpand(True)
+        self.loading_subtitle.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        self.loading_subtitle.set_label("Connecting to arXiv...")
+        self.loading_box.append(self.loading_subtitle)
+
+        self.loading_progress_bar = Gtk.ProgressBar()
+        self.loading_progress_bar.set_size_request(360, 6)
+        self.loading_progress_bar.set_halign(Gtk.Align.CENTER)
+        self.loading_box.append(self.loading_progress_bar)
+
+        self.stack.add_named(self.loading_box, "loading")
+        self.append(self.stack)
+
+    # --- In-Tab Loading Control ---
+
+    @property
+    def is_loading(self) -> bool:
+        return self.stack.get_visible_child_name() == "loading"
+
+    def show_loading(self, title: str = "Downloading Paper...", subtitle: str = "Connecting to arXiv..."):
+        self.loading_title.set_label(title)
+        self.loading_subtitle.set_label(subtitle)
+        self.loading_progress_bar.set_fraction(0.0)
+        self.loading_spinner.start()
+        self.stack.set_visible_child_name("loading")
+
+    def set_loading_progress(self, fraction: float, message: str):
+        self.loading_progress_bar.set_fraction(fraction)
+        self.loading_subtitle.set_label(message)
+
+    def hide_loading(self):
+        self.loading_spinner.stop()
+        self.stack.set_visible_child_name("canvas")
 
     # --- Document Lifecycle ---
 
@@ -145,6 +213,7 @@ class PdfDocumentView(Gtk.Box):
         source: PdfSource,
         render_worker: Any = None,
     ):
+        self.hide_loading()
         if render_worker:
             self.render_worker = render_worker
 

@@ -596,45 +596,61 @@ class MainWindow(Adw.ApplicationWindow):
             self.page_input.set_sensitive(False)
             self.annotations_btn.set_visible(False)
             self.zoom_label.set_label("100%")
-        elif isinstance(doc_view, PdfDocumentView) and doc_view.doc_model is not None:
+        elif isinstance(doc_view, PdfDocumentView):
             self.stack.set_visible_child_name("document-view")
-            self.canvas = doc_view.canvas
-            self.vadjustment = doc_view.vadjustment
-            self.hadjustment = doc_view.hadjustment
-            self.doc_model = doc_view.doc_model
-            self.current_source = doc_view.current_source
-            self.zoom = doc_view.zoom
-            self.zoom_label.set_label(f"{int(self.zoom * 100)}%")
-            self.arxiv_mapper = doc_view.arxiv_mapper
-            self.crop_analyzer = doc_view.crop_analyzer
-            self.notes_layer = doc_view.notes_layer
-            self.notes = doc_view.notes
-            self.highlights = doc_view.highlights
+            if doc_view.doc_model is not None:
+                self.canvas = doc_view.canvas
+                self.vadjustment = doc_view.vadjustment
+                self.hadjustment = doc_view.hadjustment
+                self.doc_model = doc_view.doc_model
+                self.current_source = doc_view.current_source
+                self.zoom = doc_view.zoom
+                self.zoom_label.set_label(f"{int(self.zoom * 100)}%")
+                self.arxiv_mapper = doc_view.arxiv_mapper
+                self.crop_analyzer = doc_view.crop_analyzer
+                self.notes_layer = doc_view.notes_layer
+                self.notes = doc_view.notes
+                self.highlights = doc_view.highlights
 
-            # Sync night mode to the activated tab
-            doc_view.canvas.set_night_mode(
-                self.night_mode,
-                invert_amount=self.settings.night_mode_invert,
-                hue_rotate=self.settings.night_mode_hue_rotate,
-            )
+                # Sync night mode to the activated tab
+                doc_view.canvas.set_night_mode(
+                    self.night_mode,
+                    invert_amount=self.settings.night_mode_invert,
+                    hue_rotate=self.settings.night_mode_hue_rotate,
+                )
 
-            # Restore scroll position safely
-            doc_view.restore_scroll_position()
+                # Restore scroll position safely
+                doc_view.restore_scroll_position()
 
-            curr_page = doc_view.get_current_page_index() + 1
-            self.page_input.set_text(str(curr_page))
-            self.page_total_label.set_label(f"of {doc_view.doc_model.page_count}")
-            self.page_input.set_sensitive(True)
-            title = doc_view.current_source.display_name if doc_view.current_source else "PDF Viewer"
-            self.set_title(f"PDF Viewer — {title}")
-            self.filename_label.set_label(title)
-            self.entry.set_sensitive(True)
-            self.entry.set_placeholder_text("Search document...")
-            self.annotations_btn.set_visible(True)
-            self._update_annotations_button()
-            doc_view.canvas._update_visibility()
-            doc_view.canvas.gl_canvas.queue_draw()
-            doc_view.canvas.queue_draw_overlays("tab-selected")
+                curr_page = doc_view.get_current_page_index() + 1
+                self.page_input.set_text(str(curr_page))
+                self.page_total_label.set_label(f"of {doc_view.doc_model.page_count}")
+                self.page_input.set_sensitive(True)
+                title = doc_view.current_source.display_name if doc_view.current_source else "PDF Viewer"
+                self.set_title(f"PDF Viewer — {title}")
+                self.filename_label.set_label(title)
+                self.entry.set_sensitive(True)
+                self.entry.set_placeholder_text("Search document...")
+                self.annotations_btn.set_visible(True)
+                self._update_annotations_button()
+                doc_view.canvas._update_visibility()
+                doc_view.canvas.gl_canvas.queue_draw()
+                doc_view.canvas.queue_draw_overlays("tab-selected")
+            else:
+                # Tab is downloading/loading
+                self.doc_model = None
+                self.current_source = doc_view.current_source
+                title = doc_view.loading_title.get_label() if doc_view.is_loading else "Loading..."
+                self.set_title(f"PDF Viewer — {title}")
+                self.filename_label.set_label(title)
+                self.entry.set_sensitive(False)
+                self.entry.set_text("")
+                self.entry.set_placeholder_text("Downloading document...")
+                self.page_input.set_text("")
+                self.page_total_label.set_label("")
+                self.page_input.set_sensitive(False)
+                self.annotations_btn.set_visible(False)
+                self.zoom_label.set_label("100%")
         elif view.get_n_pages() == 0:
             self._show_welcome()
 
@@ -714,6 +730,8 @@ class MainWindow(Adw.ApplicationWindow):
         # check the local arXiv cache first, and then attempt to download from arXiv if needed.
         if aid and not os.path.exists(filepath):
             from ..core.arxiv_mapper import ARXIV_CACHE_ROOT, download_arxiv_source
+            from .document_view import PdfDocumentView
+            from .welcome import WelcomeView
 
             cached_pdf = ARXIV_CACHE_ROOT / aid / "paper.pdf"
             if cached_pdf.exists():
@@ -724,18 +742,49 @@ class MainWindow(Adw.ApplicationWindow):
                     display_name=source.display_name or f"arXiv:{aid}",
                 )
             else:
-                # Asynchronously download paper in background while displaying centered loading-view
-                self.set_title(f"Downloading arXiv:{aid} — PDF Viewer")
-                self.loading_title.set_label(f"Downloading arXiv:{aid}")
-                self.loading_subtitle.set_label("Connecting to arXiv...")
-                self.loading_progress_bar.set_fraction(0.0)
-                self.stack.set_visible_child_name("loading-view")
+                # Open or allocate the tab to host the in-tab loading view
+                selected = self.tab_view.get_selected_page()
+                current_child = selected.get_child() if selected else None
+                is_empty_tab = isinstance(current_child, WelcomeView)
+
+                display_title = source.display_name or f"arXiv:{aid}"
+
+                if is_empty_tab and selected is not None:
+                    pos = self.tab_view.get_page_position(selected)
+                    doc_view = self._create_doc_view()
+                    page = self.tab_view.insert(doc_view, pos)
+                    self.tab_view.close_page(selected)
+                elif self.tab_view.get_n_pages() == 0 or not new_tab:
+                    if self.tab_view.get_n_pages() == 0:
+                        doc_view = self._create_doc_view()
+                        page = self.tab_view.append(doc_view)
+                    else:
+                        page = selected if selected else self.tab_view.get_nth_page(0)
+                        child = page.get_child()
+                        if isinstance(child, PdfDocumentView):
+                            doc_view = child
+                        else:
+                            pos = self.tab_view.get_page_position(page)
+                            doc_view = self._create_doc_view()
+                            page = self.tab_view.insert(doc_view, pos)
+                            self.tab_view.close_page(selected if selected else page)
+                else:
+                    doc_view = self._create_doc_view()
+                    page = self.tab_view.append(doc_view)
+
+                page.props.title = display_title
+                self.tab_view.set_selected_page(page)
+                self.stack.set_visible_child_name("document-view")
+
+                doc_view.show_loading(
+                    title=f"Downloading {display_title}",
+                    subtitle="Connecting to arXiv...",
+                )
 
                 def _download_worker():
                     def _on_progress(fraction: float, message: str):
                         def _update():
-                            self.loading_progress_bar.set_fraction(fraction)
-                            self.loading_subtitle.set_label(message)
+                            doc_view.set_loading_progress(fraction, message)
                             return False
                         GLib.idle_add(_update)
 
@@ -753,7 +802,22 @@ class MainWindow(Adw.ApplicationWindow):
                         )
 
                         def _on_success():
-                            self.open_document(new_source, new_tab=new_tab)
+                            doc_model = DocumentModel(str(cached_pdf))
+                            if self.render_worker:
+                                self.render_worker.set_document(str(cached_pdf))
+                            meta_title = (doc_model.doc.metadata or {}).get("title")
+                            if meta_title and isinstance(meta_title, str):
+                                cleaned_meta = meta_title.strip()
+                                if cleaned_meta and cleaned_meta.lower() not in ("paper.pdf", "untitled", "none"):
+                                    new_source.display_name = cleaned_meta
+
+                            page.props.title = new_source.display_name
+                            doc_view.set_document(doc_model, new_source, self.render_worker)
+                            self.recent_files.add(new_source)
+                            self._rebuild_open_menu()
+
+                            if self.tab_view.get_selected_page() == page:
+                                self._on_selected_tab_changed(self.tab_view, None)
                             return False
 
                         GLib.idle_add(_on_success)
@@ -761,7 +825,8 @@ class MainWindow(Adw.ApplicationWindow):
                         err_msg = str(e)
 
                         def _on_fail():
-                            self._show_welcome()
+                            if self.tab_view.get_page_position(page) >= 0:
+                                self.tab_view.close_page(page)
                             self._show_error_dialog(f"Failed to download arXiv paper '{source.uri}':\n{err_msg}")
                             return False
 

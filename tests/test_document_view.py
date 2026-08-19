@@ -135,3 +135,35 @@ def test_drag_tab_to_new_window(tmp_path):
     win2.close()
 
 
+def test_document_view_in_tab_loading(tmp_path):
+    view = PdfDocumentView()
+    assert view.is_loading is False
+    assert view.stack.get_visible_child_name() == "canvas"
+
+    view.show_loading(title="Downloading arXiv:2305.12345", subtitle="Connecting...")
+    assert view.is_loading is True
+    assert view.stack.get_visible_child_name() == "loading"
+    assert view.loading_title.get_label() == "Downloading arXiv:2305.12345"
+    assert view.loading_subtitle.get_label() == "Connecting..."
+
+    view.set_loading_progress(0.45, "Downloading 4.5/10.0 MB...")
+    assert view.loading_progress_bar.get_fraction() == 0.45
+    assert view.loading_subtitle.get_label() == "Downloading 4.5/10.0 MB..."
+
+    # Loading hides when set_document is called
+    doc_path = tmp_path / "sample_loading.pdf"
+    doc = fitz.open()
+    doc.new_page(width=500, height=800)
+    doc.save(str(doc_path))
+    doc.close()
+
+    doc_model = DocumentModel(str(doc_path))
+    source = PdfSource(source_type="arxiv", uri=str(doc_path), display_name="Paper")
+    view.set_document(doc_model, source)
+
+    assert view.is_loading is False
+    assert view.stack.get_visible_child_name() == "canvas"
+    view.close()
+
+
+
