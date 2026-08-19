@@ -30,7 +30,7 @@ class LinkPreviewManager:
         self.portal_card.set_visible(False)
         self.win.link_preview_label.set_text("")
         self.win.link_preview_card_box.set_visible(False)
-        if not self.win.debug_info_label or not self.win.debug_info_label.get_visible():
+        if self.win.debug_info_label is None or not self.win.debug_info_label.get_visible():
             self.win.link_preview_box.set_visible(False)
 
     def on_link_hovered(self, source_page_index: int | None, link: dict | None):

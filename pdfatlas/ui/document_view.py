@@ -100,6 +100,8 @@ class PdfDocumentView(Gtk.Box):
 
         self.link_preview_card_box = Gtk.Box()
         self.link_preview_card_box.set_visible(False)
+        self.debug_info_label: Gtk.Label | None = None
+        self.debug_arxiv_label: Gtk.Label | None = None
         # Floating zoom controls
         self.zoom_component = ZoomControlsComponent(
             on_zoom_in=self.zoom_in,
