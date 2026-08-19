@@ -52,7 +52,10 @@ class LinkPreviewManager:
 
                 aid = extract_arxiv_id_from_raw(link_uri) or arxiv_id_from_path(link_uri)
                 if aid:
-                    lbl = f"arXiv:{aid} (Click to open in PDF Atlas)"
+                    if link.get("auto_detected"):
+                        lbl = f"arXiv:{aid} [Auto-detected] (Click to open in PDF Atlas)"
+                    else:
+                        lbl = f"arXiv:{aid} (Click to open in PDF Atlas)"
                 else:
                     lbl = f"Link: {link_uri}"
             else:

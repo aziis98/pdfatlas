@@ -1,4 +1,50 @@
+import re
 import fitz
+
+ARXIV_TEXT_RE = re.compile(
+    r"(?:(?:arXiv|arxiv|ARXIV):\s*|https?://(?:[a-zA-Z0-9\-]+\.)?arxiv\.org/(?:abs|pdf)/|doi:10\.48550/arXiv\.)"
+    r"([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?/\d{7}|\d{4}\.\d{4,5}(?:v\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def detect_text_arxiv_links(page: fitz.Page, existing_links: list[dict]) -> list[dict]:
+    """
+    Detect plain text occurrences of 'arXiv:<id>' or arXiv URLs on the page that
+    lack explicit PDF link annotations, and return synthesized link dictionaries.
+    """
+    detected: list[dict] = []
+    try:
+        raw_text = page.get_text("text")
+        if not isinstance(raw_text, str) or not raw_text or "arxiv" not in raw_text.lower():
+            return detected
+
+        existing_rects = [lnk.get("from") for lnk in existing_links if lnk.get("from") is not None]
+
+        for m in ARXIV_TEXT_RE.finditer(raw_text):
+            full_match = m.group(0).strip()
+            aid = m.group(1).strip()
+            rects = page.search_for(full_match)
+            if not rects and " " in full_match:
+                rects = page.search_for(full_match.replace(" ", ""))
+
+            for r in rects:
+                is_covered = any(
+                    r.intersects(er) and (r & er).get_area() > 0.5 * r.get_area()
+                    for er in existing_rects
+                )
+                if not is_covered:
+                    detected.append({
+                        "kind": fitz.LINK_URI,
+                        "from": r,
+                        "uri": f"https://arxiv.org/abs/{aid}",
+                        "arxiv_id": aid,
+                        "auto_detected": True,
+                    })
+                    existing_rects.append(r)
+    except Exception as e:
+        print(f"[DocumentModel] Error detecting text arXiv links: {e}", flush=True)
+    return detected
 
 
 class DocumentModel:
@@ -15,7 +61,10 @@ class DocumentModel:
         self._page_links: list[list[dict]] = []
         for i in range(self._page_count):
             try:
-                self._page_links.append(self.doc[i].get_links())
+                page = self.doc[i]
+                links = page.get_links()
+                auto_links = detect_text_arxiv_links(page, links)
+                self._page_links.append(links + auto_links)
             except (RuntimeError, ValueError):
                 self._page_links.append([])
 

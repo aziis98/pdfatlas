@@ -157,3 +157,49 @@ def test_regular_uri_link_click_launches_external_browser(tmp_path):
         mock_show_uri.assert_called_once()
 
 
+def test_detect_text_arxiv_links_synthetic(tmp_path):
+    import fitz
+    from pdfatlas.core.document import DocumentModel
+
+    pdf_file = tmp_path / "test_arxiv_text.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=800)
+    page.insert_text((50, 100), "See reference arXiv:2102.03384 for details.")
+    page.insert_text((50, 200), "Also see https://arxiv.org/abs/math/9903146.")
+    doc.save(str(pdf_file))
+    doc.close()
+
+    model = DocumentModel(str(pdf_file))
+    links = model.get_page_links(0)
+    assert len(links) == 2
+    assert links[0]["auto_detected"] is True
+    assert "2102.03384" in links[0]["uri"]
+    assert links[1]["auto_detected"] is True
+    assert "math/9903146" in links[1]["uri"]
+    model.close()
+
+
+def test_detect_text_arxiv_links_sample_pdf():
+    import os
+    from pdfatlas.core.document import DocumentModel
+
+    sample_path = "sandbox.local/sample-files/2603.20268v1.pdf"
+    if not os.path.exists(sample_path):
+        return
+
+    model = DocumentModel(sample_path)
+    # Page 42 (0-indexed 41) has 6 plain text arXiv citations
+    p42_links = model.get_page_links(41)
+    auto_links = [lnk for lnk in p42_links if lnk.get("auto_detected")]
+    assert len(auto_links) == 6
+    aids = [lnk.get("arxiv_id") for lnk in auto_links]
+    assert "2102.03384" in aids
+    assert "math/9903146" in aids
+    assert "2307.06944" in aids
+    assert "1805.11574" in aids
+    assert "2502.03415" in aids
+    assert "math/9901113" in aids
+    model.close()
+
+
+

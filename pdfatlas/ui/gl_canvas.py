@@ -406,6 +406,7 @@ class GLCanvas(Gtk.GLArea):
 
                     internal_borders: list[tuple[float, float, float, float]] = []
                     uri_borders: list[tuple[float, float, float, float]] = []
+                    auto_borders: list[tuple[float, float, float, float]] = []
                     bt = 1.8
 
                     for link in links:
@@ -423,10 +424,13 @@ class GLCanvas(Gtk.GLArea):
                             and canvas.hovered_link[0] == i
                             and canvas.hovered_link[1] is link
                         )
+                        is_auto = bool(link.get("auto_detected", False))
                         is_uri = link.get("kind") == 2
 
                         if is_hovered:
-                            if is_uri:
+                            if is_auto:
+                                r.fill_rect(lx0, ly0, lw, lh, (0.85, 0.45, 0.12, 0.30))
+                            elif is_uri:
                                 r.fill_rect(lx0, ly0, lw, lh, (0.054, 0.228, 0.147, 0.30))
                             else:
                                 r.fill_rect(lx0, ly0, lw, lh, (0.06, 0.156, 0.27, 0.30))
@@ -437,7 +441,9 @@ class GLCanvas(Gtk.GLArea):
                             (lx0, ly0, bt, lh),
                             (lx0 + lw - bt, ly0, bt, lh),
                         ]
-                        if is_uri:
+                        if is_auto:
+                            auto_borders.extend(rect_quads)
+                        elif is_uri:
                             uri_borders.extend(rect_quads)
                         else:
                             internal_borders.extend(rect_quads)
@@ -446,6 +452,8 @@ class GLCanvas(Gtk.GLArea):
                         r.fill_rects(internal_borders, (0.17, 0.442, 0.765, 0.85))
                     if uri_borders:
                         r.fill_rects(uri_borders, (0.153, 0.646, 0.4165, 0.85))
+                    if auto_borders:
+                        r.fill_rects(auto_borders, (0.92, 0.52, 0.15, 0.85))
 
                 if canvas.debug_mode:
                     mc = (0.9, 0.0, 0.9, 0.9)
