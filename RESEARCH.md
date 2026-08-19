@@ -359,6 +359,23 @@ This document records durable technical findings, architectural decisions, mathe
   2. **`Adw.TabView` Tab Selection Timing Gotcha:** In `Adw.TabView`, appending the very first tab to an empty view automatically triggers the `notify::selected-page` signal *synchronously* inside `tab_view.append(doc_view)`. If document setup (`doc_view.set_document(...)`) is deferred until after `append()`, the tab selection listener runs against an uninitialized `PdfDocumentView`, clearing the active document pointer. Calling `doc_view.set_document(...)` **before** appending to `TabView` guarantees all callbacks and pointers receive valid state immediately.
   3. **Native Tab Window Detaching:** Connecting `tab_view.connect("create-window", ...)` returning `new_win.tab_view` leverages Libadwaita's native cross-window and desktop drag-and-drop tab detachment with automatic page migration.
 
+### 1.36. Automatic arXiv Text Link Detection & Three-Tier Link Styling
+- **Finding:** Academic PDFs frequently list bibliography references as plain text `arXiv:<id>`, `https://arxiv.org/abs/<id>`, or `doi:10.48550/arXiv.<id>` strings without generating native PDF Link Annotations (e.g. `page.get_links()` returns empty).
+- **Solution:**
+  1. **Text Scan & Geometry Search:** In [`pdfatlas/core/document.py`](pdfatlas/core/document.py), `detect_text_arxiv_links(page, existing_links)` runs a fast check (`"arxiv" in text.lower()`), executes `ARXIV_TEXT_RE` pattern matching, and calls `page.search_for(match_str)` to locate exact bounding rectangles (`fitz.Rect`) for un-annotated citations.
+  2. **Synthesized Links:** Adds virtual `fitz.LINK_URI` dictionaries tagged with `auto_detected: True` and `uri: f"https://arxiv.org/abs/{aid}"` to `DocumentModel._page_links`.
+  3. **Three-Tier Link Visual Palette in OpenGL:**
+     - **Internal Document Links (`LINK_GOTO`):** Blue border `(0.17, 0.442, 0.765, 0.85)` / hover fill `(0.06, 0.156, 0.27, 0.30)`
+     - **Explicit External Web Links (`LINK_URI`):** Emerald green border `(0.153, 0.646, 0.4165, 0.85)` / hover fill `(0.054, 0.228, 0.147, 0.30)`
+     - **Auto-Detected arXiv Links:** Amber / warm orange border `(0.92, 0.52, 0.15, 0.85)` / hover fill `(0.85, 0.45, 0.12, 0.30)`
+  4. **Hover & Navigation:** Hover banners display `arXiv:<id> [Auto-detected] (Click to open in PDF Atlas)`. Clicking dispatches directly to `open_document(PdfSource(arxiv:...))` to fetch or open the cited paper in a new tab.
+
+### 1.37. Unified SQLite Persistence for Crop BBoxes & arXiv Sourcemaps
+- **Finding:** Background margin auto-crop analysis and arXiv LaTeX AST diff sourcemap calculations previously re-analyzed on every document load, incurring repeated CPU rasterization and parsing time.
+- **Solution:** Persist all analysis artifacts in the per-document SQLite database (`~/.cache/pdfatlas/{sha256}_v2.db`):
+  1. `crop_bboxes` table stores raw page bounding boxes `(page, x0, y0, x1, y1)`. On document open, cached bboxes load in <1ms, bypassing the background rasterization queue.
+  2. `arxiv_diff_cache` table stores serialized word tokens, metadata, and `pdf_to_tex_map` sourcemap bijections, bypassing TeX source extraction and `SequenceMatcher` runs on subsequent opens.
+
 ---
 
 ## 2. Rejected Approaches
