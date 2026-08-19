@@ -32,10 +32,10 @@ Core guidelines and architectural conventions for writing clean, strongly typed,
 
 ---
 
-## 3. Automated Quality Verification
+## 3. Automated Quality Verification & Workflow
 
-Always verify code edits with static analysis and automated test suites:
+Verify code edits efficiently using the following workflow:
 
-- **Static Type Checking:** Verify 0 type errors with type checkers (e.g., Pyright / Mypy).
-- **Linter & Formatting:** Ensure clean passes with code linters (e.g., Ruff / Flake8).
-- **Unit Tests:** Run targeted and full test suites to prevent regression.
+- **Iterative Type Checking:** Keep static type checks clean (0 errors) as you make changes.
+- **Targeted Testing First:** Prefer running targeted unit tests covering the specific files or modules modified during iterative development to save time and reduce log overhead. Reserve full test suite runs for finalizing or touching cross-cutting systems.
+- **Batch Formatting / Linting:** Run formatters and linters once at the end of the task rather than after every individual file edit.
