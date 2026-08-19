@@ -202,4 +202,54 @@ def test_detect_text_arxiv_links_sample_pdf():
     model.close()
 
 
+def test_normalize_link_dict_string_page(tmp_path):
+    import fitz
+    from pdfatlas.core.document import normalize_link_dict
+
+    doc = fitz.open()
+    doc.new_page(width=600, height=800)
+    doc.new_page(width=600, height=800)
+    doc.new_page(width=600, height=800)
+
+    # String page '2' -> 0-indexed page 1
+    raw_link = {
+        "kind": 4,
+        "page": "2",
+        "view": "FitH,51",
+    }
+    norm = normalize_link_dict(doc, raw_link, len(doc))
+    assert norm["page"] == 1
+    assert norm["to"] == fitz.Point(0.0, 51.0)
+
+    # String page '99' out of bounds -> None
+    raw_link_oob = {
+        "kind": 4,
+        "page": "99",
+    }
+    norm_oob = normalize_link_dict(doc, raw_link_oob, len(doc))
+    assert norm_oob["page"] is None
+
+    doc.close()
+
+
+def test_link_preview_hover_string_page_safe():
+    from unittest.mock import MagicMock
+    from pdfatlas.ui.link_preview import LinkPreviewManager
+
+    mock_win = MagicMock()
+    mock_win.canvas = None
+    mock_win.doc_model = MagicMock()
+    mock_win.doc_model.page_count = 10
+    manager = LinkPreviewManager(mock_win)
+
+    # Link with int page
+    manager.on_link_hovered(0, {"kind": 4, "page": 1})
+    mock_win.link_preview_label.set_text.assert_called_with("Go to Page 2")
+
+    # Link with leftover or unnormalized string page (fallback safety)
+    manager.on_link_hovered(0, {"kind": 4, "page": "2"})
+    # Should not raise TypeError and should fallback gracefully
+
+
+
 

@@ -47,6 +47,62 @@ def detect_text_arxiv_links(page: fitz.Page, existing_links: list[dict]) -> list
     return detected
 
 
+def normalize_link_dict(doc: fitz.Document, link: dict, page_count: int) -> dict:
+    """
+    Normalize link dictionary fields:
+    - Ensure 'page' is an integer index (0 <= page < page_count) or None.
+    - If 'to' point is missing but 'view' specifies coordinates (e.g. FitH, FitV, XYZ), parse it into 'to'.
+    """
+    raw_page = link.get("page")
+    if isinstance(raw_page, int):
+        if not (0 <= raw_page < page_count):
+            link["page"] = None
+    elif isinstance(raw_page, str):
+        target_page: int | None = None
+        s = raw_page.strip()
+        if s.isdigit():
+            p = int(s) - 1
+            if 0 <= p < page_count:
+                target_page = p
+        else:
+            try:
+                resolved = doc.resolve_link(link)
+                if (
+                    resolved
+                    and isinstance(resolved, (tuple, list))
+                    and len(resolved) > 0
+                    and isinstance(resolved[0], int)
+                    and 0 <= resolved[0] < page_count
+                ):
+                    target_page = resolved[0]
+            except Exception:
+                pass
+        link["page"] = target_page
+
+    if link.get("to") is None and link.get("view"):
+        view = link.get("view")
+        if isinstance(view, str):
+            parts = [p.strip() for p in view.split(",")]
+            if parts[0] == "FitH" and len(parts) > 1:
+                try:
+                    link["to"] = fitz.Point(0.0, float(parts[1]))
+                except ValueError:
+                    pass
+            elif parts[0] == "FitV" and len(parts) > 1:
+                try:
+                    link["to"] = fitz.Point(float(parts[1]), 0.0)
+                except ValueError:
+                    pass
+            elif parts[0] == "XYZ" and len(parts) >= 3:
+                try:
+                    x = float(parts[1]) if parts[1] != "null" else 0.0
+                    y = float(parts[2]) if parts[2] != "null" else 0.0
+                    link["to"] = fitz.Point(x, y)
+                except ValueError:
+                    pass
+    return link
+
+
 class DocumentModel:
     """
     A read-only model wrapper around fitz.Document.
@@ -62,9 +118,10 @@ class DocumentModel:
         for i in range(self._page_count):
             try:
                 page = self.doc[i]
-                links = page.get_links()
-                auto_links = detect_text_arxiv_links(page, links)
-                self._page_links.append(links + auto_links)
+                raw_links = page.get_links()
+                normalized_links = [normalize_link_dict(self.doc, lnk, self._page_count) for lnk in raw_links]
+                auto_links = detect_text_arxiv_links(page, normalized_links)
+                self._page_links.append(normalized_links + auto_links)
             except (RuntimeError, ValueError):
                 self._page_links.append([])
 

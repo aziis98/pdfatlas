@@ -45,7 +45,7 @@ class LinkPreviewManager:
             link_uri = link.get("uri", "")
             target_page = link.get("page")
 
-            if target_page is not None:
+            if isinstance(target_page, int) and 0 <= target_page:
                 lbl = f"Go to Page {target_page + 1}"
             elif link_uri:
                 from ..core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
@@ -83,7 +83,7 @@ class LinkPreviewManager:
         """
         Calculates viewport positioning and requests exact 1:1 hardware pixel snippet rendering.
         """
-        if not link or not self.win.doc_model:
+        if not link or not self.win.doc_model or not self.win.canvas:
             self.portal_card.set_visible(False)
             return False
 
