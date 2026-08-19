@@ -97,7 +97,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.render_mode = render_mode
         self.render_workers = render_workers
         self.use_shm = use_shm
-        self._deferred_state_query = None
+        self._deferred_state_query: str | None = None
 
         # 2. Core models & persistent configuration
         self.doc_model: DocumentModel | None = None
@@ -1293,17 +1293,33 @@ class MainWindow(Adw.ApplicationWindow):
         print(f"[MainWindow] Link #{link_index} not found (total links: {current_count})", flush=True)
         return False
 
-    def _run_scroll_benchmark(self, config_str: str) -> bool:
+    def _run_scroll_benchmark(self, config: dict[str, Any] | str) -> bool:
         try:
-            parts = [p.strip() for p in config_str.split(",") if p.strip()]
-            y_start = float(parts[0]) if len(parts) > 0 else 0.0
-            y_end = float(parts[1]) if len(parts) > 1 else (self.vadjustment.get_upper() if self.vadjustment else 2000.0)
-            interval_ms = int(parts[2]) if len(parts) > 2 else 16
-            steps = int(parts[3]) if len(parts) > 3 else 60
-            repeat_count = int(parts[4]) if len(parts) > 4 else 1
-            auto_quit = bool(int(parts[5])) if len(parts) > 5 else False
+            if isinstance(config, dict):
+                y_start = float(config.get("y_start", 0.0))
+                y_end = float(
+                    config.get(
+                        "y_end", self.vadjustment.get_upper() if self.vadjustment else 2000.0
+                    )
+                )
+                interval_ms = int(config.get("interval_ms", 16))
+                steps = int(config.get("steps", 60))
+                repeat_count = int(config.get("repeat_count", 1))
+                auto_quit = bool(config.get("auto_quit", False))
+            else:
+                parts = [p.strip() for p in config.split(",") if p.strip()]
+                y_start = float(parts[0]) if len(parts) > 0 else 0.0
+                y_end = (
+                    float(parts[1])
+                    if len(parts) > 1
+                    else (self.vadjustment.get_upper() if self.vadjustment else 2000.0)
+                )
+                interval_ms = int(parts[2]) if len(parts) > 2 else 16
+                steps = int(parts[3]) if len(parts) > 3 else 60
+                repeat_count = int(parts[4]) if len(parts) > 4 else 1
+                auto_quit = bool(int(parts[5])) if len(parts) > 5 else False
         except Exception as e:
-            print(f"[ScrollBenchmark] Invalid config format '{config_str}': {e}", flush=True)
+            print(f"[ScrollBenchmark] Invalid config format '{config}': {e}", flush=True)
             return False
 
         print(

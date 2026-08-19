@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import os
 from pathlib import Path
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -15,6 +17,9 @@ from ..core.index import get_db_for_pdf, load_doc_state
 from ..core.pdf_source import PdfSource
 from ..core.state import CliState
 
+if TYPE_CHECKING:
+    from ..ui.window import MainWindow
+
 
 class DocumentLoader:
     """
@@ -23,7 +28,7 @@ class DocumentLoader:
     deferred CLI state restoration, and state persistence.
     """
 
-    def __init__(self, win: Any):
+    def __init__(self, win: MainWindow):
         self.win = win
         self._state_save_timer_id: int | None = None
 
@@ -494,7 +499,7 @@ class DocumentLoader:
             self.win.db_service.load_highlights(self.win.annotations_controller.on_highlights_loaded)
             self.win.db_service.load_notes(self.win.annotations_controller.on_notes_loaded)
 
-        if getattr(self.win, "_deferred_state_query", None):
+        if self.win._deferred_state_query:
             query = self.win._deferred_state_query
             self.win._deferred_state_query = None
             self.win.entry.set_text(query)

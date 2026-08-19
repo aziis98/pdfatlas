@@ -1,5 +1,7 @@
-from typing import Any
+from __future__ import annotations
+
 import re
+from typing import TYPE_CHECKING
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -10,6 +12,9 @@ from gi.repository import Adw, Gdk, Gtk, Pango
 
 from ..ui.cairo_utils import hsl_to_hex
 from ..ui.gui import box, button, label, spacer
+
+if TYPE_CHECKING:
+    from ..ui.window import MainWindow
 
 #: Max characters of a simplified note preview before GTK ellipsizes it.
 MAX_NOTE_PREVIEW_CHARS = 100
@@ -66,7 +71,7 @@ class AnnotationsController:
     and annotations & notes overview popover list.
     """
 
-    def __init__(self, win: Any):
+    def __init__(self, win: MainWindow):
         self.win = win
         self.active_highlight_color: str = "#FFF49C"
 
@@ -270,7 +275,7 @@ class AnnotationsController:
             self.win.canvas.queue_draw()
         self.update_annotations_button()
 
-        if getattr(self.win, "_deferred_state_query", None):
+        if self.win._deferred_state_query:
             query = self.win._deferred_state_query
             self.win._deferred_state_query = None
             self.win.entry.set_text(query)

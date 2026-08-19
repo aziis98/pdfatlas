@@ -1,4 +1,6 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -6,6 +8,9 @@ gi.require_version("Pango", "1.0")
 from gi.repository import GLib, Gtk, Pango
 
 from ..gui import box, button, label
+
+if TYPE_CHECKING:
+    from ..window import MainWindow
 
 
 class FloatingControls:
@@ -16,7 +21,7 @@ class FloatingControls:
     - Floating debug cache & layout info overlays.
     """
 
-    def __init__(self, win: Any):
+    def __init__(self, win: MainWindow):
         self.win = win
         self.zoom_label: Gtk.Label | None = None
         self.zoom_floating_box: Gtk.Box | None = None

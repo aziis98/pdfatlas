@@ -1,9 +1,14 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw
+
+if TYPE_CHECKING:
+    from ..ui.window import MainWindow
 
 
 class TabController:
@@ -12,7 +17,7 @@ class TabController:
     and cross-window tab detachment / creation.
     """
 
-    def __init__(self, win: Any):
+    def __init__(self, win: MainWindow):
         self.win = win
         self.tab_view: Adw.TabView = Adw.TabView()
         self.tab_bar: Adw.TabBar = Adw.TabBar(view=self.tab_view)
