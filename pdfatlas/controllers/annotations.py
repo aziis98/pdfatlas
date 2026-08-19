@@ -223,10 +223,13 @@ class AnnotationsController:
 
             if kind == "highlight":
                 color_dot = box(css_class="annotation-color-dot")
+                color_dot.set_valign(Gtk.Align.CENTER)
+                color_dot.set_halign(Gtk.Align.CENTER)
+                color_dot.set_size_request(10, 10)
                 hex_col = item.get("color", "#FFF49C")
                 provider = Gtk.CssProvider()
                 provider.load_from_data(
-                    f".annotation-color-dot {{ min-width: 10px; min-height: 10px; background-color: {hex_col}; border-radius: 50%; }}".encode(
+                    f".annotation-color-dot {{ min-width: 10px; min-height: 10px; background-color: {hex_col}; border-radius: 9999px; }}".encode(
                         "utf-8"
                     )
                 )
@@ -348,14 +351,18 @@ class AnnotationsController:
             hex_color = hsl_to_hex(*hsl)
             color_btn = Gtk.Button()
             color_btn.set_size_request(24, 24)
+            color_btn.set_valign(Gtk.Align.CENTER)
+            color_btn.set_halign(Gtk.Align.CENTER)
             color_btn.set_tooltip_text(hex_color)
 
-            provider = Gtk.CssProvider()
-            provider.load_from_data(
-                f"button {{ background-color: {hex_color}; background-image: none; border-radius: 4px; border: 1px solid rgba(0,0,0,0.2); min-width: 24px; min-height: 24px; padding: 0; margin: 0; }} button:hover {{ outline: 2px solid #ffffff; outline-offset: -2px; }}".encode(
-                    "utf-8"
-                )
+            css = (
+                f"button {{ background-color: {hex_color}; background-image: none; "
+                f"border-radius: 9999px; border: 1px solid rgba(0,0,0,0.2); "
+                f"min-width: 24px; min-height: 24px; padding: 0; margin: 0; }} "
+                f"button:hover {{ outline: 2px solid #ffffff; outline-offset: -2px; }}"
             )
+            provider = Gtk.CssProvider()
+            provider.load_from_data(css.encode("utf-8"))
             color_btn.get_style_context().add_provider(
                 provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
@@ -428,12 +435,16 @@ class AnnotationsController:
 
     def update_highlight_split_button_label(self):
         circle_swatch = box(css_class="highlight-circle-swatch")
+        circle_swatch.set_valign(Gtk.Align.CENTER)
+        circle_swatch.set_halign(Gtk.Align.CENTER)
+        circle_swatch.set_size_request(18, 18)
         provider = Gtk.CssProvider()
-        provider.load_from_data(
-            f".highlight-circle-swatch {{ min-width: 18px; min-height: 18px; background-color: {self.active_highlight_color}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); }}".encode(
-                "utf-8"
-            )
+        css = (
+            f".highlight-circle-swatch {{ min-width: 18px; min-height: 18px; "
+            f"background-color: {self.active_highlight_color}; border-radius: 9999px; "
+            f"border: 1px solid rgba(0,0,0,0.3); }}"
         )
+        provider.load_from_data(css.encode("utf-8"))
         circle_swatch.get_style_context().add_provider(
             provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )

@@ -443,13 +443,11 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_end(right_box)
 
         # Tag icon button for annotations (placed on the left of page_input)
-        self.annotations_btn = Gtk.MenuButton()
         self.annotations_btn.set_icon_name("tag-symbolic")
         self.annotations_btn.set_tooltip_text("Annotations & Highlights")
         self.annotations_btn.set_visible(False)
+        self.annotations_btn.set_popover(self.annotations_controller.annotations_popover)
         right_box.append(self.annotations_btn)
-
-        self._build_annotations_popover()
 
         self.page_input = Gtk.Entry()
         self.page_input.set_width_chars(4)
