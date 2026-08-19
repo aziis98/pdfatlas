@@ -202,3 +202,57 @@ def test_multi_tab_night_mode_synchronization(tmp_path):
 
     win.close()
 
+
+def test_multi_window_night_mode_synchronization(tmp_path):
+    import fitz
+    from pdfatlas.core.pdf_source import PdfSource
+
+    pdf_path = tmp_path / "test_multiwin_night.pdf"
+    doc = fitz.open()
+    doc.new_page(width=500, height=800)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    app = Adw.Application(application_id="com.example.testmultiwinnight")
+    app.register(None)
+
+    win1 = MainWindow(app)
+    win1.settings.color_scheme = "light"
+    win1._apply_color_scheme()
+
+    win2 = MainWindow(app)
+
+    # Open document in win1 and win2
+    source1 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc Win1")
+    win1.open_document(source1)
+    doc_view1 = win1.get_active_doc_view()
+
+    source2 = PdfSource(source_type="file", uri=str(pdf_path), display_name="Doc Win2")
+    win2.open_document(source2)
+    doc_view2 = win2.get_active_doc_view()
+
+    assert win1.night_mode is False
+    assert win2.night_mode is False
+    assert doc_view1.canvas.night_mode is False
+    assert doc_view2.canvas.night_mode is False
+
+    # Toggle night mode in Window 1 -> Should synchronize Window 2 as well
+    win1.toggle_night_mode()
+    assert win1.night_mode is True
+    assert win2.night_mode is True
+    assert win2.settings.color_scheme == "dark"
+    assert doc_view1.canvas.night_mode is True
+    assert doc_view2.canvas.night_mode is True
+
+    # Toggle back in Window 2 -> Should synchronize Window 1 as well
+    win2.toggle_night_mode()
+    assert win1.night_mode is False
+    assert win2.night_mode is False
+    assert win1.settings.color_scheme == "light"
+    assert doc_view1.canvas.night_mode is False
+    assert doc_view2.canvas.night_mode is False
+
+    win1.close()
+    win2.close()
+
+

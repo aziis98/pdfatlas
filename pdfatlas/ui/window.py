@@ -188,6 +188,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.shortcuts_controller = ShortcutsController(self)
         self.connect("realize", self._on_window_realized)
 
+        # Apply saved color scheme and synchronize night mode on launch
+        self._apply_color_scheme()
+
     def _setup_actions(self):
         """Register application and window Gio actions."""
         # Night mode stateful toggle
@@ -537,11 +540,23 @@ class MainWindow(Adw.ApplicationWindow):
             use_shm=self.use_shm,
         )
         new_win.stack.set_visible_child_name("document-view")
+        new_win.settings.color_scheme = self.settings.color_scheme
+        new_win.settings.night_mode_invert = self.settings.night_mode_invert
+        new_win.settings.night_mode_hue_rotate = self.settings.night_mode_hue_rotate
+        new_win._apply_color_scheme()
         new_win.present()
         return new_win.tab_view
 
     def _on_page_attached(self, view: Adw.TabView, page: Adw.TabPage, position: int) -> None:
         self.stack.set_visible_child_name("document-view")
+        child = page.get_child()
+        canvas = getattr(child, "canvas", None)
+        if canvas is not None:
+            canvas.set_night_mode(
+                self.is_effective_dark(),
+                invert_amount=self.settings.night_mode_invert,
+                hue_rotate=self.settings.night_mode_hue_rotate,
+            )
         self._on_selected_tab_changed(view, None)
 
     def _on_page_detached(self, view: Adw.TabView, page: Adw.TabPage, position: int) -> None:
@@ -2538,7 +2553,14 @@ class MainWindow(Adw.ApplicationWindow):
         else:  # "system"
             style_mgr.set_color_scheme(Adw.ColorScheme.DEFAULT)
 
-        self._sync_effective_theme()
+        # Broadcast color scheme and sync night mode across all open windows
+        windows = self.app.get_windows() if self.app else [self]
+        for win in windows:
+            if isinstance(win, MainWindow):
+                win.settings.color_scheme = scheme
+                win.settings.night_mode_invert = self.settings.night_mode_invert
+                win.settings.night_mode_hue_rotate = self.settings.night_mode_hue_rotate
+                win._sync_effective_theme()
 
     def _sync_effective_theme(self):
         self.night_mode = self.is_effective_dark()
@@ -2563,9 +2585,7 @@ class MainWindow(Adw.ApplicationWindow):
             )
 
     def _on_style_manager_dark_changed(self, style_mgr, pspec):
-        scheme = self.settings.color_scheme
-        if scheme == "system":
-            self._sync_effective_theme()
+        self._sync_effective_theme()
 
     def toggle_night_mode(self):
         current_dark = self.is_effective_dark()
