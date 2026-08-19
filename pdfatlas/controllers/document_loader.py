@@ -533,8 +533,4 @@ class DocumentLoader:
             zoom = self.win.zoom
             scroll_y = self.win.vadjustment.get_value() if self.win.vadjustment else 0.0
             scroll_x = self.win.hadjustment.get_value() if self.win.hadjustment else 0.0
-            self.win.db_service.save_doc_state(
-                zoom=zoom,
-                scroll_x=scroll_x,
-                scroll_y=scroll_y,
-            )
+            self.win.db_service.save_state(zoom, scroll_y, scroll_x)
