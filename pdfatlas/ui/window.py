@@ -264,51 +264,51 @@ class MainWindow(Adw.ApplicationWindow):
         self.floating_controls.zoom_label = val
 
     @property
-    def zoom_floating_box(self) -> Gtk.Box | None:
+    def zoom_floating_box(self) -> Gtk.Box:
         return self.floating_controls.zoom_floating_box
 
     @zoom_floating_box.setter
-    def zoom_floating_box(self, val: Gtk.Box | None):
+    def zoom_floating_box(self, val: Gtk.Box):
         self.floating_controls.zoom_floating_box = val
 
     @property
-    def link_preview_label(self) -> Gtk.Label | None:
+    def link_preview_label(self) -> Gtk.Label:
         return self.floating_controls.link_preview_label
 
     @link_preview_label.setter
-    def link_preview_label(self, val: Gtk.Label | None):
+    def link_preview_label(self, val: Gtk.Label):
         self.floating_controls.link_preview_label = val
 
     @property
-    def link_preview_card_box(self) -> Gtk.Box | None:
+    def link_preview_card_box(self) -> Gtk.Box:
         return self.floating_controls.link_preview_card_box
 
     @link_preview_card_box.setter
-    def link_preview_card_box(self, val: Gtk.Box | None):
+    def link_preview_card_box(self, val: Gtk.Box):
         self.floating_controls.link_preview_card_box = val
 
     @property
-    def progress_label(self) -> Gtk.Label | None:
+    def progress_label(self) -> Gtk.Label:
         return self.floating_controls.progress_label
 
     @progress_label.setter
-    def progress_label(self, val: Gtk.Label | None):
+    def progress_label(self, val: Gtk.Label):
         self.floating_controls.progress_label = val
 
     @property
-    def progress_card_box(self) -> Gtk.Box | None:
+    def progress_card_box(self) -> Gtk.Box:
         return self.floating_controls.progress_card_box
 
     @progress_card_box.setter
-    def progress_card_box(self, val: Gtk.Box | None):
+    def progress_card_box(self, val: Gtk.Box):
         self.floating_controls.progress_card_box = val
 
     @property
-    def link_preview_box(self) -> Gtk.Box | None:
+    def link_preview_box(self) -> Gtk.Box:
         return self.floating_controls.link_preview_box
 
     @link_preview_box.setter
-    def link_preview_box(self, val: Gtk.Box | None):
+    def link_preview_box(self, val: Gtk.Box):
         self.floating_controls.link_preview_box = val
 
     @property
@@ -550,10 +550,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.on_note_create = self._on_canvas_note_create
         self.canvas.notes_layer = self.notes_layer
 
-        if self.zoom_floating_box:
-            self.canvas.add_overlay(self.zoom_floating_box)
-        if self.link_preview_box:
-            self.canvas.add_overlay(self.link_preview_box)
+        self.canvas.add_overlay(self.zoom_floating_box)
+        self.canvas.add_overlay(self.link_preview_box)
         self.canvas.add_overlay(self.link_preview_manager.portal_card)
         if self.debug_mode:
             self._build_debug_cache_box()
@@ -1240,43 +1238,31 @@ class MainWindow(Adw.ApplicationWindow):
         }
 
         max_fraction = max(t["fraction"] for t in self._active_progress_tasks.values())
-        if self.progress_bar:
-            self.progress_bar.set_fraction(max_fraction)
-            self.progress_bar.set_visible(True)
+        self.progress_bar.set_fraction(max_fraction)
+        self.progress_bar.set_visible(True)
 
         latest_task = list(self._active_progress_tasks.values())[-1]
         progress_text = latest_task["formatted"]
 
-        if self.progress_label:
-            self.progress_label.set_label(progress_text)
-        if self.progress_card_box:
-            self.progress_card_box.set_visible(True)
-        if self.link_preview_box:
-            self.link_preview_box.set_visible(True)
+        self.progress_label.set_label(progress_text)
+        self.progress_card_box.set_visible(True)
+        self.link_preview_box.set_visible(True)
 
     def _hide_progress(self, task_id: str):
         if task_id in self._active_progress_tasks:
             del self._active_progress_tasks[task_id]
 
         if not self._active_progress_tasks:
-            if self.progress_bar:
-                self.progress_bar.set_visible(False)
-            if self.progress_card_box:
-                self.progress_card_box.set_visible(False)
-            if (
-                self.link_preview_box
-                and self.link_preview_card_box
-                and not self.link_preview_card_box.get_visible()
-            ):
+            self.progress_bar.set_visible(False)
+            self.progress_card_box.set_visible(False)
+            if not self.link_preview_card_box.get_visible():
                 self.link_preview_box.set_visible(False)
         else:
             max_fraction = max(t["fraction"] for t in self._active_progress_tasks.values())
-            if self.progress_bar:
-                self.progress_bar.set_fraction(max_fraction)
+            self.progress_bar.set_fraction(max_fraction)
             latest_task = list(self._active_progress_tasks.values())[-1]
             progress_text = latest_task["formatted"]
-            if self.progress_label:
-                self.progress_label.set_label(progress_text)
+            self.progress_label.set_label(progress_text)
 
     # --- Navigation & Zoom Operations ---
 

@@ -23,20 +23,10 @@ class FloatingControls:
 
     def __init__(self, win: MainWindow):
         self.win = win
-        self.zoom_label: Gtk.Label | None = None
-        self.zoom_floating_box: Gtk.Box | None = None
-        self.link_preview_label: Gtk.Label | None = None
-        self.link_preview_card_box: Gtk.Box | None = None
-        self.progress_label: Gtk.Label | None = None
-        self.progress_card_box: Gtk.Box | None = None
-        self.link_preview_box: Gtk.Box | None = None
-        self.debug_info_label: Gtk.Label | None = None
-        self.debug_arxiv_label: Gtk.Label | None = None
-        self.debug_cache_label: Gtk.Label | None = None
 
-    def build_floating_zoom_controls(self) -> Gtk.Box:
-        self.zoom_label = label(text="100%", css_class="zoom-floating-label")
-        self.zoom_floating_box = box(
+        # 1. Zoom controls
+        self.zoom_label: Gtk.Label = label(text="100%", css_class="zoom-floating-label")
+        self.zoom_floating_box: Gtk.Box = box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=4,
             css_class="zoom-floating-box",
@@ -60,12 +50,12 @@ class FloatingControls:
                 ),
             ],
         )
-        return self.zoom_floating_box
 
-    def build_floating_link_preview(self) -> Gtk.Box:
-        self.link_preview_label = label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=65)
-
-        self.link_preview_card_box = box(
+        # 2. Link & Progress preview controls
+        self.link_preview_label: Gtk.Label = label(
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=65
+        )
+        self.link_preview_card_box: Gtk.Box = box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=6,
             css_class="link-preview-box",
@@ -74,8 +64,10 @@ class FloatingControls:
         )
         self.link_preview_card_box.set_visible(False)
 
-        self.progress_label = label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=65)
-        self.progress_card_box = box(
+        self.progress_label: Gtk.Label = label(
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=65
+        )
+        self.progress_card_box: Gtk.Box = box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=6,
             css_class="link-preview-box",
@@ -84,7 +76,7 @@ class FloatingControls:
         )
         self.progress_card_box.set_visible(False)
 
-        self.link_preview_box = box(
+        self.link_preview_box: Gtk.Box = box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=6,
             halign=Gtk.Align.START,
@@ -93,9 +85,11 @@ class FloatingControls:
             margin_bottom=8,
             children=[self.progress_card_box, self.link_preview_card_box],
         )
+        self.link_preview_box.set_visible(False)
 
+        # 3. Debug overlays (if enabled)
         if self.win.debug_mode:
-            self.debug_info_label = label(
+            self.debug_info_label: Gtk.Label | None = label(
                 xalign=0.0,
                 halign=Gtk.Align.START,
                 justify=Gtk.Justification.LEFT,
@@ -104,7 +98,7 @@ class FloatingControls:
             self.debug_info_label.set_visible(False)
             self.link_preview_box.append(self.debug_info_label)
 
-            self.debug_arxiv_label = label(
+            self.debug_arxiv_label: Gtk.Label | None = label(
                 xalign=0.0,
                 halign=Gtk.Align.START,
                 justify=Gtk.Justification.LEFT,
@@ -118,7 +112,12 @@ class FloatingControls:
             self.debug_info_label = None
             self.debug_arxiv_label = None
 
-        self.link_preview_box.set_visible(False)
+        self.debug_cache_label: Gtk.Label | None = None
+
+    def build_floating_zoom_controls(self) -> Gtk.Box:
+        return self.zoom_floating_box
+
+    def build_floating_link_preview(self) -> Gtk.Box:
         return self.link_preview_box
 
     def build_debug_cache_box(self) -> Gtk.Label:
@@ -128,8 +127,7 @@ class FloatingControls:
         self.debug_cache_label.add_css_class("debug-info-label")
         self.debug_cache_label.set_visible(True)
 
-        if self.link_preview_box:
-            self.link_preview_box.append(self.debug_cache_label)
+        self.link_preview_box.append(self.debug_cache_label)
 
         self.refresh_debug_cache()
         GLib.timeout_add(1000, self.refresh_debug_cache)
@@ -181,13 +179,19 @@ class FloatingControls:
                 if pt is not None:
                     char_idx = self.win.canvas.text_selection.hit_test(page_index, pt[0], pt[1])
                     if char_idx is not None:
-                        w_start = self.win.canvas.text_selection.get_word_start_char_idx(page_index, char_idx)
+                        w_start = self.win.canvas.text_selection.get_word_start_char_idx(
+                            page_index, char_idx
+                        )
                         pdf_frag, tex_frag = self.win.arxiv_mapper.get_cursor_fragment(
                             page_index, w_start, window_words=50
                         )
                         pi = self.win.canvas.text_selection.get_page_index(page_index)
-                        curr_c_rect = pi.chars[char_idx].bbox if 0 <= char_idx < len(pi.chars) else None
-                        curr_w_rects = self.win.canvas.text_selection.get_word_rects_for_char(page_index, char_idx)
+                        curr_c_rect = (
+                            pi.chars[char_idx].bbox if 0 <= char_idx < len(pi.chars) else None
+                        )
+                        curr_w_rects = self.win.canvas.text_selection.get_word_rects_for_char(
+                            page_index, char_idx
+                        )
                         fwd_c_rects = self.win.canvas.text_selection.get_forward_char_rects(
                             page_index, w_start, word_count=50
                         )
@@ -223,8 +227,7 @@ class FloatingControls:
                     if self.win.canvas.debug_arxiv_data is not None:
                         self.win.canvas.debug_arxiv_data = None
                         self.win.canvas.queue_draw_overlays("debug-arxiv-clear")
-            if self.link_preview_box:
-                self.link_preview_box.set_visible(True)
+            self.link_preview_box.set_visible(True)
         else:
             self.debug_info_label.set_text("")
             self.debug_info_label.set_visible(False)
@@ -234,5 +237,5 @@ class FloatingControls:
             if self.win.canvas and self.win.canvas.debug_arxiv_data is not None:
                 self.win.canvas.debug_arxiv_data = None
                 self.win.canvas.queue_draw_overlays("debug-arxiv-clear")
-            if self.link_preview_card_box and not self.link_preview_card_box.get_visible() and self.link_preview_box:
+            if not self.link_preview_card_box.get_visible():
                 self.link_preview_box.set_visible(False)

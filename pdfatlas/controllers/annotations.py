@@ -33,35 +33,40 @@ def simplify_md_preview(markdown: str) -> str:
         ln = re.sub(r"^#{1,6}\s*", "", ln).strip()
         if ln:
             lines.append(ln)
-    text = re.sub(r"(\$+|\*+|_+)", "", " ".join(lines))
-    text = re.sub(r"\s{2,}", " ", text).strip()[:MAX_NOTE_PREVIEW_CHARS]
-    return text or "(Note)"
+    text = " ".join(lines)
+    text = re.sub(r"\$\$([^$]+)\$\$", r"\1", text)
+    text = re.sub(r"\$([^$]+)\$", r"\1", text)
+    text = re.sub(r"(\*\*|__)(.*?)\1", r"\2", text)
+    text = re.sub(r"(\*|_)(.*?)\1", r"\2", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > MAX_NOTE_PREVIEW_CHARS:
+        text = text[: MAX_NOTE_PREVIEW_CHARS - 1] + "…"
+    return text
 
 
-# Fluorescent highlighter pen colors sorted strictly by hue with increased lightness (74%-82%)
 PALETTE_COLS = 6
 PALETTE_COLORS = [
-    # Red-Orange to Yellow (H: 18° to 54°)
-    (18, 100, 80),   # Peach
-    (28, 100, 76),   # Orange
-    (42, 100, 74),   # Golden Amber
-    (54, 100, 75),   # Fluorescent Yellow
-    (82, 100, 74),   # Lemon Lime
-    (115, 100, 76),  # Neon Green
-    # Green to Cyan-Blue (H: 138° to 222°)
-    (138, 90, 78),   # Sea Green
-    (152, 95, 78),   # Mint Green
-    (172, 95, 78),   # Turquoise
-    (188, 100, 78),  # Electric Cyan
-    (208, 100, 80),  # Sky Blue
-    (222, 100, 82),  # Ice Blue
-    # Violet to Red-Pink (H: 245° to 350°)
-    (245, 95, 82),   # Lavender
-    (265, 95, 80),   # Bright Violet
-    (282, 90, 80),   # Bright Plum
-    (325, 100, 78),  # Hot Pink
-    (338, 100, 80),  # Neon Magenta
-    (350, 100, 78),  # Bright Coral
+    # Row 1: Warm
+    (54, 1.0, 0.80),
+    (43, 1.0, 0.77),
+    (27, 1.0, 0.81),
+    (14, 1.0, 0.83),
+    (2, 1.0, 0.83),
+    (330, 0.85, 0.84),
+    # Row 2: Cool
+    (291, 0.65, 0.83),
+    (262, 0.65, 0.85),
+    (210, 0.90, 0.83),
+    (187, 0.75, 0.78),
+    (160, 0.65, 0.78),
+    (95, 0.65, 0.80),
+    # Row 3: Soft / Neutral
+    (48, 0.70, 0.88),
+    (30, 0.60, 0.88),
+    (15, 0.60, 0.88),
+    (200, 0.40, 0.88),
+    (150, 0.35, 0.88),
+    (0, 0.0, 0.80),
 ]
 
 
@@ -75,24 +80,55 @@ class AnnotationsController:
         self.win = win
         self.active_highlight_color: str = "#FFF49C"
 
-        # Overview popover widgets
-        self.annotations_btn: Gtk.MenuButton | None = None
-        self.annotations_popover: Gtk.Popover | None = None
-        self.annotations_count_label: Gtk.Label | None = None
-        self.annotations_list: Gtk.Box | None = None
+        # 1. Overview popover widgets
+        self.annotations_btn: Gtk.MenuButton = Gtk.MenuButton()
+        self.annotations_popover: Gtk.Popover = Gtk.Popover()
+        self.annotations_count_label: Gtk.Label = label(text="Annotations (0)", css_class="bold")
+        self.annotations_list: Gtk.Box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._init_annotations_popover()
 
-        # Selection toolbar widgets
-        self.selection_toolbar: Gtk.Box | None = None
-        self.btn_copy_text: Gtk.Button | None = None
-        self.btn_copy_tex: Gtk.Button | None = None
-        self.btn_highlight: Adw.SplitButton | None = None
-        self.btn_remove_hl: Gtk.Button | None = None
-        self.info_menu_btn: Gtk.MenuButton | None = None
+        # 2. Selection toolbar widgets
+        self.btn_copy_text: Gtk.Button = button(
+            label="Copy",
+            tooltip="Copy selected PDF text [Ctrl+Shift+C]",
+            on_clicked=lambda b: self.copy_pdf_text_to_clipboard(),
+        )
+        self.btn_copy_tex: Gtk.Button = button(
+            label="Copy Source TeX",
+            tooltip="Copy source TeX for selection [Ctrl+C]",
+            on_clicked=lambda b: self.copy_tex_to_clipboard(),
+        )
+        self.btn_highlight: Adw.SplitButton = Adw.SplitButton()
+        self.btn_remove_hl: Gtk.Button = button(
+            label="Remove",
+            tooltip="Remove the selected highlight",
+            on_clicked=lambda b: self.remove_matching_highlights(),
+        )
+        self.info_menu_btn: Gtk.MenuButton = Gtk.MenuButton()
+        self.selection_toolbar: Gtk.Box = box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            css_class="selection-toolbar",
+            valign=Gtk.Align.END,
+            halign=Gtk.Align.FILL,
+            children=[
+                box(
+                    orientation=Gtk.Orientation.HORIZONTAL,
+                    spacing=6,
+                    children=[
+                        self.btn_highlight,
+                        self.btn_remove_hl,
+                        self.btn_copy_text,
+                        self.btn_copy_tex,
+                    ],
+                ),
+                spacer(),
+            ],
+        )
+        self._init_selection_toolbar()
 
-    def build_annotations_popover(self) -> Gtk.Popover:
-        self.annotations_popover = Gtk.Popover()
-        if self.annotations_btn:
-            self.annotations_btn.set_popover(self.annotations_popover)
+    def _init_annotations_popover(self):
+        self.annotations_btn.set_popover(self.annotations_popover)
 
         popover_box = box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -112,7 +148,6 @@ class AnnotationsController:
             margin_top=2,
             margin_bottom=2,
         )
-        self.annotations_count_label = label(text="Annotations (0)", css_class="bold")
         self.annotations_count_label.set_hexpand(True)
         self.annotations_count_label.set_halign(Gtk.Align.START)
         title_box.append(self.annotations_count_label)
@@ -126,13 +161,14 @@ class AnnotationsController:
         scrolled.set_vexpand(True)
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
-        self.annotations_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.annotations_list.add_css_class("annotation-list")
         scrolled.set_child(self.annotations_list)
         popover_box.append(scrolled)
 
         self.annotations_popover.set_child(popover_box)
         self.annotations_popover.connect("notify::visible", self._on_annotations_popover_visibility)
+
+    def build_annotations_popover(self) -> Gtk.Popover:
         return self.annotations_popover
 
     def _on_annotations_popover_visibility(self, popover, pspec):
@@ -141,13 +177,8 @@ class AnnotationsController:
 
     def update_annotations_button(self):
         count = len(self.win.highlights) + len(self.win.notes)
-        if self.annotations_btn:
-            self.annotations_btn.set_visible(count > 0)
-        if self.annotations_count_label:
-            self.annotations_count_label.set_text(f"Annotations ({count})")
-
-        if not self.annotations_list:
-            return
+        self.annotations_btn.set_visible(count > 0)
+        self.annotations_count_label.set_text(f"Annotations ({count})")
 
         child = self.annotations_list.get_first_child()
         while child is not None:
@@ -180,52 +211,54 @@ class AnnotationsController:
                 self.annotations_list.append(hdr_box)
                 last_page = page_idx
 
-            item_box = box(
-                orientation=Gtk.Orientation.HORIZONTAL,
-                spacing=8,
-                margin_start=4,
-                margin_end=4,
-                margin_top=2,
-                margin_bottom=2,
-            )
-
-            if kind == "highlight":
-                color_swatch = Gtk.Box()
-                color_swatch.set_size_request(14, 14)
-                color_swatch.set_valign(Gtk.Align.CENTER)
-                color_swatch.add_css_class("highlight-circle-swatch")
-                bg_color = item.get("color", "#FFEE55")
-                provider = Gtk.CssProvider()
-                provider.load_from_string(
-                    f".highlight-circle-swatch {{ background-color: {bg_color}; border-radius: 9999px; min-width: 14px; min-height: 14px; }}"
-                )
-                color_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-                item_box.append(color_swatch)
-                txt = (item.get("text", "") or "").strip() or "(Highlight)"
-            else:
-                note_icon = Gtk.Image.new_from_icon_name("mail-attachment-symbolic")
-                note_icon.set_pixel_size(14)
-                note_icon.set_valign(Gtk.Align.CENTER)
-                item_box.append(note_icon)
-                md_text = item.get("markdown", "") or ""
-                txt = simplify_md_preview(md_text)
-
-            txt_lbl = label(text=txt)
-            txt_lbl.set_single_line_mode(True)
-            txt_lbl.set_lines(1)
-            txt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            txt_lbl.set_halign(Gtk.Align.START)
-            txt_lbl.set_xalign(0.0)
-            txt_lbl.set_hexpand(True)
-            item_box.append(txt_lbl)
-
-            linked_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            linked_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
             linked_box.add_css_class("linked")
             linked_box.set_hexpand(True)
 
             main_btn = Gtk.Button()
             main_btn.set_hexpand(True)
-            main_btn.set_child(item_box)
+            main_btn.add_css_class("annotation-row-btn")
+
+            row_content = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+            if kind == "highlight":
+                color_dot = box(css_class="annotation-color-dot")
+                hex_col = item.get("color", "#FFF49C")
+                provider = Gtk.CssProvider()
+                provider.load_from_data(
+                    f".annotation-color-dot {{ min-width: 10px; min-height: 10px; background-color: {hex_col}; border-radius: 50%; }}".encode(
+                        "utf-8"
+                    )
+                )
+                color_dot.get_style_context().add_provider(
+                    provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+                )
+                row_content.append(color_dot)
+
+                txt = (item.get("text") or "").strip().replace("\n", " ")
+                if len(txt) > 40:
+                    txt = txt[:38] + "…"
+                row_content.append(
+                    label(
+                        text=txt,
+                        ellipsize=Pango.EllipsizeMode.END,
+                        xalign=0,
+                        css_class="caption",
+                    )
+                )
+            else:
+                row_content.append(Gtk.Image.new_from_icon_name("mail-attachment-symbolic"))
+                md_preview = simplify_md_preview(item.get("markdown", ""))
+                row_content.append(
+                    label(
+                        text=md_preview or "Empty note",
+                        ellipsize=Pango.EllipsizeMode.END,
+                        xalign=0,
+                        css_class="caption",
+                    )
+                )
+
+            main_btn.set_child(row_content)
             if kind == "highlight":
                 main_btn.set_tooltip_text("Go to annotation")
                 main_btn.connect("clicked", lambda b, h=item: self.activate_annotation(h))
@@ -252,13 +285,11 @@ class AnnotationsController:
 
     def activate_annotation(self, hl: dict):
         self.win.nav_controller.jump_to_annotation(hl)
-        if self.annotations_popover:
-            self.annotations_popover.popdown()
+        self.annotations_popover.popdown()
 
     def activate_note(self, note: dict):
         self.win.nav_controller.jump_to_note(note)
-        if self.annotations_popover:
-            self.annotations_popover.popdown()
+        self.annotations_popover.popdown()
 
     def delete_annotation(self, hl: dict):
         if hl in self.win.highlights:
@@ -303,29 +334,10 @@ class AnnotationsController:
 
     # --- Selection Toolbar & Highlighting Palette ---
 
-    def build_selection_toolbar(self) -> Gtk.Box:
-        self.btn_copy_text = button(
-            label="Copy",
-            tooltip="Copy selected PDF text [Ctrl+Shift+C]",
-            on_clicked=lambda b: self.copy_pdf_text_to_clipboard(),
-        )
-        self.btn_copy_tex = button(
-            label="Copy Source TeX",
-            tooltip="Copy source TeX for selection [Ctrl+C]",
-            on_clicked=lambda b: self.copy_tex_to_clipboard(),
-        )
-
-        # Highlight SplitButton
-        self.btn_highlight = Adw.SplitButton()
+    def _init_selection_toolbar(self):
         self.btn_highlight.set_tooltip_text("Highlight selected text [Ctrl+H]")
         self.btn_highlight.connect("clicked", lambda b: self.apply_highlight_to_selection())
         self.update_highlight_split_button_label()
-
-        self.btn_remove_hl = button(
-            label="Remove",
-            tooltip="Remove the selected highlight",
-            on_clicked=lambda b: self.remove_matching_highlights(),
-        )
 
         popover_palette = Gtk.Popover()
         grid = Gtk.Grid(column_spacing=6, row_spacing=6)
@@ -344,7 +356,9 @@ class AnnotationsController:
                     "utf-8"
                 )
             )
-            color_btn.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            color_btn.get_style_context().add_provider(
+                provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
 
             def make_color_cb(c: str):
                 return lambda b: self.select_highlight_color(c, popover_palette)
@@ -375,29 +389,8 @@ class AnnotationsController:
         popover_palette.set_child(popover_box)
         self.btn_highlight.set_popover(popover_palette)
 
-        self.selection_toolbar = box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=8,
-            css_class="selection-toolbar",
-            valign=Gtk.Align.END,
-            halign=Gtk.Align.FILL,
-            children=[
-                box(
-                    orientation=Gtk.Orientation.HORIZONTAL,
-                    spacing=6,
-                    children=[
-                        self.btn_highlight,
-                        self.btn_remove_hl,
-                        self.btn_copy_text,
-                        self.btn_copy_tex,
-                    ],
-                ),
-                spacer(),
-            ],
-        )
         self.selection_toolbar.set_visible(False)
 
-        self.info_menu_btn = Gtk.MenuButton()
         self.info_menu_btn.set_icon_name("dialog-information-symbolic")
         self.info_menu_btn.set_direction(Gtk.ArrowType.UP)
         self.info_menu_btn.set_tooltip_text("Shortcuts Info")
@@ -429,11 +422,11 @@ class AnnotationsController:
         self.info_menu_btn.set_popover(popover)
 
         self.selection_toolbar.append(self.info_menu_btn)
+
+    def build_selection_toolbar(self) -> Gtk.Box:
         return self.selection_toolbar
 
     def update_highlight_split_button_label(self):
-        if not self.btn_highlight:
-            return
         circle_swatch = box(css_class="highlight-circle-swatch")
         provider = Gtk.CssProvider()
         provider.load_from_data(
@@ -441,7 +434,9 @@ class AnnotationsController:
                 "utf-8"
             )
         )
-        circle_swatch.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        circle_swatch.get_style_context().add_provider(
+            provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
         self.btn_highlight.set_child(circle_swatch)
 
     def select_highlight_color(self, hex_color: str, popover: Gtk.Popover):
@@ -484,8 +479,9 @@ class AnnotationsController:
                         "text": txt,
                     }
                     self.win.highlights.append(hl_obj)
-                    self.win.canvas.set_highlights(self.win.highlights)
-                    self.win.canvas.queue_draw()
+                    if self.win.canvas:
+                        self.win.canvas.set_highlights(self.win.highlights)
+                        self.win.canvas.queue_draw()
                     self.update_annotations_button()
 
                 return _on_saved
@@ -500,9 +496,10 @@ class AnnotationsController:
                 make_on_saved(page_idx, char_start, char_end, color, rects, text),
             )
 
-        sel.clear_selection()
+        if self.win.canvas:
+            self.win.canvas.clear_selection()
+            self.win.canvas.queue_draw()
         self.update_selection_toolbar(False)
-        self.win.canvas.queue_draw()
 
     def remove_highlights_in_selection(self, popover: Gtk.Popover | None = None):
         if popover:
@@ -527,10 +524,11 @@ class AnnotationsController:
             if hl in self.win.highlights:
                 self.win.highlights.remove(hl)
 
-        self.win.canvas.set_highlights(self.win.highlights)
-        self.win.canvas.queue_draw()
+        if self.win.canvas:
+            self.win.canvas.set_highlights(self.win.highlights)
+            self.win.canvas.queue_draw()
+            self.win.canvas.clear_selection()
         self.update_annotations_button()
-        sel.clear_selection()
         self.update_selection_toolbar(False)
 
     def remove_matching_highlights(self):
@@ -541,12 +539,11 @@ class AnnotationsController:
             self.win.db_service.delete_highlight(hl["id"])
             if hl in self.win.highlights:
                 self.win.highlights.remove(hl)
-        self.win.canvas.set_highlights(self.win.highlights)
-        self.win.canvas.queue_draw()
+        if self.win.canvas:
+            self.win.canvas.set_highlights(self.win.highlights)
+            self.win.canvas.queue_draw()
+            self.win.canvas.clear_selection()
         self.update_annotations_button()
-        sel = self.win.canvas.text_selection if self.win.canvas else None
-        if sel:
-            sel.clear_selection()
         self.update_selection_toolbar(False)
 
     def selection_matching_highlights(self) -> list[dict]:
@@ -600,7 +597,9 @@ class AnnotationsController:
                     rng = sel._selection_range(pi)
                     if rng:
                         s_char, e_char = rng
-                        tex_snippet = self.win.arxiv_mapper.get_latex_for_pdf_range(pi, s_char, e_char)
+                        tex_snippet = self.win.arxiv_mapper.get_latex_for_pdf_range(
+                            pi, s_char, e_char
+                        )
                         if tex_snippet:
                             latex_parts.append(tex_snippet)
 
@@ -623,20 +622,17 @@ class AnnotationsController:
         self.copy_tex_to_clipboard()
 
     def update_selection_toolbar(self, has_selection: bool | None = None):
-        if self.selection_toolbar:
-            if has_selection is None:
-                sel = self.win.canvas.text_selection if self.win.canvas else None
-                has_selection = sel.has_selection() if sel else False
+        if has_selection is None:
+            sel = self.win.canvas.text_selection if self.win.canvas else None
+            has_selection = sel.has_selection() if sel else False
 
-            if has_selection:
-                is_tex_available = bool(self.win.arxiv_mapper and self.win.arxiv_mapper.is_ready)
-                if self.btn_copy_tex:
-                    self.btn_copy_tex.set_visible(is_tex_available)
-                    self.btn_copy_tex.set_sensitive(is_tex_available)
-                    if is_tex_available:
-                        self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
-                if self.btn_remove_hl:
-                    self.btn_remove_hl.set_visible(bool(self.selection_matching_highlights()))
-                self.selection_toolbar.set_visible(True)
-            else:
-                self.selection_toolbar.set_visible(False)
+        if has_selection:
+            is_tex_available = bool(self.win.arxiv_mapper and self.win.arxiv_mapper.is_ready)
+            self.btn_copy_tex.set_visible(is_tex_available)
+            self.btn_copy_tex.set_sensitive(is_tex_available)
+            if is_tex_available:
+                self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
+            self.btn_remove_hl.set_visible(bool(self.selection_matching_highlights()))
+            self.selection_toolbar.set_visible(True)
+        else:
+            self.selection_toolbar.set_visible(False)

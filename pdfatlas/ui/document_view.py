@@ -70,7 +70,6 @@ class PdfDocumentView(Gtk.Box):
         self.highlights: list[Any] = []
         self.notes: list[Any] = []
         self.zoom: float = 1.0
-        self.zoom_label: Gtk.Label | None = None
         self.debug_note_rect: bool = False
         self._pinch_anchor_x: float = 0.0
         self._pinch_anchor_y: float = 0.0
@@ -101,14 +100,13 @@ class PdfDocumentView(Gtk.Box):
 
         self.link_preview_card_box = Gtk.Box()
         self.link_preview_card_box.set_visible(False)
-        self.debug_info_label: Gtk.Label | None = None
-
         # Floating zoom controls
         self.zoom_component = ZoomControlsComponent(
             on_zoom_in=self.zoom_in,
             on_zoom_out=self.zoom_out,
         )
         self.zoom_floating_box = self.zoom_component.build_widget()
+        self.zoom_label = self.zoom_component.zoom_label
 
         # Selection toolbar
         self.selection_toolbar_component = SelectionToolbarComponent(

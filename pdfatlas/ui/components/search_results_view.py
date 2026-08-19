@@ -47,8 +47,7 @@ class SearchResultsView(Gtk.Box):
 
     def reset_scroll(self):
         vadj = self.scrolled.get_vadjustment()
-        if vadj:
-            vadj.set_value(vadj.get_lower())
+        vadj.set_value(vadj.get_lower())
 
     def clear(self):
         child = self.results_box.get_first_child()
