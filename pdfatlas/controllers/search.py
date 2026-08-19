@@ -117,17 +117,8 @@ class SearchController:
         self.run_search(entry.get_text())
 
     def clear_results_box(self):
-        srv = getattr(self.win, "search_results_view", None)
-        if srv is not None:
-            srv.clear()
-        else:
-            rb = getattr(self.win, "results_box", None)
-            if rb is not None:
-                child = rb.get_first_child()
-                while child is not None:
-                    nxt = child.get_next_sibling()
-                    rb.remove(child)
-                    child = nxt
+        if self.win.search_results_view is not None:
+            self.win.search_results_view.clear()
 
     def on_toggle_pin(self, result: dict, query_terms: list | set, pinned: bool):
         if pinned:
@@ -179,31 +170,36 @@ class SearchController:
         GLib.idle_add(scroll_to_target)
 
     def run_search(self, query: str):
-        query = (query or "").strip()
+        query = query.strip()
         if not query:
             self.clear_results_box()
-            self._last_query = ""
-            if self.win.stack.get_visible_child_name() == "search-view":
-                self.win.stack.set_visible_child_name("document-view")
-                self.win.canvas.grab_focus()
+            self.win.stack.set_visible_child_name("document-view")
+            return
+
+        if not self.win.db_service:
+            print("[Search] Warning: DatabaseService not available", flush=True)
             return
 
         self._current_search_id += 1
         search_id = self._current_search_id
         self._last_query = query
 
-        srv = getattr(self.win, "search_results_view", None)
-        if srv is not None:
-            srv.reset_executor()
-            srv.reset_scroll()
-        elif hasattr(self.win, "executor"):
+        if self.win.search_results_view is not None:
+            self.win.search_results_view.reset_executor()
+            self.win.search_results_view.reset_scroll()
+        elif self.win.executor is not None:
             self.win.executor.shutdown(wait=False, cancel_futures=True)
             from concurrent.futures import ThreadPoolExecutor
-            self.win.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
+
+            self.win.executor = ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="search-portal"
+            )
 
         self.win.stack.set_visible_child_name("search-view")
 
-        self.win.db_service.search(query, limit=30, search_id=search_id, on_results=self._on_search_results)
+        self.win.db_service.search(
+            query, limit=30, search_id=search_id, on_results=self._on_search_results
+        )
 
     def _on_search_results(self, live_results: list[dict], search_id: int):
         if search_id != self._current_search_id:
@@ -211,10 +207,9 @@ class SearchController:
 
         is_grid = self.win.settings.search_layout == "grid"
         active_filepath = self.win.doc_model.filepath if self.win.doc_model else ""
-        srv = getattr(self.win, "search_results_view", None)
-        if srv is not None:
-            srv.pinned = self.win.pinned
-            srv.render_results(
+        if self.win.search_results_view is not None:
+            self.win.search_results_view.pinned = self.win.pinned
+            self.win.search_results_view.render_results(
                 live_results,
                 query=self._last_query,
                 active_filepath=active_filepath,

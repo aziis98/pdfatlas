@@ -1,12 +1,7 @@
-"""Editable markdown notes anchored to PDF coordinates.
-
-Note icons are GTK buttons overlaid on the page containers; hovering an icon
-shows a rendered preview popover (shared WebKit webview), clicking opens a
-standalone editor window with Source/Rendered tabs and autosave.
-"""
+from __future__ import annotations
 
 import json
-
+from typing import Any
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -257,7 +252,7 @@ def _assets_base_uri() -> str:
 class NotesLayer:
     """Owns note icons over the canvas, the shared hover preview, and editors."""
 
-    def __init__(self, win):
+    def __init__(self, win: Any):
         self.win = win
         self._icons: dict[int, Gtk.Button] = {}
         self._icon_menus: dict[int, Gtk.Popover] = {}
@@ -288,6 +283,7 @@ class NotesLayer:
     def set_notes(self, notes: list[dict]):
         self.win.notes = notes
         self._remove_all_icons()
+        self.prepare()
         for note in notes:
             self._ensure_icon(note)
 
@@ -313,24 +309,18 @@ class NotesLayer:
     # --- Creation / deletion ---------------------------------------------
 
     def create_note(self, page: int, x: float, y: float):
-        # WARNING: the on_complete callback runs inside GLib's idle loop, so it
-        # MUST return GLib.SOURCE_REMOVE. A lambda that returns GLib.idle_add's
-        # result (a non-zero source id) reschedules itself forever — hundreds of
-        # _on_note_saved calls/sec → endless editor pop-ups + CPU pegging.
-        def on_complete(nid: int) -> bool:
-            GLib.idle_add(self._on_note_saved, nid, page, x, y)
-            return GLib.SOURCE_REMOVE
+        self.prepare()
 
-        db = getattr(self.win, "db_service", None)
-        if db is not None:
-            db.save_note(page, x, y, "", on_complete=on_complete)
+        def on_complete(nid: int) -> None:
+            GLib.idle_add(self._on_note_saved, nid, page, x, y)
+
+        if self.win.db_service is not None:
+            self.win.db_service.save_note(page, x, y, "", on_complete=on_complete)
 
     def _notify_annotations_changed(self):
-        if hasattr(self.win, "_update_annotations_button"):
-            self.win._update_annotations_button()
-        cb = getattr(self.win, "on_annotations_changed", None)
-        if callable(cb):
-            cb()
+        self.win._update_annotations_button()
+        if callable(self.win.on_annotations_changed):
+            self.win.on_annotations_changed()
 
     def _on_note_saved(self, nid: int, page: int, x: float, y: float):
         note = {"id": nid, "page": page, "x": x, "y": y, "markdown": ""}
@@ -341,9 +331,8 @@ class NotesLayer:
 
     def delete_note(self, note: dict):
         nid = note["id"]
-        db = getattr(self.win, "db_service", None)
-        if db is not None:
-            db.delete_note(nid)
+        if self.win.db_service is not None:
+            self.win.db_service.delete_note(nid)
         self.win.notes = [n for n in self.win.notes if n.get("id") != nid]
         self._remove_icon(nid)
         ed = self._editors.pop(nid, None)
@@ -357,9 +346,8 @@ class NotesLayer:
         if note is None:
             return  # deleted while an editor was still open
         note["markdown"] = markdown
-        db = getattr(self.win, "db_service", None)
-        if db is not None:
-            db.update_note(note_id, markdown)
+        if self.win.db_service is not None:
+            self.win.db_service.update_note(note_id, markdown)
 
     # --- Icons ------------------------------------------------------------
 
@@ -419,7 +407,10 @@ class NotesLayer:
         self.hide_preview()
         container_count = len(self.win.canvas.containers)
         for note in self.win.notes:
-            btn = self._icons.get(note.get("id"))
+            nid = note.get("id")
+            if not isinstance(nid, int):
+                continue
+            btn = self._icons.get(nid)
             if btn is None:
                 continue
             if note["page"] < container_count:

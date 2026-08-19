@@ -34,6 +34,7 @@ from ..core.settings import CropSettings
 from .arxiv_dialog import ArxivDialog
 from .canvas import PDFCanvas
 from .components.floating_controls import FloatingControls
+from .document_view import PdfDocumentView
 from .gui import box, label, search_entry
 from .link_preview import LinkPreviewManager
 from .minimap import MinimapWindow
@@ -134,6 +135,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.notes: list[dict] = []
         self._active_progress_tasks: dict[str, dict] = {}
         self.night_mode = self.is_effective_dark()
+        self._last_link_click_time: float = 0.0
+        self.crop_scanned_count: int = 0
+        self.notes_layer: NotesLayer | None = None
+        self.on_annotations_changed: Any = None
+        self.on_page_changed: Any = None
 
         # Optional / on-demand widgets
         self.minimap_dialog: MinimapWindow | None = None
@@ -638,7 +644,7 @@ class MainWindow(Adw.ApplicationWindow):
                 surface.set_cursor(blank_cursor)
 
     def _on_canvas_note_create(self, page: int, x: float, y: float):
-        if hasattr(self, "notes_layer"):
+        if self.notes_layer is not None:
             self.notes_layer.create_note(page, x, y)
 
     def _show_toast(self, message: str):
@@ -801,7 +807,7 @@ class MainWindow(Adw.ApplicationWindow):
     # --- File Dialog & Recent Files Menu ---
 
     def _on_horizontal_scroll_changed(self, adj):
-        if hasattr(self, "notes_layer"):
+        if self.notes_layer is not None:
             self.notes_layer.hide_preview()
         self._schedule_state_save()
 
@@ -1004,7 +1010,7 @@ class MainWindow(Adw.ApplicationWindow):
                 aid = extract_arxiv_id_from_raw(uri) or arxiv_id_from_path(uri)
                 if aid:
                     now = time.monotonic()
-                    if getattr(self, "_last_link_click_time", 0.0) + 0.5 > now:
+                    if self._last_link_click_time + 0.5 > now:
                         return
                     self._last_link_click_time = now
                     source = PdfSource(
@@ -1208,7 +1214,7 @@ class MainWindow(Adw.ApplicationWindow):
                 )
 
     def _on_crop_page_scanned(self, page_index):
-        self.crop_scanned_count = getattr(self, "crop_scanned_count", 0) + 1
+        self.crop_scanned_count += 1
         total = self.doc_model.page_count if self.doc_model else 1
         self._show_progress(
             "crop_analysis",
@@ -1364,7 +1370,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def jump_to_page(self, page_index: int, smooth: bool = True):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "jump_to_page"):
+        if doc_view is not None:
             doc_view.jump_to_page(page_index)
         else:
             self.nav_controller.jump_to_page(page_index, smooth=smooth)
@@ -1378,7 +1384,7 @@ class MainWindow(Adw.ApplicationWindow):
         center_y: float | None = None,
     ):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "set_zoom_level"):
+        if doc_view is not None:
             doc_view.set_zoom_level(
                 new_zoom,
                 anchor_x=anchor_x,
@@ -1398,51 +1404,49 @@ class MainWindow(Adw.ApplicationWindow):
 
     def zoom_in(self):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "zoom_in"):
+        if doc_view is not None:
             doc_view.zoom_in()
         else:
             self.nav_controller.zoom_in()
 
     def zoom_out(self):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "zoom_out"):
+        if doc_view is not None:
             doc_view.zoom_out()
         else:
             self.nav_controller.zoom_out()
 
     def zoom_reset(self):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "set_zoom_level"):
+        if doc_view is not None:
             doc_view.set_zoom_level(1.0)
         else:
             self.nav_controller.zoom_reset()
 
     def zoom_fit_width(self):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "zoom_fit_width"):
+        if doc_view is not None:
             doc_view.zoom_fit_width()
         else:
             self.nav_controller.zoom_fit_width()
 
     def zoom_fit_page(self):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "zoom_fit_page"):
+        if doc_view is not None:
             doc_view.zoom_fit_page()
-        elif doc_view and hasattr(doc_view, "zoom_fit_height"):
-            doc_view.zoom_fit_height()
         else:
             self.nav_controller.zoom_fit_page()
 
     def scroll_page(self, forward: bool = True):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "page_step"):
+        if doc_view is not None:
             doc_view.page_step(1 if forward else -1)
         else:
             self.nav_controller.scroll_page(forward=forward)
 
     def scroll_step(self, forward: bool = True):
         doc_view = self.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "scroll_step"):
+        if doc_view is not None:
             doc_view.scroll_step(1 if forward else -1)
         else:
             self.nav_controller.scroll_step(forward=forward)
@@ -1509,13 +1513,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.night_mode = self.is_effective_dark()
         if self.night_mode_action:
             self.night_mode_action.set_state(GLib.Variant.new_boolean(self.night_mode))
-        if hasattr(self, "tab_view") and self.tab_view is not None:
+        if self.tab_view is not None:
             for i in range(self.tab_view.get_n_pages()):
                 page = self.tab_view.get_nth_page(i)
                 child = page.get_child()
-                canvas = getattr(child, "canvas", None)
-                if canvas is not None:
-                    canvas.set_night_mode(
+                if isinstance(child, PdfDocumentView):
+                    child.canvas.set_night_mode(
                         self.night_mode,
                         invert_amount=self.settings.night_mode_invert,
                         hue_rotate=self.settings.night_mode_hue_rotate,
@@ -1540,7 +1543,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.toggle_night_mode()
 
     def _on_scroll_page_changed(self, adj):
-        if hasattr(self, "notes_layer"):
+        if self.notes_layer is not None:
             self.notes_layer.hide_preview()
         if not self.doc_model or not self.canvas or not self.canvas.page_layout:
             return

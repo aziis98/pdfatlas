@@ -77,11 +77,12 @@ class TabController:
         return new_win.tab_view
 
     def on_page_attached(self, view: Adw.TabView, page: Adw.TabPage, position: int) -> None:
+        from ..ui.document_view import PdfDocumentView
+
         self.win.stack.set_visible_child_name("document-view")
         child = page.get_child()
-        canvas = getattr(child, "canvas", None)
-        if canvas is not None:
-            canvas.set_night_mode(
+        if isinstance(child, PdfDocumentView):
+            child.canvas.set_night_mode(
                 self.win.is_effective_dark(),
                 invert_amount=self.win.settings.night_mode_invert,
                 hue_rotate=self.win.settings.night_mode_hue_rotate,
@@ -100,9 +101,11 @@ class TabController:
                 self.win._show_welcome()
 
     def on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
+        from ..ui.document_view import PdfDocumentView
+
         child = page.get_child()
-        if hasattr(child, "close"):
-            getattr(child, "close")()
+        if isinstance(child, PdfDocumentView):
+            child.close()
         view.close_page_finish(page, True)
         if view.get_n_pages() == 0:
             windows = self.win.app.get_windows() if self.win.app else []
@@ -119,10 +122,11 @@ class TabController:
         # Save scroll position of previous active doc_view before switching away
         if self._active_doc_view_ref is not None:
             prev = self._active_doc_view_ref
-            if hasattr(prev, "vadjustment") and prev.vadjustment is not None:
-                prev.saved_scroll_y = prev.vadjustment.get_value()
-            if hasattr(prev, "hadjustment") and prev.hadjustment is not None:
-                prev.saved_scroll_x = prev.hadjustment.get_value()
+            if isinstance(prev, PdfDocumentView):
+                if prev.vadjustment is not None:
+                    prev.saved_scroll_y = prev.vadjustment.get_value()
+                if prev.hadjustment is not None:
+                    prev.saved_scroll_x = prev.hadjustment.get_value()
 
         doc_view = self.get_active_doc_view()
         self._active_doc_view_ref = doc_view if isinstance(doc_view, PdfDocumentView) else None

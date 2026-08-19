@@ -202,6 +202,6 @@ class DocumentModel:
         """
         Close the underlying fitz document if not already closed.
         """
-        if self.doc and not getattr(self.doc, "is_closed", False):
+        if self.doc and not self.doc.is_closed:
             self.doc.close()
 

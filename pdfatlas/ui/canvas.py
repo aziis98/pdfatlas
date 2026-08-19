@@ -714,7 +714,7 @@ class PDFCanvas(Gtk.Overlay):
         self._update_visibility()
         self.gl_canvas.queue_draw()
         win = self.win
-        if win and hasattr(win, "_schedule_state_save"):
+        if win is not None:
             win._schedule_state_save()
         return False  # GLib.SOURCE_REMOVE
 

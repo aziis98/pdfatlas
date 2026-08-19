@@ -240,7 +240,12 @@ class AnnotationsController:
                 btn_delete.connect("clicked", lambda b, h=item: self.delete_annotation(h))
             else:
                 btn_delete.set_tooltip_text("Delete note")
-                btn_delete.connect("clicked", lambda b, n=item: self.win.notes_layer.delete_note(n))
+                btn_delete.connect(
+                    "clicked",
+                    lambda b, n=item: self.win.notes_layer.delete_note(n)
+                    if self.win.notes_layer
+                    else None,
+                )
             linked_box.append(btn_delete)
 
             self.annotations_list.append(linked_box)
@@ -264,11 +269,13 @@ class AnnotationsController:
         self.update_annotations_button()
 
     def on_highlights_loaded(self, highlights: list[dict]):
-        if getattr(self.win, "initial_state", None):
+        from ..ui.document_view import PdfDocumentView
+
+        if self.win.initial_state is not None:
             return
         self.win.highlights = highlights
         doc_view = self.win.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "highlights"):
+        if isinstance(doc_view, PdfDocumentView):
             doc_view.highlights = highlights
         if self.win.canvas:
             self.win.canvas.set_highlights(highlights)
@@ -282,13 +289,15 @@ class AnnotationsController:
             self.win.run_search(query)
 
     def on_notes_loaded(self, notes: list[dict]):
-        if getattr(self.win, "initial_state", None):
+        from ..ui.document_view import PdfDocumentView
+
+        if self.win.initial_state is not None:
             return
         self.win.notes = notes
         doc_view = self.win.get_active_doc_view()
-        if doc_view and hasattr(doc_view, "notes"):
+        if isinstance(doc_view, PdfDocumentView):
             doc_view.notes = notes
-        if hasattr(self.win, "notes_layer"):
+        if self.win.notes_layer is not None:
             self.win.notes_layer.set_notes(notes)
         self.update_annotations_button()
 

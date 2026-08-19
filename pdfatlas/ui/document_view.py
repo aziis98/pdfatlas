@@ -72,6 +72,8 @@ class PdfDocumentView(Gtk.Box):
         self.zoom: float = 1.0
         self.zoom_label: Gtk.Label | None = None
         self.debug_note_rect: bool = False
+        self._pinch_anchor_x: float = 0.0
+        self._pinch_anchor_y: float = 0.0
 
         # Build canvas
         self.canvas = PDFCanvas()
@@ -325,8 +327,8 @@ class PdfDocumentView(Gtk.Box):
         new_zoom = self._pinch_start_zoom * gesture.get_scale_delta()
         success, center_x, center_y = gesture.get_bounding_box_center()
         if not success or (center_x == 0.0 and center_y == 0.0):
-            center_x = getattr(self, "_pinch_anchor_x", self.canvas.get_pointer_pos()[0])
-            center_y = getattr(self, "_pinch_anchor_y", self.canvas.get_pointer_pos()[1])
+            center_x = self._pinch_anchor_x or self.canvas.get_pointer_pos()[0]
+            center_y = self._pinch_anchor_y or self.canvas.get_pointer_pos()[1]
         self.canvas.pinch_center_x = center_x
         self.canvas.pinch_center_y = center_y
         # gesture coords are viewport-relative; convert to document coords for anchoring

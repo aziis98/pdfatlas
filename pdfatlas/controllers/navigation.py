@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 
 from ..core.layout import layout_scale
@@ -16,11 +18,10 @@ class NavigationController:
         self.win = main_window
 
     def _update_page_indicator(self, page_index: int):
-        if hasattr(self.win, "page_input") and self.win.page_input is not None:
+        if self.win.page_input is not None:
             self.win.page_input.set_text(str(page_index + 1))
-        cb = getattr(self.win, "on_page_changed", None)
-        if callable(cb) and self.win.doc_model:
-            cb(page_index + 1, self.win.doc_model.page_count)
+        if callable(self.win.on_page_changed) and self.win.doc_model:
+            self.win.on_page_changed(page_index + 1, self.win.doc_model.page_count)
 
     def jump_to_page(self, page_index: int, smooth: bool = True):
         """
@@ -218,13 +219,10 @@ class NavigationController:
         self.win.hadjustment.set_upper(h_upper)
         self.win.hadjustment.set_value(target_h)
 
-        cb_scroll = getattr(self.win, "_on_scroll_page_changed", None)
-        if callable(cb_scroll):
-            cb_scroll(self.win.vadjustment)
+        if self.win.vadjustment:
+            self.win._on_scroll_page_changed(self.win.vadjustment)
         self.win.canvas._update_visibility()
-        cb_redraw = getattr(self.win, "_queue_canvas_redraw", None)
-        if callable(cb_redraw):
-            cb_redraw()
+        self.win._queue_canvas_redraw()
 
     def zoom_in(self):
         self.set_zoom_level(self.win.zoom * 1.2)
@@ -238,10 +236,7 @@ class NavigationController:
     def zoom_fit_width(self):
         if not self.win.doc_model or not self.win.canvas:
             return
-        if hasattr(self.win.canvas, "_viewport_width"):
-            viewport_w = float(self.win.canvas._viewport_width())
-        else:
-            viewport_w = float(self.win.canvas.viewport_width())
+        viewport_w = float(self.win.canvas._viewport_width())
 
         if viewport_w <= 100:
             return
@@ -263,15 +258,8 @@ class NavigationController:
     def zoom_fit_page(self):
         if not self.win.doc_model or not self.win.canvas:
             return
-        if hasattr(self.win.canvas, "_viewport_width"):
-            viewport_w = float(self.win.canvas._viewport_width())
-        else:
-            viewport_w = float(self.win.canvas.viewport_width())
-
-        if hasattr(self.win.canvas, "_viewport_height"):
-            viewport_h = float(self.win.canvas._viewport_height())
-        else:
-            viewport_h = float(self.win.canvas.viewport_height())
+        viewport_w = float(self.win.canvas._viewport_width())
+        viewport_h = float(self.win.canvas._viewport_height())
         if viewport_w <= 100 or viewport_h <= 100:
             return
 

@@ -404,8 +404,12 @@ class DocumentLoader:
                         n["id"] = idx + 1
                     if "markdown" not in n:
                         n["markdown"] = ""
+                    if "x" not in n:
+                        n["x"] = 0.0
+                    if "y" not in n:
+                        n["y"] = 0.0
                 self.win.notes = sample_notes
-                if hasattr(self.win, "notes_layer"):
+                if self.win.notes_layer is not None:
                     self.win.notes_layer.set_notes(sample_notes)
                 self.win._update_annotations_button()
 
@@ -428,7 +432,7 @@ class DocumentLoader:
                         (n for n in self.win.notes if n.get("id") == nid),
                         self.win.notes[0] if self.win.notes else None,
                     )
-                    if note and hasattr(self.win, "notes_layer"):
+                    if note and self.win.notes_layer is not None:
                         self.win.notes_layer.prepare()
                         self.win.notes_layer._on_preview_show(note)
                         rect = self.win.notes_layer._preview_anchor_rect(note)
