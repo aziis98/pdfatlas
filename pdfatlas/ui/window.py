@@ -705,7 +705,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- Document Loading & Indexing Delegations ---
 
-    def open_document(self, source: PdfSource, new_tab: bool = True):
+    def open_document(self, source: PdfSource, new_tab: bool = False):
         self.document_loader.open_document(source, new_tab=new_tab)
 
     def _index_worker(self, filepath):

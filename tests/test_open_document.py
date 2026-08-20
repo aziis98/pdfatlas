@@ -198,7 +198,7 @@ def test_uncached_arxiv_paper_async_download(tmp_path, monkeypatch):
         assert cache_pdf.exists()
 
 
-def test_cli_command_line_second_document_opens_in_tab(tmp_path):
+def test_cli_command_line_opens_in_new_window(tmp_path):
     from unittest.mock import MagicMock, patch
     from pdfatlas.main import PDFViewerApplication
     from pdfatlas.ui.window import MainWindow
@@ -215,7 +215,7 @@ def test_cli_command_line_second_document_opens_in_tab(tmp_path):
     win.present()
 
     with patch.object(win, "open_document") as mock_open:
-        # First invocation opens doc1
+        # First invocation opens doc1 in the empty window
         cmd1 = MagicMock()
         cmd1.get_arguments.return_value = ["pdfatlas", str(pdf1)]
         cmd1.get_cwd.return_value = str(tmp_path)
@@ -224,16 +224,25 @@ def test_cli_command_line_second_document_opens_in_tab(tmp_path):
         assert mock_open.call_count == 1
         source1 = mock_open.call_args[0][0]
         assert source1.uri == str(pdf1)
+        assert mock_open.call_args[1].get("new_tab") is False
 
-        # Second invocation opens doc2
-        cmd2 = MagicMock()
-        cmd2.get_arguments.return_value = ["pdfatlas", "doc2.pdf"]
-        cmd2.get_cwd.return_value = str(tmp_path)
+    # Simulate that win now has an active document loaded
+    win.doc_model = MagicMock()
+
+    # Second invocation opens doc2 in a new window
+    cmd2 = MagicMock()
+    cmd2.get_arguments.return_value = ["pdfatlas", "doc2.pdf"]
+    cmd2.get_cwd.return_value = str(tmp_path)
+
+    with patch.object(MainWindow, "open_document") as mock_open_win:
         app.do_command_line(cmd2)
-
-        assert mock_open.call_count == 2
-        source2 = mock_open.call_args[0][0]
+        assert mock_open_win.call_count == 1
+        source2 = mock_open_win.call_args[0][0]
         assert source2.uri == str(pdf2)
-        assert mock_open.call_args[1].get("new_tab") is True
+        assert mock_open_win.call_args[1].get("new_tab") is False
 
-    win.close()
+    windows = [w for w in app.get_windows() if isinstance(w, MainWindow)]
+    assert len(windows) == 2
+
+    for w in windows:
+        w.close()

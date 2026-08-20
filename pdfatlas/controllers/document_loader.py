@@ -37,7 +37,7 @@ class DocumentLoader:
         self.win = win
         self._state_save_timer_id: int | None = None
 
-    def open_document(self, source: PdfSource, new_tab: bool = True):
+    def open_document(self, source: PdfSource, new_tab: bool = False):
         raw_path = os.path.expanduser(source.uri)
         try:
             filepath = os.path.abspath(raw_path) if os.path.exists(raw_path) else raw_path

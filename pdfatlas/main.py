@@ -116,12 +116,62 @@ class PDFViewerApplication(Adw.Application):
             raw_target = a
             break
 
-        windows = self.get_windows()
-        win = self.get_active_window() or (windows[0] if windows else None)
-        is_first_window = False
+        windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
+        active_win = self.get_active_window()
+        win = active_win if isinstance(active_win, MainWindow) else (windows[0] if windows else None)
 
-        if not win or not isinstance(win, MainWindow):
-            is_first_window = True
+        target_to_open = raw_target if raw_target else self.filepath_to_open
+
+        if target_to_open:
+            # If an existing window is empty (on welcome screen with no doc), reuse it;
+            # otherwise, always open in a new window.
+            if win and win.doc_model is None:
+                target_win = win
+            else:
+                from .core.installation import get_installation_mode_info
+                mode, reason = get_installation_mode_info()
+                print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
+
+                target_win = MainWindow(
+                    self,
+                    state=self.state,
+                    follow_link=self.follow_link,
+                    debug_mode=self.debug,
+                    debug_note_rect=self.debug_note_rect,
+                    render_workers=self.render_workers,
+                    use_shm=self.use_shm,
+                )
+
+            source = self._resolve_source(target_win, target_to_open.strip(), cwd=cwd)
+            target_win.open_document(source, new_tab=False)
+            target_win.present()
+        else:
+            if not win:
+                from .core.installation import get_installation_mode_info
+                mode, reason = get_installation_mode_info()
+                print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
+
+                win = MainWindow(
+                    self,
+                    state=self.state,
+                    follow_link=self.follow_link,
+                    debug_mode=self.debug,
+                    debug_note_rect=self.debug_note_rect,
+                    render_workers=self.render_workers,
+                    use_shm=self.use_shm,
+                )
+            win.present()
+
+        return 0
+
+    def do_activate(self):
+        windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
+        if windows and not self.filepath_to_open:
+            windows[0].present()
+            return
+
+        win = windows[0] if (windows and windows[0].doc_model is None) else None
+        if not win:
             from .core.installation import get_installation_mode_info
             mode, reason = get_installation_mode_info()
             print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
@@ -135,40 +185,12 @@ class PDFViewerApplication(Adw.Application):
                 render_workers=self.render_workers,
                 use_shm=self.use_shm,
             )
-            win.present()
-
-        target_to_open = raw_target if raw_target else (self.filepath_to_open if is_first_window else None)
-        if target_to_open:
-            source = self._resolve_source(win, target_to_open.strip(), cwd=cwd)
-            win.open_document(source, new_tab=not is_first_window)
-
-        win.present()
-        return 0
-
-    def do_activate(self):
-        windows = self.get_windows()
-        if windows:
-            windows[0].present()
-            return
-
-        from .core.installation import get_installation_mode_info
-        mode, reason = get_installation_mode_info()
-        print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
-
-        win = MainWindow(
-            self,
-            state=self.state,
-            follow_link=self.follow_link,
-            debug_mode=self.debug,
-            debug_note_rect=self.debug_note_rect,
-            render_workers=self.render_workers,
-            use_shm=self.use_shm,
-        )
-        win.present()
 
         if self.filepath_to_open:
             source = self._resolve_source(win, self.filepath_to_open.strip())
-            win.open_document(source, new_tab=True)
+            win.open_document(source, new_tab=False)
+
+        win.present()
 
     def do_startup(self):
         Adw.Application.do_startup(self)
