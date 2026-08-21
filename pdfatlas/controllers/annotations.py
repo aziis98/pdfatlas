@@ -44,29 +44,35 @@ def simplify_md_preview(markdown: str) -> str:
     return text
 
 
+#: Number of color columns in the highlight color picker grid popover.
 PALETTE_COLS = 6
-PALETTE_COLORS = [
+
+#: Curated 18-color pastel highlighter palette for text annotations.
+#: Each entry is an HSL tuple: (hue_degrees [0..360], saturation_percent [0..100], lightness_percent [0..100]).
+#: Note: Saturation and lightness must be in percentage (0..100) to match `hsl_to_hex`.
+#: Organised in 3 rows: Warm tones, Cool tones, and Soft / Neutral tones.
+PALETTE_COLORS: list[tuple[float, float, float]] = [
     # Row 1: Warm
-    (54, 1.0, 0.80),
-    (43, 1.0, 0.77),
-    (27, 1.0, 0.81),
-    (14, 1.0, 0.83),
-    (2, 1.0, 0.83),
-    (330, 0.85, 0.84),
+    (54, 100, 80),
+    (43, 100, 77),
+    (27, 100, 81),
+    (14, 100, 83),
+    (2, 100, 83),
+    (330, 85, 84),
     # Row 2: Cool
-    (291, 0.65, 0.83),
-    (262, 0.65, 0.85),
-    (210, 0.90, 0.83),
-    (187, 0.75, 0.78),
-    (160, 0.65, 0.78),
-    (95, 0.65, 0.80),
+    (291, 65, 83),
+    (262, 65, 85),
+    (210, 90, 83),
+    (187, 75, 78),
+    (160, 65, 78),
+    (95, 65, 80),
     # Row 3: Soft / Neutral
-    (48, 0.70, 0.88),
-    (30, 0.60, 0.88),
-    (15, 0.60, 0.88),
-    (200, 0.40, 0.88),
-    (150, 0.35, 0.88),
-    (0, 0.0, 0.80),
+    (48, 70, 88),
+    (30, 60, 88),
+    (15, 60, 88),
+    (200, 40, 88),
+    (150, 35, 88),
+    (0, 0, 80),
 ]
 
 
