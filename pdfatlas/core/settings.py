@@ -3,8 +3,9 @@ import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-XDG_CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-SETTINGS_FILE = XDG_CONFIG_HOME / "pdfatlas" / "settings.json"
+def get_settings_file_path() -> Path:
+    xdg_config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return xdg_config / "pdfatlas" / "settings.json"
 
 
 @dataclass
@@ -27,11 +28,12 @@ class CropSettings:
     night_mode_hue_rotate: bool = True
 
     @classmethod
-    def load(cls, path: Path = SETTINGS_FILE) -> "CropSettings":
+    def load(cls, path: Path | None = None) -> "CropSettings":
         settings = cls()
-        if path.exists():
+        target_path = path if path is not None else get_settings_file_path()
+        if target_path.exists():
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
+                data = json.loads(target_path.read_text(encoding="utf-8"))
                 valid_keys = {f.name for f in fields(cls)}
                 for k, v in data.items():
                     if k in valid_keys:
@@ -40,10 +42,11 @@ class CropSettings:
                 pass
         return settings
 
-    def save(self, path: Path = SETTINGS_FILE):
+    def save(self, path: Path | None = None):
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            target_path = path if path is not None else get_settings_file_path()
+            target_path.parent.mkdir(parents=True, exist_ok=True)
             data = asdict(self)
-            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            target_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError:
             pass

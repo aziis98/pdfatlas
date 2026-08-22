@@ -4,11 +4,6 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 
-XDG_DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-RECENT_FILE = XDG_DATA_HOME / "pdfatlas" / "recent.json"
-RECENT_MAX = 10
-
-
 @dataclass
 class PdfSource:
     source_type: str
@@ -23,11 +18,23 @@ class PdfSource:
         return arxiv_id_from_path(self.uri) is not None
 
 
+def get_recent_file_path() -> Path:
+    xdg_data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return xdg_data / "pdfatlas" / "recent.json"
+
+
+def is_test_path(uri: str) -> bool:
+    """Check if a URI belongs to a test run or test artifact."""
+    if "pytest-" in uri or "/tmp/pytest" in uri or "/pytest_cache" in uri:
+        return True
+    return False
+
 
 class RecentFilesManager:
-    def __init__(self, path: Path = RECENT_FILE):
-        self._path = path
+    def __init__(self, path: Path | None = None, max_entries: int | None = None):
+        self._path = path if path is not None else get_recent_file_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self.max_entries = max_entries
         self._entries: list[PdfSource] = []
         self._load()
 
@@ -36,22 +43,28 @@ class RecentFilesManager:
             try:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 for item in data:
-                    self._entries.append(PdfSource(**item))
+                    src = PdfSource(**item)
+                    if not is_test_path(src.uri):
+                        self._entries.append(src)
             except (json.JSONDecodeError, KeyError, TypeError, OSError):
                 self._entries = []
 
     def _save(self):
-        data = [asdict(e) for e in self._entries]
+        data = [asdict(e) for e in self._entries if not is_test_path(e.uri)]
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def add(self, source: PdfSource):
-        self._entries = [e for e in self._entries if e.uri != source.uri]
+        if is_test_path(source.uri):
+            return
+        self._entries = [e for e in self._entries if e.uri != source.uri and not is_test_path(e.uri)]
         self._entries.insert(0, source)
-        if len(self._entries) > RECENT_MAX:
+        if self.max_entries is not None and len(self._entries) > self.max_entries:
             self._entries.pop()
         self._save()
 
-    def get_recent(self, n: int = 5) -> list[PdfSource]:
+    def get_recent(self, n: int | None = None) -> list[PdfSource]:
+        if n is None:
+            return list(self._entries)
         return self._entries[:n]
 
     def get_recent_by_type(self, source_type: str, n: int = 10) -> list[PdfSource]:

@@ -1071,6 +1071,11 @@ class MainWindow(Adw.ApplicationWindow):
         if not self.doc_model or not self.vadjustment or not self.canvas:
             return
 
+        if self.minimap_dialog and self.minimap_dialog.get_visible():
+            self.minimap_dialog.close()
+            self.minimap_dialog = None
+            return
+
         val = self.vadjustment.get_value()
         y_center = val + self.vadjustment.get_page_size() / 2
 
@@ -1095,10 +1100,12 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
         self.minimap_dialog = dialog
+        dialog.connect("close-request", lambda w: setattr(self, "minimap_dialog", None))
         dialog.minimap.set_current_page(active_page)
-        dialog.present(self)
+        dialog.present()
 
     def _on_minimap_page_clicked(self, page_index):
+        self.minimap_dialog = None
         self.jump_to_page(page_index)
 
     # --- Toggles & Crop Analyzer ---

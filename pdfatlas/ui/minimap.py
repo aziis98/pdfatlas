@@ -127,7 +127,7 @@ class MiniMap(Gtk.DrawingArea):
         self.resize_cache_surface = None
 
         # Trigger relayout with current size allocation
-        self._relayout(self.get_allocated_width(), self.get_allocated_height())
+        self._relayout(self.get_width(), self.get_height())
 
     def _on_destroy(self, widget):
         if self.resize_timer_id is not None:
@@ -434,7 +434,7 @@ class MiniMap(Gtk.DrawingArea):
         self.queue_draw()
 
 
-class MinimapWindow(Adw.Dialog):
+class MinimapWindow(Adw.Window):
     """
     A centered modal window containing the fitting grid Minimap.
     Clicking a page thumbnail jumps to it in the main viewer and closes this window.
@@ -454,9 +454,31 @@ class MinimapWindow(Adw.Dialog):
         page_layout: list[tuple[float, float, float, fitz.Rect | None]] | None = None,
         page_gap: int = 12,
     ):
-        super().__init__(title="Minimap")
-        self.set_content_width(700)
-        self.set_content_height(520)
+        super().__init__(
+            title="Minimap",
+            transient_for=parent_window,
+            modal=True,
+            destroy_with_parent=True,
+        )
+
+        parent_w = 0
+        parent_h = 0
+        if parent_window is not None:
+            parent_w = parent_window.get_width()
+            parent_h = parent_window.get_height()
+            if parent_w <= 0 or parent_h <= 0:
+                def_w, def_h = parent_window.get_default_size()
+                if def_w > 0 and def_h > 0:
+                    parent_w, parent_h = def_w, def_h
+
+        if parent_w > 0 and parent_h > 0:
+            target_w = max(300, int(parent_w * 0.75))
+            target_h = max(200, int(parent_h * 0.75))
+        else:
+            target_w = 700
+            target_h = 520
+
+        self.set_default_size(target_w, target_h)
 
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
@@ -475,7 +497,7 @@ class MinimapWindow(Adw.Dialog):
         self.minimap.set_vadjustment(main_vadjustment)
         content_box.append(self.minimap)
 
-        self.set_child(content_box)
+        self.set_content(content_box)
 
         # Connect callback to scroll and close the window
         def _handle_page_clicked(idx: int) -> None:

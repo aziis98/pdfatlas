@@ -16,9 +16,6 @@ if TYPE_CHECKING:
     from ..core.pdf_source import PdfSource, RecentFilesManager
     from .window import MainWindow
 
-#: Number of recent documents shown on the welcome screen.
-WELCOME_RECENT_MAX = 5
-
 
 def _shorten_path(path: str) -> str:
     """Replace the user's home directory prefix with ``~`` for display."""
@@ -42,7 +39,7 @@ TIP_MESSAGES: list[str] = [
     "Search terms are highlighted on the portals and the page canvas; the engine uses a trigram tokenizer, so partial word fragments match too.",
     "In search results, click a portal card to jump straight to that spot in the reader.",
     "Pin interesting search portals to keep them handy while you keep reading and searching.",
-    "Ctrl+O opens a PDF; your last 10 documents are kept as recent files.",
+    "Ctrl+O opens a PDF; your recent documents are saved for quick access.",
     "You can open arXiv papers directly from the command line, by ID (pdfatlas 1706.03762) or by URL.",
     "Select any text to reveal the copy and highlight toolbar.",
     "On arXiv papers, Ctrl+C copies the original LaTeX source for your selection.",
@@ -150,13 +147,19 @@ class WelcomeView(Gtk.Box):
 
         self.recent_list = Gtk.ListBox()
         self.recent_list.add_css_class("welcome-recent-list")
-        self.recent_list.add_css_class("card")
         self.recent_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.recent_list.set_hexpand(False)
-        self.recent_list.set_halign(Gtk.Align.CENTER)
-        self.recent_list.set_size_request(260, -1)
+        self.recent_list.set_hexpand(True)
         self.recent_list.connect("row-activated", self._on_recent_activated)
-        content.append(self.recent_list)
+
+        self.recent_scrolled = Gtk.ScrolledWindow()
+        self.recent_scrolled.add_css_class("welcome-recent-scrolled")
+        self.recent_scrolled.add_css_class("card")
+        self.recent_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.recent_scrolled.set_propagate_natural_height(True)
+        self.recent_scrolled.set_max_content_height(265)
+        self.recent_scrolled.set_hexpand(True)
+        self.recent_scrolled.set_child(self.recent_list)
+        content.append(self.recent_scrolled)
 
         self.recent_empty_label = label(
             text="No recent documents yet, open a PDF to get started.",
@@ -169,10 +172,10 @@ class WelcomeView(Gtk.Box):
         while (child := self.recent_list.get_first_child()) is not None:
             self.recent_list.remove(child)
 
-        recent = recents.get_recent(WELCOME_RECENT_MAX)
+        recent = recents.get_recent()
         if recent:
             self.recent_empty_label.set_visible(False)
-            self.recent_list.set_visible(True)
+            self.recent_scrolled.set_visible(True)
             for source in recent:
                 row = RecentRow(source)
                 row_box = box(orientation=Gtk.Orientation.VERTICAL, spacing=1,
@@ -201,7 +204,7 @@ class WelcomeView(Gtk.Box):
                 self.recent_list.append(row)
         else:
             self.recent_empty_label.set_visible(True)
-            self.recent_list.set_visible(False)
+            self.recent_scrolled.set_visible(False)
 
         random_start = random.randrange(len(TIP_MESSAGES))
         self._tip_index = random_start
