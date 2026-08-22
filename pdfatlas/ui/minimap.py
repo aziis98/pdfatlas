@@ -22,15 +22,21 @@ def compute_grid(page_count: int, alloc_w: float, alloc_h: float,
     best_scale = 0.0
     best_C = 1
     best_R = page_count
-    for C in range(1, page_count + 1):
-        R = math.ceil(page_count / C)
-        cell_w = alloc_w / C
-        cell_h = alloc_h / R
-        scale = min(cell_w / first_page_w, cell_h / first_page_h)
-        if scale > best_scale:
-            best_scale = scale
-            best_C = C
+
+    for R in range(1, page_count + 1):
+        C = math.ceil(page_count / R)
+        scale = (alloc_h / R) / first_page_h
+        thumb_w = first_page_w * scale
+        if C * thumb_w <= alloc_w:
             best_R = R
+            best_C = C
+            best_scale = scale
+            break
+    else:
+        best_R = page_count
+        best_C = 1
+        best_scale = alloc_w / (best_C * first_page_w)
+
     thumb_w = first_page_w * best_scale
     thumb_h = first_page_h * best_scale
     cell_w = alloc_w / best_C

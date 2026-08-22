@@ -23,6 +23,10 @@ def test_compute_grid():
     assert thumb_h > 0
     assert cell_w > 0
     assert cell_h > 0
+    # Pages fit to height with no vertical gap:
+    assert abs(thumb_h - cell_h) < 1e-6
+    # Extra allocated space is placed horizontally:
+    assert cell_w >= thumb_w
 
 
 def test_minimap_window_sizing_from_parent():
