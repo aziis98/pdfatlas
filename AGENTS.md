@@ -93,7 +93,20 @@ pdfatlas/
 
 ---
 
-## 5. Research Log & Technical Knowledge Base
+## 5. Architecture Guide (`ARCHITECTURE.md`)
 
-- **Rule:** Maintain and update [`RESEARCH.md`](RESEARCH.md) periodically whenever discovering durable technical findings, architectural tradeoffs, coordinate system math, or rejected approaches.
+- **Rule (Mandatory):** Maintain and update [`ARCHITECTURE.md`](ARCHITECTURE.md) whenever adding, removing, or restructuring components, controllers, core models, or UI views.
+- **Structure Requirements:**
+  - Must include a Table of Contents (TOC).
+  - Provide a concise, up-to-date outline of each component, its responsibilities, and interactions.
+  - For each UI/GTK component, include a clean ASCII diagram illustrating widget nesting and layout hierarchy.
+- Always keep `ARCHITECTURE.md` synchronized with the actual codebase.
+
+---
+
+## 6. Research Log & Knowledge Base (`RESEARCH.md`)
+
+- **Purpose:** [`RESEARCH.md`](RESEARCH.md) is an append-only technical log and knowledge dump recording durable technical findings, coordinate systems/math, runtime quirks, and rejected approaches.
+- **Rule (Mandatory):** Maintain and append entries to [`RESEARCH.md`](RESEARCH.md) whenever discovering non-obvious library behavior, architectural trade-offs, or failed experiments.
 - Always document **why** an approach failed and **how** the durable solution works to prevent regression loops.
+

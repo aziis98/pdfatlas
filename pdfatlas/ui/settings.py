@@ -64,6 +64,10 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.hue_rotate_switch.set_active(self.settings.night_mode_hue_rotate)
         self.hue_rotate_switch.connect("notify::active", self._on_hue_rotate_toggled)
 
+        self.shadow_switch = Adw.SwitchRow(title="Page shadows")
+        self.shadow_switch.set_active(self.settings.page_shadow)
+        self.shadow_switch.connect("notify::active", self._on_shadow_toggled)
+
         self.enable_switch = Adw.SwitchRow(title="Enable auto-crop")
         self.enable_switch.set_active(self.settings.enabled)
         self.enable_switch.connect("notify::active", self._on_enable_toggled)
@@ -72,7 +76,7 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.gaps_switch.set_active(self.settings.page_gaps)
         self.gaps_switch.connect("notify::active", self._on_gaps_toggled)
 
-        self._add_group(page, "Appearance", [self.theme_combo, self.invert_spin, self.hue_rotate_switch])
+        self._add_group(page, "Appearance", [self.theme_combo, self.shadow_switch, self.invert_spin, self.hue_rotate_switch])
         self._add_group(page, "Cropping", [self.enable_switch, self.gaps_switch])
         self.add(page)
 
@@ -279,6 +283,10 @@ class SettingsWindow(Adw.PreferencesDialog):
     def _on_theme_changed(self, row, pspec):
         scheme_order = ["system", "light", "dark"]
         self.settings.color_scheme = scheme_order[row.get_selected()]
+        self.on_changed()
+
+    def _on_shadow_toggled(self, row, pspec):
+        self.settings.page_shadow = row.get_active()
         self.on_changed()
 
     def _on_invert_changed(self, adjustment):

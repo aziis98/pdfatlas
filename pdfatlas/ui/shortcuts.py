@@ -26,6 +26,7 @@ class ShortcutsController:
     def _setup_shortcuts(self):
         # File & Tab operations
         self._add_shortcut("<Control>o", self.win._open_file_dialog)
+        self._add_shortcut("<Control>p", self.win.print_file)
         self._add_shortcut("<Control>t", self.win.new_tab)
         self._add_shortcut("<Control>w", self.win.close_current_tab)
         self._add_shortcut("<Control>n", self.win.new_window)

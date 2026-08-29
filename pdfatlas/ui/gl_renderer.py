@@ -149,17 +149,19 @@ class QuadRenderer:
 
         gl.glBindVertexArray(self.vao)
 
-    def white_card(self, x: float, y: float, w: float, h: float):
+    def white_card(self, x: float, y: float, w: float, h: float, radius: float = 0.0):
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         gl.glUniform1i(self.u_is_placeholder, 1)
+        gl.glUniform1f(self.u_radius, float(radius))
         gl.glUniform2f(self.u_page_pos, float(x), float(y))
         gl.glUniform2f(self.u_page_size, float(w), float(h))
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
 
-    def fill_rect(self, x: float, y: float, w: float, h: float, color: tuple[float, float, float, float]):
+    def fill_rect(self, x: float, y: float, w: float, h: float, color: tuple[float, float, float, float], radius: float = 0.0):
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         gl.glUniform1i(self.u_is_placeholder, 2)
         gl.glUniform4f(self.u_color, *color)
+        gl.glUniform1f(self.u_radius, float(radius))
         gl.glUniform2f(self.u_page_pos, float(x), float(y))
         gl.glUniform2f(self.u_page_size, float(w), float(h))
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
@@ -174,6 +176,7 @@ class QuadRenderer:
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         gl.glUniform1i(self.u_is_placeholder, 2)
         gl.glUniform4f(self.u_color, *color)
+        gl.glUniform1f(self.u_radius, 0.0)
         for x, y, w, h in rects:
             gl.glUniform2f(self.u_page_pos, float(x), float(y))
             gl.glUniform2f(self.u_page_size, float(w), float(h))
@@ -193,6 +196,7 @@ class QuadRenderer:
     def composite_layer(self, tex_id: int, viewport_w: int, viewport_h: int):
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
         gl.glUniform1i(self.u_is_placeholder, 4)
+        gl.glUniform1f(self.u_radius, 0.0)
         gl.glUniform1f(self.u_flip_v, 1.0)
         gl.glUniform2f(self.u_page_pos, self._offset_x, self._offset_y)
         gl.glUniform2f(self.u_page_size, float(viewport_w), float(viewport_h))
@@ -201,9 +205,10 @@ class QuadRenderer:
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
         gl.glUniform1f(self.u_flip_v, 0.0)
 
-    def textured(self, tex_id: int, x: float, y: float, w: float, h: float):
+    def textured(self, tex_id: int, x: float, y: float, w: float, h: float, radius: float = 0.0):
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
         gl.glUniform1i(self.u_is_placeholder, 0)
+        gl.glUniform1f(self.u_radius, float(radius))
         gl.glUniform2f(self.u_page_pos, float(x), float(y))
         gl.glUniform2f(self.u_page_size, float(w), float(h))
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
@@ -296,7 +301,8 @@ class CompositingLayer:
     def composite_page_to_screen(self, renderer: QuadRenderer, page_tex_id: int,
                                  x: float, y: float, w: float, h: float,
                                  viewport_w: int, viewport_h: int, gl_scale: int,
-                                 night_mode: bool = False) -> None:
+                                 night_mode: bool = False,
+                                 radius: float = 0.0) -> None:
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._default_fbo)
         gl.glViewport(0, 0, int(viewport_w * gl_scale), int(viewport_h * gl_scale))
 
@@ -305,6 +311,7 @@ class CompositingLayer:
         gl.glActiveTexture(gl.GL_TEXTURE1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture2)
         gl.glUniform1i(renderer.u_is_placeholder, 6)
+        gl.glUniform1f(renderer.u_radius, float(radius))
         gl.glUniform1f(renderer.u_flip_v, 0.0)   # page texture is top-down (like r.textured)
         gl.glUniform2f(renderer.u_page_pos, float(x), float(y))
         gl.glUniform2f(renderer.u_page_size, float(w), float(h))

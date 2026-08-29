@@ -26,6 +26,7 @@ from ..controllers.annotations import (
 )
 from ..controllers.document_loader import DocumentLoader
 from ..controllers.navigation import NavigationController
+from ..controllers.printing import PrintController
 from ..controllers.search import SearchController
 from ..controllers.tabs import TabController
 from ..core.arxiv_mapper import ArxivDiffMapper, arxiv_id_from_path, extract_arxiv_id_from_raw
@@ -155,6 +156,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.document_loader = DocumentLoader(self)
         self.nav_controller = NavigationController(self)
         self.search_controller = SearchController(self)
+        self.print_controller = PrintController(self)
 
         # 7. Window actions and menu signals
         self._setup_actions()
@@ -377,6 +379,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("install-app", lambda act, param: self._on_install_app_action_activated()),
             ("open-file", lambda act, param: self._open_file_dialog()),
             ("open-arxiv", lambda act, param: self._open_arxiv_dialog()),
+            ("print-file", lambda act, param: self.print_file()),
             ("new-tab", lambda act, param: self.new_tab()),
             ("new-window", lambda act, param: self.new_window()),
         ]
@@ -470,6 +473,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # GMenu Model
         menu = Gio.Menu.new()
+        menu.append("Print File…", "win.print-file")
         menu.append("Night Mode", "win.night-mode")
         menu.append("Gap-less Mode", "win.gapless-mode")
         menu.append("Auto-crop Mode", "win.crop-mode")
@@ -1553,3 +1557,16 @@ class MainWindow(Adw.ApplicationWindow):
         if self.page_input and not self.page_input.has_focus():
             if self.page_input.get_text() != page_num_str:
                 self.page_input.set_text(page_num_str)
+
+    def print_file(self):
+        """Trigger print dialog for the currently loaded document."""
+        if not self.doc_model or self.doc_model.page_count == 0:
+            self._show_toast("No document loaded to print.")
+            return
+
+        title = "Document"
+        if self.current_source:
+            title = self.current_source.display_name or self.current_source.uri
+
+        self.print_controller.print_document(self.doc_model, title=title)
+

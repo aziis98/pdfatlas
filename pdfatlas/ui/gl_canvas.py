@@ -132,8 +132,10 @@ class GLCanvas(Gtk.GLArea):
                 continue
 
             x_offset = (box_w - dw) / 2.0
+            fits_width = (dw >= viewport_w - 1.0)
+            page_radius = 4.0 if (canvas.page_gap > 0 and canvas.page_shadow and not fits_width) else 0.0
 
-            r.white_card(x_offset, page_y0, dw, dh)
+            r.white_card(x_offset, page_y0, dw, dh, radius=page_radius)
 
             if canvas.cache is None:
                 continue
@@ -165,11 +167,11 @@ class GLCanvas(Gtk.GLArea):
                                 used_fallback = True
                 if tex_id is not None:
                     page_tex_ids[i] = tex_id
-                    r.textured(tex_id, x_offset, page_y0, dw, dh)
+                    r.textured(tex_id, x_offset, page_y0, dw, dh, radius=page_radius)
                     if not used_fallback:
                         self._last_uploaded[page_key] = surface
                 else:
-                    r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col)
+                    r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col, radius=page_radius)
 
                 hl_block = canvas.highlighted_block
                 if hl_block is not None:
@@ -463,7 +465,7 @@ class GLCanvas(Gtk.GLArea):
                     r.fill_rect(x_offset, page_y0, mb_t, dh, mc)
                     r.fill_rect(x_offset + dw - mb_t, page_y0, mb_t, dh, mc)
             else:
-                r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col)
+                r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col, radius=page_radius)
 
         if self._uploader is not None:
             self._uploader.evict_not_active(keep_surfaces)
@@ -483,9 +485,12 @@ class GLCanvas(Gtk.GLArea):
                 self._hl_layer.composite_highlight_to_layer2(r, viewport_w, viewport_h)
             for i, tex_id in page_tex_ids.items():
                 y_off, dw, dh, _ = canvas.page_layout[i]
+                fits_w = (dw >= viewport_w - 1.0)
+                hl_page_radius = 4.0 if (canvas.page_gap > 0 and canvas.page_shadow and not fits_w) else 0.0
                 self._hl_layer.composite_page_to_screen(
                     r, tex_id, (box_w - dw) / 2.0, y_off, dw, dh, viewport_w, viewport_h, gl_scale,
                     night_mode=self.night_mode,
+                    radius=hl_page_radius,
                 )
 
         debug_note_rect = canvas.debug_note_rect

@@ -378,10 +378,30 @@ This document records durable technical findings, architectural decisions, mathe
 
 ---
 
+### 1.22. Native PDF Document Printing Delegation vs Rasterization Spools
+- **Finding:** In GTK4, using `Gtk.PrintOperation` requires rasterizing every PDF page into high-DPI bitmaps and blitting them onto a `cairo.Context` in the `draw-page` callback. This is memory-intensive and converts crisp vector fonts and lines into rasterized pixels.
+- **Solution:** GTK 4.10+ provides `Gtk.PrintDialog.print_file(parent, setup, gfile, cancellable, callback)`. Passing the original PDF file (`Gio.File.new_for_path(filepath)`) directly delegates the file to the OS print spooler / CUPS portal, preserving full vector quality, native fonts, and embedded metadata with zero rasterization overhead.
+
+### 1.23. OpenGL Quad Clipping for GTK Container Border Radii
+- **Finding:** In a hybrid rendering architecture where an OpenGL background canvas (`GLCanvas`) renders textured page quads behind transparent GTK overlay containers (`PageContainer`), setting a CSS `border-radius` (e.g. 4px) on the GTK container causes the underlying square 90-degree OpenGL white page quad to poke out behind the rounded corners.
+- **Solution:** Pass the corner radius (`u_radius = 4.0 * gl_scale`) into the fragment shader (`quad.frag`). Calculate the signed distance field $d$ to the rounded rectangle boundary:
+  $$p = (\text{TexCoord} - 0.5) \times \text{u\_page\_size}$$
+  $$b = \text{u\_page\_size} \times 0.5 - \text{u\_radius}$$
+  $$q = \max(|p| - b, 0.0), \quad d = \|q\| - \text{u\_radius}$$
+  Compute smooth subpixel coverage $\alpha = \text{clamp}(0.5 - d, 0.0, 1.0)$ and discard fragments outside the curve ($d > 0$), perfectly matching the GTK container's rounded corners.
+
+### 1.24. Gap-less Mode Shadow & Border-Radius Suppression
+- **Finding:** In continuous vertical document scrolling where pages touch without gaps (`page_gap = 0`), applying 4-sided CSS drop shadows and border-radius causes two visual defects: top/bottom shadows cast dark seams at inter-page junctions, and border-radii create corner pinches along the vertical edges.
+- **Solution:** Suppress `.page-shadow` and reset `border-radius: 0px` (and `u_radius = 0.0` in GL) whenever gap-less mode is active (`self.page_gap == 0`), presenting a seamless, continuous document ribbon.
+
+---
+
 ## 2. Rejected Approaches
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **`Gtk.PrintOperation` Cairo Pixel Blitting for PDF Printing** | Rasterized every PDF page to 300+ DPI bitmaps and painted via Cairo, ballooning memory and rasterizing vector fonts. | `Gtk.PrintDialog.print_file()` passing the original PDF file directly to CUPS/portal. |
+| **Directional CSS Shadows in Gap-less Mode** | Negative spread multi-box-shadows still produced subtle corner pinches at inter-page seams. | Cleanly suppress shadows and border-radius when `page_gaps = False`. |
 | **Synchronous `download_arxiv_source` in UI thread on `open_document`** | Blocked window presentation for seconds over network, failed completely when offline even when a local copy of the PDF was present. | Check local filesystem and cache first, open PDF immediately, offload TeX fetch to background worker. |
 | **Exhaustive $O(N \times M)$ `SequenceMatcher` in `_reconcile_moved_edits`** | Scaled quadratically (~24 seconds for 20k words), holding the Python GIL and stalling background pipelines. | Inverted token index with length and token-overlap upper-bound filtering before invoking `SequenceMatcher` (0.06s). |
 | **GTK `PageContainer` Child Widgets on `Gtk.GLArea`** | GTK's layout engine allocation pass diverged from OpenGL coordinate space under zoom and container margins. | Render all overlays directly in OpenGL shaders (`GLCanvas._on_render`) with math-based hit testing. |
@@ -404,5 +424,6 @@ This document records durable technical findings, architectural decisions, mathe
 | **`xdotool search` to find the Weston X11 window** | Depends on a WM publishing EWMH `_NET_CLIENT_LIST`; bare Xvfb runs no WM, so it returned nothing. | Grep the window id from `xwininfo -root -tree` by the fixed title "Weston Compositor". |
 | **Un-anchored note preview popover (`set_has_arrow(False)`, uncentered rect)** | Without an arrow and with the anchor rect whose top-left was the note point (icon is centered), the card hung off the icon with the pointer at the wrong spot. | `set_has_arrow(True)` and center the anchor rect on the note point, sized to the real 34×34 icon. |
 | **Using raw widget height for `zoom_fit_page` instead of `_viewport_height()`** | In un-realized/headless widgets, `get_height()` is 0 or includes hidden scrollbars, causing `zoom_fit_page` calculations to fail or produce horizontal scrollbar overflow. | Use `vadjustment.get_page_size()` (via `_viewport_height()`) for exact scrollbar-aware geometry. |
+
 
 

@@ -68,7 +68,7 @@ class PageContainer(Gtk.Overlay):
     Note icons are added as overlay children positioned via margins.
     """
 
-    def __init__(self, page_index):
+    def __init__(self, page_index: int):
         super().__init__()
         self.page_index = page_index
         self.y_offset = 0.0
@@ -80,6 +80,19 @@ class PageContainer(Gtk.Overlay):
         self.set_halign(Gtk.Align.START)
         self.set_focusable(False)
         self.add_css_class("page-container")
+        self.add_css_class("page-shadow")
+
+    def set_shadow(self, enabled: bool, has_radius: bool = True):
+        """Toggle the page-shadow CSS class and corner rounding on this container."""
+        if enabled:
+            self.add_css_class("page-shadow")
+            if not has_radius:
+                self.add_css_class("no-radius")
+            else:
+                self.remove_css_class("no-radius")
+        else:
+            self.remove_css_class("page-shadow")
+            self.remove_css_class("no-radius")
 
     def set_layout_params(self, y_offset, w, h, crop_rect):
         """Update size requests and positions during zoom or crop events."""
@@ -123,6 +136,7 @@ class PDFCanvas(Gtk.Overlay):
         self.night_mode_invert = 0.95
         self.night_mode_hue_rotate = True
         self.page_gap = 12
+        self.page_shadow = True
         self.highlighted_block = None
         self.containers = []
         self.in_flight = set()
@@ -235,6 +249,13 @@ class PDFCanvas(Gtk.Overlay):
             self.gl_canvas.night_mode_hue_rotate = hue_rotate
             self.gl_canvas.queue_draw()
 
+    def set_page_shadow(self, enabled: bool):
+        is_gapless = (self.page_gap == 0)
+        self.page_shadow = enabled and not is_gapless
+        self._reposition_pages()
+        if self.gl_canvas is not None:
+            self.gl_canvas.queue_draw()
+
     def _setup_scroll_input_controllers(self):
         """Attach full-viewport input controllers to the scroll container."""
         scroll_click = Gtk.GestureClick.new()
@@ -266,18 +287,24 @@ class PDFCanvas(Gtk.Overlay):
         return self.scrolled_window.get_height()
 
     def _viewport_width(self) -> float:
-        """Viewport width, preferring the horizontal adjustment page size (robust
-        before the scrolled window is realized and on resize)."""
-        if self.hadjustment and self.hadjustment.get_page_size() > 0:
-            return self.hadjustment.get_page_size()
+        hadj = self.hadjustment
+        if hadj and hadj.get_page_size() > 0:
+            return hadj.get_page_size()
         return float(self.get_width())
 
     def _viewport_height(self) -> float:
-        """Viewport height, preferring the vertical adjustment page size (robust
-        before the scrolled window is realized and on resize)."""
-        if self.vadjustment and self.vadjustment.get_page_size() > 0:
-            return self.vadjustment.get_page_size()
+        vadj = self.vadjustment
+        if vadj and vadj.get_page_size() > 0:
+            return vadj.get_page_size()
         return float(self.get_height())
+
+    def _pointer_coords_in_page(self) -> tuple[float, float]:
+        """Return pointer coordinates relative to the visible page layout."""
+        vw = self._viewport_width()
+        vh = self._viewport_height()
+        px = self.pointer_x if self.pointer_x is not None else (vw / 2.0)
+        py = self.pointer_y if self.pointer_y is not None else (vh / 2.0)
+        return float(px), float(py)
 
     def get_pointer_pos(self) -> tuple[float, float]:
         """Returns the last known pointer position relative to the visible viewport,
@@ -311,6 +338,8 @@ class PDFCanvas(Gtk.Overlay):
                 break
             page_x0 = round((box_w - dw) / 2.0)
             self._layout.move(self.containers[i], page_x0, round(y_offset))
+            fits_width = (dw >= viewport_w - 1.0)
+            self.containers[i].set_shadow(self.page_shadow, has_radius=not fits_width)
 
     def set_kinetic_scrolling(self, enabled: bool) -> None:
         """Enable or disable kinetic (inertial) scrolling of the document."""
@@ -682,8 +711,8 @@ class PDFCanvas(Gtk.Overlay):
         doc_model: DocumentModel,
         cache: RenderCache,
         render_worker,
-        crop_analyzer: CropAnalyzer,
-        settings: CropSettings,
+        crop_analyzer: CropAnalyzer | None = None,
+        settings: CropSettings | None = None,
     ):
         self.doc_model = doc_model
         self.cache = cache
@@ -796,11 +825,15 @@ class PDFCanvas(Gtk.Overlay):
             self.page_layout = []
             return
 
-        # Update page gap based on settings dynamically
+        # Update page gap and shadow based on settings dynamically
         if self.settings and not self.settings.page_gaps:
             self.page_gap = 0
         else:
             self.page_gap = 12
+
+        is_gapless = (self.page_gap == 0)
+        page_shadow = (self.settings.page_shadow if self.settings else self.page_shadow) and not is_gapless
+        self.page_shadow = page_shadow
 
         page_count = self.doc_model.page_count
 
@@ -815,10 +848,14 @@ class PDFCanvas(Gtk.Overlay):
             self.containers = []
             for i in range(page_count):
                 container = PageContainer(i)
+                container.set_shadow(page_shadow)
                 if self.debug_mode:
                     container.add_css_class("page-container-debug")
                 self._layout.put(container, 0, 0)
                 self.containers.append(container)
+        else:
+            for container in self.containers:
+                container.set_shadow(page_shadow)
 
         current_y = 0.0
         self.page_layout = []

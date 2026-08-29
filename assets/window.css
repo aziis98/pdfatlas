@@ -160,9 +160,17 @@ entry.page-input {
 .page-container {
     background-color: transparent;
     border: none;
+    border-radius: 0px;
     margin: 0;
     padding: 0;
     box-shadow: none;
+}
+.page-container.page-shadow {
+    border-radius: 4px;
+    box-shadow: 0 2px 8px alpha(#000000, 0.09), 0 1px 2px alpha(#000000, 0.09);
+}
+.page-container.page-shadow.no-radius {
+    border-radius: 0px;
 }
 scrolledwindow,
 viewport {
