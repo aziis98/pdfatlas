@@ -4,7 +4,7 @@ import math
 from typing import Callable
 
 import cairo
-import fitz
+import pymupdf as fitz
 import gi
 
 gi.require_version("Gtk", "4.0")

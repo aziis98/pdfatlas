@@ -394,12 +394,47 @@ This document records durable technical findings, architectural decisions, mathe
 - **Finding:** In continuous vertical document scrolling where pages touch without gaps (`page_gap = 0`), applying 4-sided CSS drop shadows and border-radius causes two visual defects: top/bottom shadows cast dark seams at inter-page junctions, and border-radii create corner pinches along the vertical edges.
 - **Solution:** Suppress `.page-shadow` and reset `border-radius: 0px` (and `u_radius = 0.0` in GL) whenever gap-less mode is active (`self.page_gap == 0`), presenting a seamless, continuous document ribbon.
 
+### 1.25. Cold-Start Window Latency & Progressive First-Frame Low-Res Pre-seeding
+- **Finding:** During cold launch (when no background PDF Atlas process is active), four distinct bottlenecks delayed the user from seeing the document:
+  1. `target_win.present()` was called only after `open_document(source)` finished all synchronous parsing, layout computations, and widget allocations, keeping the window invisible for ~500ms.
+  2. The initial visible page was rendered only at full device resolution (e.g. 2× HiDPI) by the newly spawned background worker pool. On the first OpenGL draw, `cache.get_best()` returned `None`, leaving the user looking at a blank gray rectangle for 100–300ms.
+  3. Every document open eagerly called `NotesLayer.prepare()`, instantiating a `WebKit.WebView` and spawning a background `WebKitWebProcess` (+70ms synchronous overhead) even for documents with zero notes.
+  4. `DatabaseService.open_db()` began SQLite text extraction (`extract_text_to_db`) on a thread in the main Python process. On complex PDFs, `get_text("dict")` ran for seconds while holding the Python GIL, causing UI thread hitches during initial window display.
+- **Solution:**
+  1. **Immediate Window Presentation:** Invoke `target_win.present()` immediately upon window creation so Wayland/X11 mapping runs concurrently with document loading.
+  2. **Fast Low-Res Frame-1 Pre-seeding (`seed_initial_previews`):** Directly extract an ultra-fast 0.25× low-resolution thumbnail (1–30ms) for page 0 on document load and insert it into `RenderCache`. Because `GLCanvas._on_render` uses `cache.get_best()`, the initial frame renders the actual page content immediately (smoothly upscaled by GPU `GL_LINEAR` filtering) with zero blank gray page time. The background render worker continues rasterizing the full-res texture at priority 0 and seamlessly replaces the low-res texture once ready.
+  3. **Lazy WebKit Initialization:** Defer `WebKit.WebView.new()` until a note hover or note edit actually occurs.
+  4. **Deferred SQLite Search Indexing:** Schedule `open_db()` 400ms after document open via `GLib.timeout_add` so the UI thread renders initial frames smoothly before any text extraction touches the GIL.
+
+### 1.26. PyMuPDF 1.28+ Deprecation Migration (`import pymupdf as fitz`)
+- **Finding:** PyMuPDF 1.28+ emits `DeprecationWarning: the 'fitz' API is deprecated and will be removed in future. Use 'import pymupdf' instead.` whenever importing `fitz` directly.
+- **Solution:** Migrate all imports to `import pymupdf as fitz`. This completely silences the warning, maintains full backward compatibility with the existing `fitz.*` API (`fitz.open`, `fitz.Rect`, `fitz.Matrix`, etc.), and satisfies both PyMuPDF 1.28+ and Pyright type definitions without touching call sites.
+
+### 1.27. Build-time Commit Hash Embedding via Hatchling Hooks
+- **Finding:** Running `git rev-parse --short HEAD` at runtime fails in deployed/installed environments (e.g. `uv tool install . --force`) because `.git` directories are stripped when building wheels or installing isolated tools in `~/.local/share/uv/tools`. Consequently, `--version` would either report an unhelpful static version (`0.1.0`) or fail.
+- **Solution:** Implement a custom Hatchling build hook (`hatch_build.py` subclassing `BuildHookInterface`) registered under `[tool.hatch.build.hooks.custom]`. During wheel/sdist creation (`uv tool install`), `initialize()` queries the git repo root and writes `COMMIT = "<short_hash>"` into `pdfatlas/_build_commit.py`. At runtime, `pdfatlas._version.get_version()` checks git dynamically in local repo clones, falls back to `_build_commit.py` for installed wheels, and falls back to `importlib.metadata` or `0.1.0`.
+
+### 1.28. Startup Flash Elimination via Direct Stack View Activation and Delayed Transitions
+- **Finding:** When opening a PDF via CLI, the window flashed the welcome screen for 150–300ms before crossfading into the document. This was caused by three interacting behaviors:
+  1. `MainWindow._build_ui()` unconditionally invoked `_show_welcome()`, loading recent files and setting the stack visible child to `"welcome-view"`.
+  2. `main.py` invoked `target_win.present()` immediately after `MainWindow(...)` before `open_document()` completed, mapping the window to the compositor while showing `"welcome-view"`.
+  3. `Gtk.Stack` had `CROSSFADE` (150ms) enabled during construction, animating an unwanted crossfade from `"welcome-view"` into `"document-view"` upon startup.
+- **Solution:**
+  1. Pass `initial_source: PdfSource | None = None` to `MainWindow`. When present, `_build_ui()` sets the stack child directly to `"document-view"` and skips `_show_welcome()`.
+  2. Call `target_win.present()` only after `MainWindow` (and `open_document`) initialization finishes.
+  3. Initialize `Gtk.Stack` with `Gtk.StackTransitionType.NONE` during widget construction and enable `CROSSFADE` only on `realize` (`_on_window_realized`), eliminating any possible startup transition artifacts.
+
 ---
 
 ## 2. Rejected Approaches
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **Premature `target_win.present()` before `open_document()`** | Window mapped showing `"welcome-view"`, then crossfaded to `"document-view"` once the document opened, causing a visible welcome screen flash on launch. | Pass `initial_source` into `MainWindow`, initialize directly to `"document-view"`, and call `present()` after document initialization. |
+| **Runtime-only `git rev-parse` for CLI `--version`** | In isolated tool installs (`uv tool install . --force`), the wheel unpacks without the `.git` directory, causing runtime subprocess git queries to fail. | Build-time Hatchling hook (`hatch_build.py`) that bakes the git commit into `_build_commit.py` inside the wheel. |
+| **Eager `NotesLayer.prepare()` / `WebKit.WebView.new()` on document open** | Spawns a full WebKit web browser subprocess and incurs 70ms synchronous latency on every document open, even when the document has no notes. | Lazy initialization: call `prepare()` only when notes are loaded or a note preview is hovered. |
+| **Synchronous `db_service.open_db()` on document open** | PyMuPDF `extract_text_to_db` runs on a thread in the main process, thrashing the Python GIL for up to 3 seconds during initial window realization. | Defer database opening and text extraction by 400ms via `GLib.timeout_add` after the initial frames render. |
+| **Waiting for full-res render before displaying initial page** | Left a blank gray rectangle on the screen for 100–300ms until background worker child processes rendered 2× HiDPI textures. | `seed_initial_previews()` generates a 0.25× low-res `PageTexture` in 1–30ms; `GLCanvas` renders it on Frame 1 and swaps in full-res on completion. |
 | **`Gtk.PrintOperation` Cairo Pixel Blitting for PDF Printing** | Rasterized every PDF page to 300+ DPI bitmaps and painted via Cairo, ballooning memory and rasterizing vector fonts. | `Gtk.PrintDialog.print_file()` passing the original PDF file directly to CUPS/portal. |
 | **Directional CSS Shadows in Gap-less Mode** | Negative spread multi-box-shadows still produced subtle corner pinches at inter-page seams. | Cleanly suppress shadows and border-radius when `page_gaps = False`. |
 | **Synchronous `download_arxiv_source` in UI thread on `open_document`** | Blocked window presentation for seconds over network, failed completely when offline even when a local copy of the PDF was present. | Check local filesystem and cache first, open PDF immediately, offload TeX fetch to background worker. |

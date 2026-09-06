@@ -62,7 +62,7 @@ def bgra_from_rgb(arr: np.ndarray) -> np.ndarray:
 def threaded_burst(pdf_path: str):
     """Old architecture: a background thread rasterizes 5 pages in-process."""
     import cairo
-    import fitz
+    import pymupdf as fitz
 
     doc = fitz.open(pdf_path)
 

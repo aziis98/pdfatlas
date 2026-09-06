@@ -162,7 +162,7 @@ def test_settings_persistence(tmp_path):
 
 
 def test_multi_tab_night_mode_synchronization(tmp_path):
-    import fitz
+    import pymupdf as fitz
     from pdfatlas.core.pdf_source import PdfSource
 
     pdf_path = tmp_path / "test_tab_night.pdf"
@@ -206,7 +206,7 @@ def test_multi_tab_night_mode_synchronization(tmp_path):
 
 
 def test_multi_window_night_mode_synchronization(tmp_path):
-    import fitz
+    import pymupdf as fitz
     from pdfatlas.core.pdf_source import PdfSource
 
     pdf_path = tmp_path / "test_multiwin_night.pdf"

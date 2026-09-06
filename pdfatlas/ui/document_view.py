@@ -273,7 +273,6 @@ class PdfDocumentView(Gtk.Box):
                 invert_amount=self.settings.night_mode_invert,
                 hue_rotate=self.settings.night_mode_hue_rotate,
             )
-        self.notes_layer.prepare()
 
         if self.on_page_changed and self.doc_model:
             self.on_page_changed(1, self.doc_model.page_count)

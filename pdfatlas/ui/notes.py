@@ -287,9 +287,10 @@ class NotesLayer:
     def set_notes(self, notes: list[dict]):
         self.win.notes = notes
         self._remove_all_icons()
-        self.prepare()
-        for note in notes:
-            self._ensure_icon(note)
+        if notes:
+            self.prepare()
+            for note in notes:
+                self._ensure_icon(note)
 
     def clear(self):
         self._remove_all_icons()

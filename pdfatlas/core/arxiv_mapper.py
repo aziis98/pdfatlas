@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional, cast
 
-import fitz
+import pymupdf as fitz
 
 ARXIV_CACHE_ROOT = Path(
     os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")

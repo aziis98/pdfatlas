@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
-import fitz
+import pymupdf as fitz
 
 from pdfatlas.core.document import DocumentModel
 from pdfatlas.core.pdf_source import PdfSource

@@ -208,7 +208,7 @@ def test_remove_matching_highlights():
 
 
 def test_crop_bboxes_db_operations(tmp_path):
-    import fitz
+    import pymupdf as fitz
     from pdfatlas.core.index import (
         ensure_crop_table,
         save_crop_bboxes_to_db,

@@ -8,7 +8,7 @@ import os
 import sqlite3
 from typing import Any, Dict, List, cast
 
-import fitz  # PyMuPDF
+import pymupdf as fitz
 
 
 def compute_pdf_hash(pdf_path: str) -> str:

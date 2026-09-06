@@ -1,6 +1,6 @@
 """Tests for link target Y resolution and portal rendering in DocumentModel."""
 
-import fitz
+import pymupdf as fitz
 from pdfatlas.core.document import DocumentModel
 
 
@@ -158,7 +158,7 @@ def test_regular_uri_link_click_launches_external_browser(tmp_path):
 
 
 def test_detect_text_arxiv_links_synthetic(tmp_path):
-    import fitz
+    import pymupdf as fitz
     from pdfatlas.core.document import DocumentModel
 
     pdf_file = tmp_path / "test_arxiv_text.pdf"
@@ -203,7 +203,7 @@ def test_detect_text_arxiv_links_sample_pdf():
 
 
 def test_normalize_link_dict_string_page(tmp_path):
-    import fitz
+    import pymupdf as fitz
     from pdfatlas.core.document import normalize_link_dict
 
     doc = fitz.open()

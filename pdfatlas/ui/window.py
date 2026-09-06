@@ -90,6 +90,8 @@ class MainWindow(Adw.ApplicationWindow):
         debug_note_rect=False,
         render_workers=2,
         use_shm=True,
+        initial_source: PdfSource | None = None,
+        show_welcome: bool = True,
     ):
         super().__init__(application=app)
         self.app = app
@@ -103,6 +105,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.debug_note_rect = debug_note_rect
         self.render_workers = render_workers
         self.use_shm = use_shm
+        self.initial_source = initial_source
+        self.show_welcome = show_welcome and (initial_source is None)
         self._deferred_state_query: str | None = None
 
         # 2. Core models & persistent configuration
@@ -170,6 +174,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Apply saved color scheme and synchronize night mode on launch
         self._apply_color_scheme()
+
+        # 10. Load initial document if provided
+        if self.initial_source is not None:
+            self.open_document(self.initial_source, new_tab=False)
 
     # --- Property Forwarders for 100% Backward Compatibility ---
 
@@ -518,7 +526,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
         self.stack.set_hexpand(True)
-        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
         self.stack.set_transition_duration(150)
         self.content_overlay.set_child(self.stack)
 
@@ -625,7 +633,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.vadjustment.connect("value-changed", self._on_scroll_page_changed)
         self.hadjustment.connect("value-changed", self._on_horizontal_scroll_changed)
 
-        self._show_welcome()
+        if self.show_welcome:
+            self._show_welcome()
+        else:
+            self.stack.set_visible_child_name("document-view")
 
     def _show_welcome(self):
         """Show the empty-window welcome screen with fresh recents and a tip."""
@@ -640,6 +651,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.canvas.queue_draw_overlays("stack-shown")
 
     def _on_window_realized(self, widget):
+        # Enable smooth crossfades only after window realization, avoiding startup transition glitches
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+
         if os.environ.get("PDFATLAS_HIDE_CURSOR") == "1":
             blank_cursor = Gdk.Cursor.new_from_name("none", None)
             self.set_cursor(blank_cursor)

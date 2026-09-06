@@ -71,8 +71,8 @@ class TabController:
             self.win.app,
             render_workers=self.win.render_workers,
             use_shm=self.win.use_shm,
+            show_welcome=False,
         )
-        new_win.stack.set_visible_child_name("document-view")
         new_win.settings.color_scheme = self.win.settings.color_scheme
         new_win.settings.night_mode_invert = self.win.settings.night_mode_invert
         new_win.settings.night_mode_hue_rotate = self.win.settings.night_mode_hue_rotate

@@ -60,8 +60,9 @@ class PDFViewerApplication(Adw.Application):
         if not app.get_windows():
             self.quit()
 
-    def _resolve_source(self, win: MainWindow, raw_arg: str, cwd: str | None = None) -> PdfSource:
+    def _resolve_source(self, win: MainWindow | None, raw_arg: str, cwd: str | None = None) -> PdfSource:
         from .core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw
+        from .core.pdf_source import RecentFilesManager
 
         raw_str = raw_arg.strip()
         aid = extract_arxiv_id_from_raw(raw_str) or arxiv_id_from_path(raw_str)
@@ -73,9 +74,10 @@ class PDFViewerApplication(Adw.Application):
         )
         expanded = expanded_candidate if os.path.exists(expanded_candidate) else raw_str
 
-        existing = win.recent_files.get_by_uri(expanded) or win.recent_files.get_by_uri(raw_str)
+        recent_files = win.recent_files if win is not None else RecentFilesManager()
+        existing = recent_files.get_by_uri(expanded) or recent_files.get_by_uri(raw_str)
         if not existing and aid:
-            existing = win.recent_files.get_by_arxiv_id(aid)
+            existing = recent_files.get_by_arxiv_id(aid)
 
         if existing:
             return existing
@@ -127,13 +129,18 @@ class PDFViewerApplication(Adw.Application):
             # otherwise, always open in a new window.
             if win and win.doc_model is None:
                 target_win = win
+                source = self._resolve_source(target_win, target_to_open.strip(), cwd=cwd)
+                target_win.open_document(source, new_tab=False)
+                target_win.present()
             else:
                 from .core.installation import get_installation_mode_info
                 mode, reason = get_installation_mode_info()
                 print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
 
+                source = self._resolve_source(None, target_to_open.strip(), cwd=cwd)
                 target_win = MainWindow(
                     self,
+                    initial_source=source,
                     state=self.state,
                     follow_link=self.follow_link,
                     debug_mode=self.debug,
@@ -141,10 +148,7 @@ class PDFViewerApplication(Adw.Application):
                     render_workers=self.render_workers,
                     use_shm=self.use_shm,
                 )
-
-            source = self._resolve_source(target_win, target_to_open.strip(), cwd=cwd)
-            target_win.open_document(source, new_tab=False)
-            target_win.present()
+                target_win.present()
         else:
             if not win:
                 from .core.installation import get_installation_mode_info
@@ -176,8 +180,10 @@ class PDFViewerApplication(Adw.Application):
             mode, reason = get_installation_mode_info()
             print(f"[PDFAtlas] Startup mode: '{mode}' ({reason})", flush=True)
 
+            source = self._resolve_source(None, self.filepath_to_open.strip()) if self.filepath_to_open else None
             win = MainWindow(
                 self,
+                initial_source=source,
                 state=self.state,
                 follow_link=self.follow_link,
                 debug_mode=self.debug,
@@ -185,12 +191,12 @@ class PDFViewerApplication(Adw.Application):
                 render_workers=self.render_workers,
                 use_shm=self.use_shm,
             )
-
-        if self.filepath_to_open:
-            source = self._resolve_source(win, self.filepath_to_open.strip())
-            win.open_document(source, new_tab=False)
-
-        win.present()
+            win.present()
+        else:
+            if self.filepath_to_open:
+                source = self._resolve_source(win, self.filepath_to_open.strip())
+                win.open_document(source, new_tab=False)
+            win.present()
 
     def do_startup(self):
         Adw.Application.do_startup(self)
@@ -202,8 +208,17 @@ def main():
     import shutil
     import subprocess
 
-    parser = argparse.ArgumentParser(description="PDF Reader with Portals & FTS5 Search")
+    from ._version import get_version
 
+    parser = argparse.ArgumentParser(prog="pdfatlas", description="PDF Reader with Portals & FTS5 Search")
+
+    parser.add_argument(
+        "--version",
+        "-v",
+        action="version",
+        version=f"%(prog)s {get_version()}",
+        help="Show program's version number and exit",
+    )
     parser.add_argument("pdf_path", nargs="?", help="Path to PDF file to open")
     parser.add_argument("--state", default=None, help="Initial application state as a JSON string")
     parser.add_argument("--follow-link", type=int, default=None, help="Index of N-th link in document to follow on open")

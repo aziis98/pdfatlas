@@ -61,7 +61,7 @@ def download_arxiv(arxiv_id: str) -> tuple[Path, Path]:
 
 
 def extract_pdf_text(pdf_path: Path) -> str:
-    import fitz
+    import pymupdf as fitz
 
     doc = fitz.open(pdf_path)
     parts = []

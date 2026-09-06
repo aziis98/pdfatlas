@@ -246,3 +246,29 @@ def test_cli_command_line_opens_in_new_window(tmp_path):
 
     for w in windows:
         w.close()
+
+
+def test_seed_initial_previews_populates_render_cache(tmp_path):
+    import pymupdf as fitz
+    from pdfatlas.core.cache import RenderCache
+    from pdfatlas.core.document import DocumentModel
+    from pdfatlas.core.texture import PageTexture
+    from pdfatlas.ui.canvas import PDFCanvas
+
+    pdf_path = tmp_path / "test_preview.pdf"
+    doc = fitz.open()
+    doc.new_page(width=400, height=600)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    doc_model = DocumentModel(str(pdf_path))
+    cache = RenderCache(10)
+    canvas = PDFCanvas()
+    canvas.set_document(doc_model, cache, MagicMock())
+
+    # Verify that initial low-res preview was seeded into cache
+    best = cache.get_best(0, 1.0, 2, None)
+    assert best is not None
+    assert isinstance(best, PageTexture)
+    assert best.width == 100
+    assert best.height == 150

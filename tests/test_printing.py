@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
-import fitz
+import pymupdf as fitz
 import gi
 
 gi.require_version("Gtk", "4.0")

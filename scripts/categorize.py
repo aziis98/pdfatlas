@@ -2,7 +2,7 @@
 import os
 import sys
 import time
-import fitz
+import pymupdf as fitz
 import numpy as np
 
 def main():

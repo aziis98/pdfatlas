@@ -13,7 +13,7 @@ independent of the GTK/cairo stack. It never touches cairo, numpy, or GLib.
 import sys
 from typing import Literal, NotRequired, TypedDict
 
-import fitz
+import pymupdf as fitz
 
 
 class ShmInfo(TypedDict):

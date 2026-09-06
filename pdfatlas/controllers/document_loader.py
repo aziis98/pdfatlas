@@ -164,6 +164,8 @@ class DocumentLoader:
                 return
 
         if not os.path.exists(filepath):
+            if self.win.tab_view.get_n_pages() == 0:
+                self.win._show_welcome()
             self.win._show_error_dialog(f"File not found: {filepath}")
             return
 
@@ -302,7 +304,13 @@ class DocumentLoader:
             self.win.stack.set_visible_child_name("document-view")
 
             self.win._show_progress("indexing", "Indexing document text for search...", 0.0)
-            self.win.db_service.open_db(filepath, self._on_indexing_complete)
+
+            def _deferred_start_indexing():
+                if self.win.doc_model and self.win.doc_model.filepath == filepath:
+                    self.win.db_service.open_db(filepath, self._on_indexing_complete)
+                return False
+
+            GLib.timeout_add(400, _deferred_start_indexing)
 
             # Restore state if passed programmatically
             if self.win.initial_state:

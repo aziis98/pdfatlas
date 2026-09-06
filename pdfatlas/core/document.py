@@ -1,5 +1,5 @@
 import re
-import fitz
+import pymupdf as fitz
 
 ARXIV_TEXT_RE = re.compile(
     r"(?:(?:arXiv|arxiv|ARXIV):\s*|https?://(?:[a-zA-Z0-9\-]+\.)?arxiv\.org/(?:abs|pdf)/|doi:10\.48550/arXiv\.)"

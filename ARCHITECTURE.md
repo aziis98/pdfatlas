@@ -19,6 +19,7 @@ This document provides an up-to-date outline of every component in **PDF Atlas**
    - [Search Portal & Previews (`pdfatlas.ui.portal`, `link_preview`)](#search-portal--previews-pdfatlasuiportal-link_preview)
 3. [Feature Controllers (`pdfatlas.controllers.*`)](#3-feature-controllers-pdfatlascontrollers)
 4. [Core Engine & Models (`pdfatlas.core.*`)](#4-core-engine--models-pdfatlascore)
+5. [Build & Packaging Pipeline (`hatch_build.py`, `pdfatlas._version`)](#5-build--packaging-pipeline-hatch_buildpy-pdfatlas_version)
 
 ---
 
@@ -46,11 +47,14 @@ Primary application window. Manages the top header bar, tabs, window-level `Gio.
 | Adw.ToastOverlay                                                              |
 | +---------------------------------------------------------------------------+ |
 | | Gtk.Stack                                                                 | |
-| |   ├─ "welcome": WelcomeView (Recent files list & drag-drop prompt)        | |
-| |   └─ "document-view": Adw.TabView (Hosts active PdfDocumentView tabs)     | |
+|   ├─ "welcome-view": WelcomeView (Recent files list & drag-drop prompt)   | |
+|   ├─ "search-view": SearchResultsView (FTS5 search results list)          | |
+|   └─ "document-view": Adw.TabView (Hosts active PdfDocumentView tabs)     | |
 | +---------------------------------------------------------------------------+ |
 +-------------------------------------------------------------------------------+
 ```
+
+- **Direct View Activation**: When created with an `initial_source`, `MainWindow` directly activates `"document-view"`, bypassing the welcome screen and avoiding startup flashing. `Gtk.Stack` transition is initialized to `NONE` during window construction and enabled (`CROSSFADE`) only after window realization (`_on_window_realized`).
 
 ---
 
@@ -89,6 +93,7 @@ Continuous scroll canvas. Houses the OpenGL background canvas and the transparen
 
 - **`PageContainer`**: Outer `Gtk.Overlay` for each page. Holds CSS `.page-shadow` and `.page-container`, note popover pins, and link click hitboxes.
 - **Gap-less Handling**: When `page_gaps = False`, `.page-shadow` and border-radius are suppressed to maintain a continuous, seamless vertical ribbon.
+- **Progressive Low-Res Pre-seeding**: In `set_document()`, `seed_initial_previews()` extracts an ultra-fast 0.25× low-resolution thumbnail into `RenderCache` so Frame 1 renders page content immediately on screen without a blank placeholder.
 
 ---
 
@@ -195,3 +200,15 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`PdfSource` (`pdf_source.py`)**: Uniform data model for local files, remote URLs, and arXiv identifiers, plus `RecentFilesManager` (unlimited history persistence).
 - **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, and shadow configurations serialized to `~/.config/pdfatlas/settings.json`.
 - **`TextSelection` (`text_selection.py`)**: Character-accurate spatial text selection state across multiple continuous pages.
+
+---
+
+## 5. Build & Packaging Pipeline (`hatch_build.py`, `pdfatlas._version`)
+
+- **Hatchling Build Hook (`hatch_build.py`)**: `CustomBuildHook` derives from `BuildHookInterface` and runs during package build (`uv tool install . --force` or wheel packaging). It queries `git rev-parse --short HEAD` in the repo root and generates `pdfatlas/_build_commit.py` containing `COMMIT = "<short-hash>"`.
+- **Dynamic Version Resolver (`pdfatlas._version`)**: `get_version()` resolves the active version by checking:
+  1. Live git repository short commit (when working directly in a git clone).
+  2. Build-time `pdfatlas._build_commit.py` (when installed as a tool/wheel via `uv tool install`).
+  3. Package metadata `importlib.metadata.version("pdfatlas")`.
+  4. Static fallback `0.1.0`.
+- **CLI Flag**: Configured via `argparse.ArgumentParser` in `main.py` with `--version` and `-v`.

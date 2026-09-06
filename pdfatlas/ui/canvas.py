@@ -10,6 +10,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gdk, GLib, Gtk
 
+import logging
+import pymupdf as fitz
+
 from ..core.cache import RenderCache
 from ..core.crop import CropAnalyzer, CropSettings
 from ..core.document import DocumentModel
@@ -24,7 +27,10 @@ from ..core.layout import (
     texture_zoom,
 )
 from ..core.text_selection import TextSelection
+from ..core.texture import PageTexture
 from .gl_canvas import GLCanvas
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .document_view import PdfDocumentView
@@ -735,6 +741,26 @@ class PDFCanvas(Gtk.Overlay):
         self.containers = []
         self.page_layout = []
         self.update_layout()
+        self.seed_initial_previews()
+
+    def seed_initial_previews(self, max_pages: int = 1):
+        """Quickly pre-seed low-resolution preview textures for the initial page(s)
+        directly into the render cache. This ensures the canvas has content to
+        display on Frame 1, avoiding an empty gray placeholder while full-resolution
+        background renders are in flight."""
+        if not self.doc_model or not self.cache or self.doc_model.page_count == 0:
+            return
+        pages_to_seed = min(max_pages, self.doc_model.page_count)
+        for i in range(pages_to_seed):
+            try:
+                page = self.doc_model.get_page(i)
+                preview_scale = 0.25
+                mat = fitz.Matrix(preview_scale, preview_scale)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                tex = PageTexture(pix.width, pix.height, pix.n, pix.samples)
+                self.cache.set(i, preview_scale, 1, None, tex, None)
+            except Exception as e:
+                logger.debug("Failed to pre-seed preview for page %d: %s", i, e)
 
     def _on_scroll(self, adj):
         if not self.is_scrolling:
