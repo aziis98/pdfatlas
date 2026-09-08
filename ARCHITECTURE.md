@@ -284,10 +284,10 @@ Controllers decouple business logic, state mutations, and external integrations 
 
 ## 5. Build & Packaging Pipeline (`hatch_build.py`, `pdfatlas._version`)
 
-- **Hatchling Build Hook (`hatch_build.py`)**: `CustomBuildHook` derives from `BuildHookInterface` and runs during package build (`uv tool install . --force` or wheel packaging). It queries `git rev-parse --short HEAD` in the repo root and generates `pdfatlas/_build_commit.py` containing `COMMIT = "<short-hash>"`.
+- **Hatchling Build Hook (`hatch_build.py`)**: `CustomBuildHook` derives from `BuildHookInterface` and runs during package build (`uv tool install . --force` or wheel packaging). In `initialize()`, it queries `git rev-parse --short HEAD` in the repo root, creates `pdfatlas/_build_commit.py` containing `COMMIT = "<short-hash>"`, and registers it in `build_data["artifacts"]` so Hatchling packages it into the wheel despite being `.gitignored`. In `finalize()` and `clean()`, it cleans up the generated file from the source checkout.
 - **Dynamic Version Resolver (`pdfatlas._version`)**: `get_version()` resolves the active version by checking:
-  1. Live git repository short commit (when working directly in a git clone).
-  2. Build-time `pdfatlas._build_commit.py` (when installed as a tool/wheel via `uv tool install`).
+  1. Live git repository short commit via `git rev-parse --short HEAD` (when working directly in a git clone).
+  2. Build-time `pdfatlas._build_commit.py` dynamically imported via `importlib` (when installed as an isolated tool/wheel via `uv tool install`).
   3. Package metadata `importlib.metadata.version("pdfatlas")`.
   4. Static fallback `0.1.0`.
 - **CLI Flag**: Configured via `argparse.ArgumentParser` in `main.py` with `--version` and `-v`.

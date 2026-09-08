@@ -25,8 +25,19 @@ class CustomBuildHook(BuildHookInterface):
             pass
 
         target_file = os.path.join(self.root, "pdfatlas", "_build_commit.py")
-        # Only overwrite if we found a commit or if the file does not exist yet
-        if commit or not os.path.exists(target_file):
-            content = f'# Generated during package build\nCOMMIT = "{commit}"\n'
-            with open(target_file, "w", encoding="utf-8") as f:
-                f.write(content)
+        content = f'# Generated during package build\nCOMMIT = "{commit}"\n'
+        with open(target_file, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        # Register as a build artifact so hatchling packages it into the wheel even when gitignored
+        build_data.setdefault("artifacts", []).append("pdfatlas/_build_commit.py")
+
+    def finalize(self, version: str, build_data: dict[str, Any], artifact_path: str) -> None:
+        target_file = os.path.join(self.root, "pdfatlas", "_build_commit.py")
+        if os.path.exists(target_file):
+            os.remove(target_file)
+
+    def clean(self, versions: list[str]) -> None:
+        target_file = os.path.join(self.root, "pdfatlas", "_build_commit.py")
+        if os.path.exists(target_file):
+            os.remove(target_file)

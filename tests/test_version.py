@@ -26,11 +26,16 @@ def test_custom_build_hook_generates_commit_file(tmp_path):
     pkg_dir.mkdir()
     from typing import Any, cast
     hook = CustomBuildHook(str(tmp_path), {}, cast(Any, {}), cast(Any, {}), "", "wheel")
-    hook.initialize("0.1.0", {})
+    build_data = {}
+    hook.initialize("0.1.0", build_data)
     target = pkg_dir / "_build_commit.py"
     assert target.exists()
     content = target.read_text(encoding="utf-8")
     assert "COMMIT =" in content
+    assert "pdfatlas/_build_commit.py" in build_data["artifacts"]
+
+    hook.finalize("0.1.0", build_data, "")
+    assert not target.exists()
 
 
 def test_is_dev_mode_and_app_id():

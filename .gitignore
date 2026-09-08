@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+pdfatlas/_build_commit.py
 
 # Virtual environments
 .venv

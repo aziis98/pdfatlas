@@ -410,9 +410,14 @@ This document records durable technical findings, architectural decisions, mathe
 - **Finding:** PyMuPDF 1.28+ emits `DeprecationWarning: the 'fitz' API is deprecated and will be removed in future. Use 'import pymupdf' instead.` whenever importing `fitz` directly.
 - **Solution:** Migrate all imports to `import pymupdf as fitz`. This completely silences the warning, maintains full backward compatibility with the existing `fitz.*` API (`fitz.open`, `fitz.Rect`, `fitz.Matrix`, etc.), and satisfies both PyMuPDF 1.28+ and Pyright type definitions without touching call sites.
 
-### 1.27. Build-time Commit Hash Embedding via Hatchling Hooks
+### 1.27. Build-time Commit Hash Embedding via Hatchling Hooks & Artifact Packaging
 - **Finding:** Running `git rev-parse --short HEAD` at runtime fails in deployed/installed environments (e.g. `uv tool install . --force`) because `.git` directories are stripped when building wheels or installing isolated tools in `~/.local/share/uv/tools`. Consequently, `--version` would either report an unhelpful static version (`0.1.0`) or fail.
-- **Solution:** Implement a custom Hatchling build hook (`hatch_build.py` subclassing `BuildHookInterface`) registered under `[tool.hatch.build.hooks.custom]`. During wheel/sdist creation (`uv tool install`), `initialize()` queries the git repo root and writes `COMMIT = "<short_hash>"` into `pdfatlas/_build_commit.py`. At runtime, `pdfatlas._version.get_version()` checks git dynamically in local repo clones, falls back to `_build_commit.py` for installed wheels, and falls back to `importlib.metadata` or `0.1.0`.
+- **Why Versioning `_build_commit.py` in Git is Harmful:** Committing `pdfatlas/_build_commit.py` into git causes continuous churn in `git status`, merge conflicts across branches, and creates a lag where the file always contains the *prior* commit hash rather than the current state.
+- **Solution:**
+  1. Add `pdfatlas/_build_commit.py` to `.gitignore`.
+  2. Implement a custom Hatchling build hook (`hatch_build.py` subclassing `BuildHookInterface`). In `initialize()`, write `COMMIT = "<short_hash>"` into `pdfatlas/_build_commit.py` and register it in `build_data.setdefault("artifacts", []).append("pdfatlas/_build_commit.py")`. This instructs Hatchling to package the file into the wheel archive despite it being gitignored.
+  3. In `finalize()` and `clean()`, delete `pdfatlas/_build_commit.py` so no generated build artifact remains in the working tree.
+  4. In `pdfatlas/_version.py`, dynamically load `pdfatlas._build_commit` via `importlib.import_module` inside a `try...except` block so Pyright and linters do not complain about missing static imports in development clones.
 
 ### 1.28. Startup Flash Elimination via Direct Stack View Activation and Delayed Transitions
 - **Finding:** When opening a PDF via CLI, the window flashed the welcome screen for 150–300ms before crossfading into the document. This was caused by three interacting behaviors:
@@ -475,6 +480,7 @@ This document records durable technical findings, architectural decisions, mathe
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **Version-controlling `_build_commit.py` in git** | Generated build artifact churned `git status` on every package build, lagged 1 commit behind HEAD, and caused merge conflicts. | Add `_build_commit.py` to `.gitignore`, package it via `build_data['artifacts']`, clean up in `finalize()`, and import dynamically via `importlib`. |
 | **Artificial 22px shrunk-down custom buttons for context menus** | Overriding item height to 22px with 12px text made the menu feel cramped, shrunk, and unlike standard Libadwaita desktop apps. | Official Libadwaita `popover.menu` metrics: 32px rows, 9px rounded hover states, 15px popover corners, and `set_has_arrow(False)`. |
 | **Single-button isolated popover for canvas right-click (`[ Add note here ]`)** | Right-clicking on links or selections offered no contextual desktop operations; users expect standard options like open, copy address, copy text, remove link, etc. | Native context menu dynamically populated based on link hitbox, selection state, and page coordinates. |
 | **Per-character bounding boxes for custom link borders** | Stroking border quads around every glyph bounding box produced an ugly vertical fence of rectangles around every letter in the selection. | `get_selection_line_rects` and `coalesce_rects_by_line` coalescing characters into a single decent rectangle per text line. |

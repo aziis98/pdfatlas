@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import subprocess
 
+COMMIT = ""
 try:
-    from ._build_commit import COMMIT
-except ImportError:
-    COMMIT = ""
+    _build_mod = importlib.import_module("pdfatlas._build_commit")
+    COMMIT = getattr(_build_mod, "COMMIT", "")
+except Exception:
+    pass
 
 __version__ = "0.1.0"
 
