@@ -51,7 +51,16 @@ class LinkPreviewManager:
             link_uri = link.get("uri", "")
             target_page = link.get("page")
 
-            if isinstance(target_page, int) and 0 <= target_page:
+            if link.get("custom"):
+                title = link.get("title") or "Custom Link"
+                file_path = link.get("file_path")
+                if file_path and link_uri:
+                    lbl = f"🔗 {title} (PDF & Web Link)"
+                elif file_path:
+                    lbl = f"📄 {title} ({file_path})"
+                else:
+                    lbl = f"🌐 {title} ({link_uri})"
+            elif isinstance(target_page, int) and 0 <= target_page:
                 lbl = f"Go to Page {target_page + 1}"
             elif link_uri:
                 from ..core.arxiv_mapper import arxiv_id_from_path, extract_arxiv_id_from_raw

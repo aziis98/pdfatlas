@@ -1,7 +1,7 @@
 import os
 import sys
 
-from .core.process_utils import init_child_process_prelude
+from .core.process_utils import init_child_process_prelude, is_dev_mode
 
 # Early initialization for multiprocessing spawn workers before GTK/WebKit imports
 init_child_process_prelude()
@@ -13,9 +13,32 @@ os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
 import gi
 from gi.repository import GLib
 
-# Set process name & application ID before GTK initializes for Wayland window matching
-GLib.set_prgname("com.aziis98.pdfatlas")
-GLib.set_application_name("PDF Atlas")
+
+def _init_prgname() -> None:
+    app_id = None
+    if "--app-id" in sys.argv:
+        try:
+            idx = sys.argv.index("--app-id")
+            if idx + 1 < len(sys.argv):
+                app_id = sys.argv[idx + 1]
+        except ValueError:
+            pass
+
+    if app_id is None:
+        if is_dev_mode() or "--debug" in sys.argv:
+            app_id = "com.aziis98.pdfatlas.dev"
+            app_name = "PDF Atlas (Dev)"
+        else:
+            app_id = "com.aziis98.pdfatlas"
+            app_name = "PDF Atlas"
+    else:
+        app_name = f"PDF Atlas ({app_id.split('.')[-1]})"
+
+    GLib.set_prgname(app_id)
+    GLib.set_application_name(app_name)
+
+
+_init_prgname()
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -23,6 +46,7 @@ from gi.repository import Adw, Gio
 
 from .core.pdf_source import PdfSource
 from .ui.window import MainWindow
+
 
 
 class PDFViewerApplication(Adw.Application):
@@ -41,11 +65,17 @@ class PDFViewerApplication(Adw.Application):
         debug_note_rect: bool = False,
         render_workers: int = 2,
         use_shm: bool = True,
-        application_id: str = "com.aziis98.pdfatlas",
+        application_id: str | None = None,
+        flags: Gio.ApplicationFlags | None = None,
     ):
+        if application_id is None:
+            application_id = "com.aziis98.pdfatlas.dev" if is_dev_mode() else "com.aziis98.pdfatlas"
+        if flags is None:
+            flags = Gio.ApplicationFlags.HANDLES_COMMAND_LINE
+
         super().__init__(
             application_id=application_id,
-            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
+            flags=flags,
         )
         self.filepath_to_open = filepath_to_open
         self.state = state
@@ -67,12 +97,15 @@ class PDFViewerApplication(Adw.Application):
         raw_str = raw_arg.strip()
         aid = extract_arxiv_id_from_raw(raw_str) or arxiv_id_from_path(raw_str)
 
-        expanded_candidate = (
-            os.path.normpath(os.path.join(cwd, os.path.expanduser(raw_str)))
-            if cwd and not os.path.isabs(os.path.expanduser(raw_str))
-            else os.path.abspath(os.path.expanduser(raw_str))
-        )
-        expanded = expanded_candidate if os.path.exists(expanded_candidate) else raw_str
+        if raw_str.startswith(("http://", "https://")):
+            expanded = raw_str
+        else:
+            expanded_candidate = (
+                os.path.normpath(os.path.join(cwd, os.path.expanduser(raw_str)))
+                if cwd and not os.path.isabs(os.path.expanduser(raw_str))
+                else os.path.abspath(os.path.expanduser(raw_str))
+            )
+            expanded = expanded_candidate if os.path.exists(expanded_candidate) else raw_str
 
         recent_files = win.recent_files if win is not None else RecentFilesManager()
         existing = recent_files.get_by_uri(expanded) or recent_files.get_by_uri(raw_str)
@@ -81,7 +114,7 @@ class PDFViewerApplication(Adw.Application):
 
         if existing:
             return existing
-        elif os.path.exists(expanded_candidate):
+        elif not raw_str.startswith(("http://", "https://")) and os.path.exists(expanded):
             return PdfSource(
                 source_type="file",
                 uri=expanded,
@@ -92,6 +125,14 @@ class PDFViewerApplication(Adw.Application):
                 source_type="arxiv",
                 uri=raw_str,
                 display_name=f"arXiv:{aid}",
+            )
+        elif raw_str.startswith(("http://", "https://")):
+            url_path = raw_str.split("?")[0].split("#")[0]
+            display = os.path.basename(url_path) or raw_str
+            return PdfSource(
+                source_type="url",
+                uri=raw_str,
+                display_name=display,
             )
         else:
             return PdfSource(
@@ -239,6 +280,17 @@ def main():
         help="Disable zero-copy shared memory IPC for multiprocessing render backend",
     )
     parser.add_argument("--headless", action="store_true", help="Run inside a virtual display using xvfb-run if available")
+    parser.add_argument(
+        "--new-instance",
+        action="store_true",
+        help="Launch a standalone process without single-instance D-Bus IPC forwarding",
+    )
+    parser.add_argument(
+        "--app-id",
+        type=str,
+        default=None,
+        help="Custom D-Bus application ID",
+    )
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -249,6 +301,10 @@ def main():
             cmd = [xvfb, "-a", sys.executable] + sys.argv
             sys.exit(subprocess.call(cmd))
 
+    app_flags = Gio.ApplicationFlags.HANDLES_COMMAND_LINE
+    if args.new_instance:
+        app_flags |= Gio.ApplicationFlags.NON_UNIQUE
+
     app = PDFViewerApplication(
         filepath_to_open=args.pdf_path,
         state=args.state,
@@ -257,6 +313,8 @@ def main():
         debug_note_rect=args.debug_note_rect,
         render_workers=args.render_workers,
         use_shm=args.use_shm,
+        application_id=args.app_id,
+        flags=app_flags,
     )
 
     sys.exit(app.run(sys.argv))

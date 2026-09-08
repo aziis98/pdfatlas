@@ -409,6 +409,7 @@ class GLCanvas(Gtk.GLArea):
                     internal_borders: list[tuple[float, float, float, float]] = []
                     uri_borders: list[tuple[float, float, float, float]] = []
                     auto_borders: list[tuple[float, float, float, float]] = []
+                    custom_borders: list[tuple[float, float, float, float]] = []
                     bt = 1.8
 
                     for link in links:
@@ -426,11 +427,14 @@ class GLCanvas(Gtk.GLArea):
                             and canvas.hovered_link[0] == i
                             and canvas.hovered_link[1] is link
                         )
+                        is_custom = bool(link.get("custom", False))
                         is_auto = bool(link.get("auto_detected", False))
                         is_uri = link.get("kind") == 2
 
                         if is_hovered:
-                            if is_auto:
+                            if is_custom:
+                                r.fill_rect(lx0, ly0, lw, lh, (0.58, 0.32, 0.92, 0.25))
+                            elif is_auto:
                                 r.fill_rect(lx0, ly0, lw, lh, (0.85, 0.45, 0.12, 0.30))
                             elif is_uri:
                                 r.fill_rect(lx0, ly0, lw, lh, (0.054, 0.228, 0.147, 0.30))
@@ -443,7 +447,9 @@ class GLCanvas(Gtk.GLArea):
                             (lx0, ly0, bt, lh),
                             (lx0 + lw - bt, ly0, bt, lh),
                         ]
-                        if is_auto:
+                        if is_custom:
+                            custom_borders.extend(rect_quads)
+                        elif is_auto:
                             auto_borders.extend(rect_quads)
                         elif is_uri:
                             uri_borders.extend(rect_quads)
@@ -456,6 +462,8 @@ class GLCanvas(Gtk.GLArea):
                         r.fill_rects(uri_borders, (0.153, 0.646, 0.4165, 0.85))
                     if auto_borders:
                         r.fill_rects(auto_borders, (0.92, 0.52, 0.15, 0.85))
+                    if custom_borders:
+                        r.fill_rects(custom_borders, (0.58, 0.32, 0.92, 0.85))
 
                 if canvas.debug_mode:
                     mc = (0.9, 0.0, 0.9, 0.9)

@@ -42,6 +42,9 @@ def arxiv_id_from_path(path_str: str) -> Optional[str]:
     if aid:
         return aid
 
+    if path_str.startswith(("http://", "https://")):
+        return None
+
     p = Path(path_str)
     parts = p.parts
 

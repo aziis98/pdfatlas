@@ -226,6 +226,69 @@ class TextSelection:
 
         return [c.bbox for c in selected]
 
+    def get_selection_line_rects(self, page_index: int) -> list[tuple[float, float, float, float]]:
+        """
+        Return line-level merged bounding boxes for the selected text on page_index.
+        Consecutive characters on the same line are coalesced into a single
+        bounding box (min_x0, min_y0, max_x1, max_y1) excluding leading/trailing spaces.
+        """
+        rng = self._selection_range(page_index)
+        if rng is None:
+            return []
+
+        start, end = rng
+        pi = self.get_page_index(page_index)
+        if not pi.chars or start >= len(pi.chars):
+            return []
+
+        end = min(end, len(pi.chars) - 1)
+        selected = pi.chars[start : end + 1]
+        if not selected:
+            return []
+
+        line_rects: list[tuple[float, float, float, float]] = []
+        cur_chars: list[CharInfo] = []
+
+        for c in selected:
+            if not cur_chars:
+                cur_chars.append(c)
+                continue
+
+            prev_c = cur_chars[-1]
+            same_line = (
+                abs(c.line_y - prev_c.line_y) < 3.5
+                and not (c.bbox[0] < prev_c.bbox[0] - 10.0)
+                and (c.block_no == prev_c.block_no or abs(c.bbox[0] - prev_c.bbox[2]) < 30.0)
+            )
+
+            if same_line:
+                cur_chars.append(c)
+            else:
+                non_ws = [ch for ch in cur_chars if ch.char.strip()]
+                target = non_ws if non_ws else cur_chars
+                if target:
+                    line_rects.append((
+                        min(ch.bbox[0] for ch in target),
+                        min(ch.bbox[1] for ch in target),
+                        max(ch.bbox[2] for ch in target),
+                        max(ch.bbox[3] for ch in target),
+                    ))
+                cur_chars = [c]
+
+        if cur_chars:
+            non_ws = [ch for ch in cur_chars if ch.char.strip()]
+            target = non_ws if non_ws else cur_chars
+            if target:
+                line_rects.append((
+                    min(ch.bbox[0] for ch in target),
+                    min(ch.bbox[1] for ch in target),
+                    max(ch.bbox[2] for ch in target),
+                    max(ch.bbox[3] for ch in target),
+                ))
+
+        return line_rects
+
+
     def get_selected_text(self, page_index: int | None = None) -> str:
         if not self.has_selection() or self.anchor_page is None or self.focus_page is None:
             return ""

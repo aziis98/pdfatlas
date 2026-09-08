@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 def _shorten_path(path: str) -> str:
     """Replace the user's home directory prefix with ``~`` for display."""
+    if path.startswith(("http://", "https://")):
+        return path
     home = os.path.abspath(os.path.expanduser("~"))
     abspath = os.path.abspath(path)
     if abspath == home:
@@ -192,6 +194,8 @@ class WelcomeView(Gtk.Box):
                     from ..core.arxiv_mapper import arxiv_id_from_path
                     aid = arxiv_id_from_path(source.uri)
                     secondary = f"arXiv:{aid}" if aid else _shorten_path(source.uri)
+                elif source.is_url:
+                    secondary = source.uri
                 else:
                     secondary = _shorten_path(source.uri)
                 path = label(text=secondary, css_class="caption dim-label",

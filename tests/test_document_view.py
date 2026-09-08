@@ -166,4 +166,17 @@ def test_document_view_in_tab_loading(tmp_path):
     view.close()
 
 
+def test_document_view_selection_change_callback():
+    selection_events = []
+    view = PdfDocumentView(
+        on_selection_changed=lambda has_sel: selection_events.append(has_sel),
+    )
+    assert not hasattr(view, "selection_toolbar")
+    view._handle_selection_changed(True)
+    assert selection_events == [True]
+    view._handle_selection_changed(False)
+    assert selection_events == [True, False]
+
+
+
 

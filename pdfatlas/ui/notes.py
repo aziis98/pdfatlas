@@ -438,9 +438,56 @@ class NotesLayer:
                 return
             popover = Gtk.Popover()
             popover.set_parent(btn)
-            delete_btn = Gtk.Button(label="Delete note")
-            delete_btn.connect("clicked", lambda b: self._on_icon_menu_delete(nid))
-            popover.set_child(delete_btn)
+            popover.set_has_arrow(False)
+            popover.add_css_class("menu")
+            popover.add_css_class("canvas-context-menu")
+
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            box.set_margin_top(6)
+            box.set_margin_bottom(6)
+            box.set_margin_start(6)
+            box.set_margin_end(6)
+
+            # Open Note
+            btn_open = Gtk.Button()
+            btn_open.add_css_class("flat")
+            btn_open.add_css_class("canvas-menu-item")
+            btn_open.set_halign(Gtk.Align.FILL)
+            open_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            img_open = Gtk.Image.new_from_icon_name("document-edit-symbolic")
+            img_open.set_pixel_size(16)
+            open_box.append(img_open)
+            open_box.append(Gtk.Label(label="Open Note", halign=Gtk.Align.START, hexpand=True))
+            btn_open.set_child(open_box)
+
+            def _do_open(_b, n=note, p=popover):
+                p.popdown()
+                self.open_editor(n)
+
+            btn_open.connect("clicked", _do_open)
+            box.append(btn_open)
+
+            # Delete Note
+            btn_delete = Gtk.Button()
+            btn_delete.add_css_class("flat")
+            btn_delete.add_css_class("canvas-menu-item")
+            btn_delete.add_css_class("destructive-action")
+            btn_delete.set_halign(Gtk.Align.FILL)
+            del_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            img_del = Gtk.Image.new_from_icon_name("user-trash-symbolic")
+            img_del.set_pixel_size(16)
+            del_box.append(img_del)
+            del_box.append(Gtk.Label(label="Delete Note", halign=Gtk.Align.START, hexpand=True))
+            btn_delete.set_child(del_box)
+
+            def _do_delete(_b, i=nid, p=popover):
+                p.popdown()
+                self._on_icon_menu_delete(i)
+
+            btn_delete.connect("clicked", _do_delete)
+            box.append(btn_delete)
+
+            popover.set_child(box)
             self._icon_menus[nid] = popover
         # Gdk.Rectangle() Boxed ctor args are silently ignored — set fields.
         rect = Gdk.Rectangle()

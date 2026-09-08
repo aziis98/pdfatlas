@@ -251,3 +251,45 @@ def merge_highlight_runs(rects: list[tuple[float, float, float, float]]) -> list
             cur_x0, cur_y0, cur_x1, cur_y1 = rx0, ry0, rx1, ry1
     runs.append((cur_x0, cur_y0, cur_x1, cur_y1))
     return runs
+
+
+def coalesce_rects_by_line(
+    rects: list[tuple[float, float, float, float]] | list[list[float]],
+    line_tolerance: float = 4.0,
+) -> list[tuple[float, float, float, float]]:
+    """Merge rects sharing the same text line into a single bounding rect per line."""
+    if not rects:
+        return []
+
+    valid_rects = [r for r in rects if len(r) == 4]
+    if not valid_rects:
+        return []
+
+    # Sort rects by vertical position (center-y) first, then horizontal (x0)
+    sorted_rects = sorted(valid_rects, key=lambda r: ((r[1] + r[3]) / 2.0, r[0]))
+
+    runs: list[tuple[float, float, float, float]] = []
+    cur_line = [sorted_rects[0]]
+    for r in sorted_rects[1:]:
+        prev_r = cur_line[-1]
+        prev_cy = (prev_r[1] + prev_r[3]) / 2.0
+        cy = (r[1] + r[3]) / 2.0
+        if abs(cy - prev_cy) < line_tolerance:
+            cur_line.append(r)
+        else:
+            runs.append((
+                min(x[0] for x in cur_line),
+                min(x[1] for x in cur_line),
+                max(x[2] for x in cur_line),
+                max(x[3] for x in cur_line),
+            ))
+            cur_line = [r]
+    if cur_line:
+        runs.append((
+            min(x[0] for x in cur_line),
+            min(x[1] for x in cur_line),
+            max(x[2] for x in cur_line),
+            max(x[3] for x in cur_line),
+        ))
+    return runs
+

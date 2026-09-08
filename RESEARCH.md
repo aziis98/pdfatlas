@@ -424,12 +424,61 @@ This document records durable technical findings, architectural decisions, mathe
   2. Call `target_win.present()` only after `MainWindow` (and `open_document`) initialization finishes.
   3. Initialize `Gtk.Stack` with `Gtk.StackTransitionType.NONE` during widget construction and enable `CROSSFADE` only on `realize` (`_on_window_realized`), eliminating any possible startup transition artifacts.
 
+### 1.29. Custom User Links: Dual-Target Resolution, Split-Button Persistence, and GL Quad Rendering
+- **Finding (Dual-Target Resolution `(Link?, Pdf?)`):** Academic references and citations frequently have both a web landing page (DOI / publisher webpage) and a direct PDF (open-access PDF URL or locally downloaded file). Opening an external browser when a PDF is available causes context loss; conversely, linking exclusively to a PDF fails if the paper is closed-access or deleted. The resolution pipeline in `MainWindow._on_link_clicked` checks the tuple right-to-left:
+  1. If `file_path` is present (local file, arXiv ID, or OA PDF URL), it loads the document into PDF Atlas in a new tab.
+  2. If `file_path` is missing or fails, it falls back to launching `uri` in the system browser.
+- **Finding (Transparent Hit-Testing via `DocumentModel.get_page_links`):** Storing custom links in `DocumentModel._custom_links_by_page` and merging them into `get_page_links(page_index)` with `"from": fitz.Rect(r)` allows existing canvas hit-testing (`PDFCanvas._hit_test_link`), cursor hover detection, and coordinate scaling to handle custom user links automatically without requiring separate coordinate transformation layers or extra overlay widgets.
+- **Finding (Visual Differentiation via Purple/Violet Hues):** PDF Atlas reserves blue for native internal jumps, green for native URIs, and amber for auto-detected arXiv links. Custom links are rendered with purple borders `(0.58, 0.32, 0.92, 0.85)` and hover fill `(0.58, 0.32, 0.92, 0.25)` in the OpenGL quad pipeline, and `.annotation-link-icon` (`#8b5cf6`) in the annotations popover list.
+- **Finding (Selection Pre-capture for Modals):** Spawning a modal dialog (`Gtk.FileChooserNative`, `LinkSearchDialog`, or `UrlInputDialog`) transfers window focus away from the canvas. Capturing the character ranges and selection rects (`_get_current_selection_info()`) before presenting the dialog ensures selection metadata is preserved when the dialog finishes asynchronously.
+
+### 1.30. Line-Level Selection Rect Coalescing vs. Per-Character Bounding Box Artifacts
+- **Problem (Per-Character Box Outlines):** `TextSelection.get_selection_rects()` extracts raw glyph-level bounding boxes (`[c.bbox for c in selected]`) from PyMuPDF's `rawdict` layout tree. While a solid semi-transparent highlight fill (`fill_rects`) can visually blend adjacent character boxes into an acceptable band, stroking border rectangles around every box (as done for custom link outlines in `gl_canvas.py`) produced an ugly vertical "fence" of rectangular borders around each individual character (`[N][e][u][r][a][l]...`).
+- **Solution (Line-Level Bounding Box Coalescing):**
+  1. `TextSelection.get_selection_line_rects(page_index)`: Groups consecutive characters on the same visual line (matching vertical baseline within 3.5pt, horizontal progression, and block/line IDs) and computes a single contiguous bounding box `(min_x0, min_y0, max_x1, max_y1)` excluding trailing whitespace.
+  2. `layout.coalesce_rects_by_line(rects)`: Merges adjacent or legacy rects sharing the same vertical line center into a single line rectangle.
+  3. `DocumentModel.set_custom_links()`: Passes incoming rects through `coalesce_rects_by_line()` before indexing links by page into `by_page`. As a result, both newly created links and legacy links loaded from SQLite automatically render as a single clean rectangle per line (e.g. 1 rect for single-line titles/citations, exactly 2 rects for two-line citations), visually identical to native PDF link annotations.
+- **Compact Toolbar Dropdown/Dropup Menus:**
+  Selection toolbars floating near the bottom of the viewport spawn popovers that open upwards. Two-line menu items (title + description) with standard GTK button margins produced an excessively tall, bulky popover. Replacing them with `.compact-menu` containing single-line icon-and-label buttons (`min-height: 28px; padding: 4px 8px;`) and removing redundant title headings gives a lightweight, fast Libadwaita dropdown menu.
+
+### 1.35. Remote URL PDF Source Pipeline, Header Validation & DOI Fallback
+- **Background:** When users click Open Access links (e.g. from OpenAlex or ACL Anthology search dialogs) or launch PDF Atlas with a web URL, the target is often an external HTTP/HTTPS server rather than a local file or an arXiv-hosted pre-print.
+- **Root Cause of "File not found: https://..." Error:** `DocumentLoader.open_document()` only checked for arXiv IDs via `arxiv_id_from_path(filepath)`. For non-arXiv URLs, it assumed a local file path and called `os.path.exists(filepath)`, which returned `False` for URL schemes and triggered `_show_error_dialog("File not found: https://...")`.
+- **Key Implementation Decisions:**
+  1. **Source Type Model (`source_type="url"`):** Extended `PdfSource` with `fallback_uri: str | None = None` and `@property def is_url(self) -> bool`. URLs are persisted directly in `RecentFilesManager` and displayed cleanly in `RecentRow` without applying path shortening (`_shorten_path` preserves `http://` and `https://` schemes).
+  2. **Cache Isolation & Deterministic Paths:** Remote PDFs are stored under `$XDG_CACHE_HOME/pdfatlas/urls/<sha256[:16]>/<sanitized_filename>.pdf`. Repeated opens avoid all network latency, rendering in 1 frame from local disk.
+  3. **Magic-Byte PDF Validation:** The background streaming downloader (`download_remote_pdf`) reads the first 64KB chunk and inspects the first 1024 bytes for `b"%PDF-"`. If missing (e.g. an HTML paywall, login screen, or challenge), it aborts before saving to avoid corrupting the disk cache.
+  4. **Dual-Target Fallback (`fallback_uri`):** When direct PDF streaming fails (403, 404, or non-PDF payload), PDF Atlas automatically opens the paper's DOI / landing page in the user's default browser via `Gtk.show_uri()` and notifies the user with an `Adw.Toast`, ensuring the user is never left at a dead end.
+
+### 1.36. Official Libadwaita Context Menu Architecture & Metrics
+- **Background & Prior State:** Previously, right-clicking anywhere on the document canvas popped up an isolated single-button popover (`[ Add note here ]`). Right-clicking over hyperlinks or active text selections provided no contextual options. Attempting to compress the menu with artificial CSS overrides (22px item heights, 12px captions, 3px container padding, 6px border-radii) produced an unintegrated look that clashed with Libadwaita's design language.
+- **Durable Solution & Implementation:**
+  1. **Native Libadwaita Popover Base (`popover.menu` with `set_has_arrow(False)`):** Leverages Libadwaita's built-in `popover.menu` styling for the outer frame (`15px` border radius, system `var(--popover-bg-color)` background, subtle 1px border, and soft dual-layer drop-shadow). Setting `set_has_arrow(False)` eliminates the speech-bubble arrow, anchoring the menu directly at the right-click cursor position.
+  2. **Official Menu Item Metrics (`.canvas-menu-item`):**
+     - Row height: Exact standard **32px** height (`min-height: 32px; padding: 0 10px; margin: 0; border-radius: 9px;`).
+     - Hover & active feedback: Standard Libadwaita modelbutton highlights using `background-color: color-mix(in srgb, currentColor 10%, transparent);` on hover and `19%` on active.
+     - Spacing: 12px between icon and label, 20px margin-start on keyboard accelerators, 6px padding on outer box, and standard 6px vertical margin on separators (`margin: 6px 0;`).
+     - Destructive actions: Styled with `@destructive_color` and soft red hover tint (`alpha(@destructive_color, 0.12)`).
+  3. **Link Context Detection:** When right-clicking over any link (`_hit_test_link`), dynamically adds:
+     - "Open Link in Browser" (with `globe-symbolic`) or "Open Linked Document" (`document-open-symbolic`) or "Open Link" (`external-link-symbolic`).
+     - "Copy Link Address" (`edit-copy-symbolic`).
+     - If `link.get("custom") is True`: "Remove Link" (`user-trash-symbolic`) styled with `destructive-action` to unlink custom user annotations directly without having to find and select the text first.
+  4. **Selection Context Detection:** When right-clicking with an active text selection:
+     - "Copy" (`Ctrl+C`), "Copy TeX Source" (`Ctrl+Shift+C` if arXiv mapper is ready), "Highlight" (`H`), "Add Link…", and if an overlapping custom link exists, "Remove Link" (`destructive-action`).
+     - "Deselect" (`Esc`) at the bottom.
+  5. **Universal Document Action:** "Add Note Here" (`mail-attachment-symbolic`) remains anchored to the exact right-click coordinates on the page.
+  6. **Note Icon Context Menu:** The right-click popover on note pin icons in `NotesLayer` also uses the exact same Libadwaita menu metrics, presenting "Open Note" and "Delete Note" (`destructive-action`).
+
 ---
 
 ## 2. Rejected Approaches
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **Artificial 22px shrunk-down custom buttons for context menus** | Overriding item height to 22px with 12px text made the menu feel cramped, shrunk, and unlike standard Libadwaita desktop apps. | Official Libadwaita `popover.menu` metrics: 32px rows, 9px rounded hover states, 15px popover corners, and `set_has_arrow(False)`. |
+| **Single-button isolated popover for canvas right-click (`[ Add note here ]`)** | Right-clicking on links or selections offered no contextual desktop operations; users expect standard options like open, copy address, copy text, remove link, etc. | Native context menu dynamically populated based on link hitbox, selection state, and page coordinates. |
+| **Per-character bounding boxes for custom link borders** | Stroking border quads around every glyph bounding box produced an ugly vertical fence of rectangles around every letter in the selection. | `get_selection_line_rects` and `coalesce_rects_by_line` coalescing characters into a single decent rectangle per text line. |
+| **Two-line verbose popover entries in bottom selection toolbar** | Caused the upward-popping menu to be excessively tall, bulky, and padded, obscuring the reading canvas. | `.compact-menu` single-line icon + label rows with 4px margins and tight button padding. |
 | **Premature `target_win.present()` before `open_document()`** | Window mapped showing `"welcome-view"`, then crossfaded to `"document-view"` once the document opened, causing a visible welcome screen flash on launch. | Pass `initial_source` into `MainWindow`, initialize directly to `"document-view"`, and call `present()` after document initialization. |
 | **Runtime-only `git rev-parse` for CLI `--version`** | In isolated tool installs (`uv tool install . --force`), the wheel unpacks without the `.git` directory, causing runtime subprocess git queries to fail. | Build-time Hatchling hook (`hatch_build.py`) that bakes the git commit into `_build_commit.py` inside the wheel. |
 | **Eager `NotesLayer.prepare()` / `WebKit.WebView.new()` on document open** | Spawns a full WebKit web browser subprocess and incurs 70ms synchronous latency on every document open, even when the document has no notes. | Lazy initialization: call `prepare()` only when notes are loaded or a note preview is hovered. |
@@ -459,6 +508,12 @@ This document records durable technical findings, architectural decisions, mathe
 | **`xdotool search` to find the Weston X11 window** | Depends on a WM publishing EWMH `_NET_CLIENT_LIST`; bare Xvfb runs no WM, so it returned nothing. | Grep the window id from `xwininfo -root -tree` by the fixed title "Weston Compositor". |
 | **Un-anchored note preview popover (`set_has_arrow(False)`, uncentered rect)** | Without an arrow and with the anchor rect whose top-left was the note point (icon is centered), the card hung off the icon with the pointer at the wrong spot. | `set_has_arrow(True)` and center the anchor rect on the note point, sized to the real 34×34 icon. |
 | **Using raw widget height for `zoom_fit_page` instead of `_viewport_height()`** | In un-realized/headless widgets, `get_height()` is 0 or includes hidden scrollbars, causing `zoom_fit_page` calculations to fail or produce horizontal scrollbar overflow. | Use `vadjustment.get_page_size()` (via `_viewport_height()`) for exact scrollbar-aware geometry. |
+| **Shared D-Bus `application_id` during development** | `uv run main.py` forwarded commands to stale background `pdfatlas` processes running old code in memory. | Auto-detect git repo checkout in `main.py` (`is_dev_mode`) and switch to `com.aziis98.pdfatlas.dev`, plus `--new-instance` flag. |
+| **Treating remote PDF URLs as local file paths (`os.path.exists(url)`)** | Throws "File not found: https://..." error dialog when clicking Open Access article links or passing URLs on the CLI, because Python's `os.path.exists()` returns `False` for remote URI schemes. | First-class `source_type="url"` pipeline in `DocumentLoader`: background streaming download with in-tab loading screen, content hash caching under `~/.cache/pdfatlas/urls/`, and browser DOI fallback. |
+| **Parsing arbitrary HTTP URL path segments for arXiv IDs** | `arxiv_id_from_path` scanned path segments with regex `\d{4}\.\d{4,5}`, falsely treating general web URLs containing date or paper-like numbers (e.g. `example.com/2023/1234.5678.pdf`) as arXiv sources. | URLs starting with `http://` or `https://` are only treated as arXiv if they explicitly match `arxiv.org` domains or arXiv DOIs. All other web URLs route to the URL download pipeline. |
+| **Trusting HTTP 200 OK Content-Type for remote PDFs without magic byte inspection** | Academic portals and paywalls frequently return HTTP 200 OK with HTML landing pages or Cloudflare bot challenges, corrupting the local cache and crashing PyMuPDF parser. | Validate `b"%PDF-" in chunk[:1024]` on the first streaming chunk before writing to disk; raise `ValueError` to trigger graceful fallback to DOI in the user's browser. |
+
+
 
 
 

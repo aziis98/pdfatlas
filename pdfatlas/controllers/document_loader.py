@@ -1,10 +1,9 @@
-from __future__ import annotations
-
+import hashlib
 import os
 from pathlib import Path
 import threading
 import sqlite3
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 import gi
 
 gi.require_version("Adw", "1")
@@ -13,7 +12,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, GLib
+from gi.repository import Gdk, GLib, Gtk
 
 from ..core import crop as crop_mod
 from ..core import document as doc_mod
@@ -24,6 +23,85 @@ from ..core.state import CliState
 
 if TYPE_CHECKING:
     from ..ui.window import MainWindow
+
+URL_CACHE_ROOT = Path(GLib.get_user_cache_dir()) / "pdfatlas" / "urls"
+
+
+def get_cached_url_path(url: str) -> Path:
+    """Return persistent local cache path for a remote PDF URL."""
+    url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    url_path = url.split("?")[0].split("#")[0]
+    raw_name = os.path.basename(url_path).strip()
+    if not raw_name or not raw_name.lower().endswith(".pdf"):
+        raw_name = f"document_{url_hash}.pdf"
+    cache_dir = URL_CACHE_ROOT / url_hash
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / raw_name
+
+
+def download_remote_pdf(
+    url: str,
+    dest_path: Path,
+    progress_callback: Callable[[float, str], None] | None = None,
+    timeout: float = 30.0,
+) -> None:
+    """
+    Download a PDF from an HTTP/HTTPS URL with streaming progress,
+    redirect handling, and magic-byte PDF header validation.
+    """
+    import urllib.request
+
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "PDFAtlas/1.0 (Linux; +https://github.com/aziis98/pdfatlas)",
+            "Accept": "application/pdf, text/html;q=0.1, */*;q=0.1",
+        },
+    )
+
+    tmp_dest = dest_path.with_suffix(".tmp")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        content_type = resp.headers.get("Content-Type", "").lower()
+        content_length_header = resp.headers.get("Content-Length")
+        total_size = (
+            int(content_length_header)
+            if content_length_header and content_length_header.isdigit()
+            else 0
+        )
+
+        downloaded = 0
+        chunk_size = 65536
+        first_chunk = True
+
+        with open(tmp_dest, "wb") as f:
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+
+                if first_chunk:
+                    if b"%PDF-" not in chunk[:1024]:
+                        raise ValueError(
+                            f"Remote URL did not return a valid PDF (Content-Type: {content_type or 'unknown'})"
+                        )
+                    first_chunk = False
+
+                f.write(chunk)
+                downloaded += len(chunk)
+
+                if progress_callback:
+                    if total_size > 0:
+                        frac = min(1.0, downloaded / total_size)
+                        msg = f"{downloaded // 1024} KB / {total_size // 1024} KB"
+                    else:
+                        frac = 0.5
+                        msg = f"{downloaded // 1024} KB downloaded"
+                    progress_callback(frac, msg)
+
+    tmp_dest.replace(dest_path)
+
 
 
 class DocumentLoader:
@@ -163,6 +241,131 @@ class DocumentLoader:
                 threading.Thread(target=_download_worker, daemon=True).start()
                 return
 
+        if (source.is_url or filepath.startswith(("http://", "https://"))) and not os.path.exists(filepath):
+            target_url = source.uri if source.is_url else filepath
+            cached_pdf = get_cached_url_path(target_url)
+            if cached_pdf.exists():
+                filepath = str(cached_pdf)
+                source = PdfSource(
+                    source_type="url",
+                    uri=target_url,
+                    display_name=source.display_name or cached_pdf.name,
+                    fallback_uri=source.fallback_uri,
+                )
+            else:
+                from ..ui.document_view import PdfDocumentView
+                from ..ui.welcome import WelcomeView
+
+                display_title = (
+                    source.display_name
+                    or os.path.basename(target_url.split("?")[0].split("#")[0])
+                    or "Remote Document"
+                )
+
+                selected = self.win.tab_view.get_selected_page()
+                current_child = selected.get_child() if selected else None
+                is_empty_tab = isinstance(current_child, WelcomeView)
+
+                if is_empty_tab and selected is not None:
+                    pos = self.win.tab_view.get_page_position(selected)
+                    doc_view = self.win._create_doc_view()
+                    page = self.win.tab_view.insert(doc_view, pos)
+                    self.win.tab_view.close_page(selected)
+                elif self.win.tab_view.get_n_pages() == 0 or not new_tab:
+                    if self.win.tab_view.get_n_pages() == 0:
+                        doc_view = self.win._create_doc_view()
+                        page = self.win.tab_view.append(doc_view)
+                    else:
+                        page = selected if selected else self.win.tab_view.get_nth_page(0)
+                        child = page.get_child()
+                        if isinstance(child, PdfDocumentView):
+                            doc_view = child
+                        else:
+                            pos = self.win.tab_view.get_page_position(page)
+                            doc_view = self.win._create_doc_view()
+                            page = self.win.tab_view.insert(doc_view, pos)
+                            self.win.tab_view.close_page(selected if selected else page)
+                else:
+                    doc_view = self.win._create_doc_view()
+                    page = self.win.tab_view.append(doc_view)
+
+                page.props.title = display_title
+                self.win.tab_view.set_selected_page(page)
+                self.win.stack.set_visible_child_name("document-view")
+
+                doc_view.show_loading(
+                    title=f"Downloading {display_title}",
+                    subtitle="Connecting to web server...",
+                )
+
+                def _download_url_worker():
+                    def _on_progress(fraction: float, message: str):
+                        def _update():
+                            if self.win.tab_view.get_page_position(page) >= 0:
+                                doc_view.set_loading_progress(fraction, message)
+                            return False
+
+                        GLib.idle_add(_update)
+
+                    try:
+                        download_remote_pdf(
+                            target_url,
+                            cached_pdf,
+                            progress_callback=_on_progress,
+                        )
+                        new_source = PdfSource(
+                            source_type="url",
+                            uri=target_url,
+                            display_name=display_title,
+                            fallback_uri=source.fallback_uri,
+                        )
+
+                        def _on_success():
+                            if self.win.tab_view.get_page_position(page) < 0:
+                                return False
+                            doc_model = doc_mod.DocumentModel(str(cached_pdf))
+                            if self.win.render_worker:
+                                self.win.render_worker.set_document(str(cached_pdf))
+                            meta_title = (doc_model.doc.metadata or {}).get("title")
+                            if meta_title and isinstance(meta_title, str):
+                                cleaned_meta = meta_title.strip()
+                                if cleaned_meta and cleaned_meta.lower() not in (
+                                    "paper.pdf",
+                                    "untitled",
+                                    "none",
+                                ):
+                                    new_source.display_name = cleaned_meta
+
+                            page.props.title = new_source.display_name
+                            doc_view.set_document(doc_model, new_source, self.win.render_worker)
+                            self.win.recent_files.add(new_source)
+                            self.win._rebuild_open_menu()
+
+                            if self.win.tab_view.get_selected_page() == page:
+                                self.win._on_selected_tab_changed(self.win.tab_view, None)
+                            return False
+
+                        GLib.idle_add(_on_success)
+                    except Exception as e:
+                        err_msg = str(e)
+
+                        def _on_fail():
+                            if self.win.tab_view.get_page_position(page) >= 0:
+                                self.win.tab_view.close_page(page)
+                            if source.fallback_uri:
+                                self.win._show_toast("Opening article in web browser...")
+                                Gtk.show_uri(self.win, source.fallback_uri, Gdk.CURRENT_TIME)
+                            else:
+                                self.win._show_error_dialog(
+                                    f"Failed to download PDF from '{target_url}':\n{err_msg}"
+                                )
+                            return False
+
+                        GLib.idle_add(_on_fail)
+
+                threading.Thread(target=_download_url_worker, daemon=True).start()
+                return
+
         if not os.path.exists(filepath):
             if self.win.tab_view.get_n_pages() == 0:
                 self.win._show_welcome()
@@ -170,15 +373,16 @@ class DocumentLoader:
             return
 
         aid = arxiv_id_from_path(filepath)
-        existing = self.win.recent_files.get_by_uri(filepath)
+        existing = self.win.recent_files.get_by_uri(source.uri) or self.win.recent_files.get_by_uri(filepath)
         if not existing and aid:
             existing = self.win.recent_files.get_by_arxiv_id(aid)
 
         if existing and existing.display_name and existing.display_name != "paper.pdf":
             source = PdfSource(
                 source_type=existing.source_type,
-                uri=filepath,
+                uri=existing.uri,
                 display_name=existing.display_name,
+                fallback_uri=existing.fallback_uri,
             )
 
         try:
@@ -256,6 +460,7 @@ class DocumentLoader:
             self.win.notes_layer = doc_view.notes_layer
             self.win.notes = doc_view.notes
             self.win.highlights = doc_view.highlights
+            self.win.custom_links = getattr(doc_view, "custom_links", [])
 
             self.win.set_title(f"PDF Viewer — {source.display_name}")
             self.win.filename_label.set_label(source.display_name)
@@ -515,6 +720,7 @@ class DocumentLoader:
         if not self.win.initial_state:
             self.win.db_service.load_highlights(self.win.annotations_controller.on_highlights_loaded)
             self.win.db_service.load_notes(self.win.annotations_controller.on_notes_loaded)
+            self.win.db_service.load_custom_links(self.win.annotations_controller.on_custom_links_loaded)
 
         if self.win._deferred_state_query:
             query = self.win._deferred_state_query

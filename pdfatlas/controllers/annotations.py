@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import TYPE_CHECKING
 import gi
@@ -11,6 +12,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gdk, Gtk, Pango
 
 from ..ui.cairo_utils import hsl_to_hex
+from ..ui.components import LinkSearchDialog, UrlInputDialog
 from ..ui.gui import box, button, label, spacer
 
 if TYPE_CHECKING:
@@ -85,6 +87,7 @@ class AnnotationsController:
     def __init__(self, win: MainWindow):
         self.win = win
         self.active_highlight_color: str = "#FFF49C"
+        self.last_link_action: str = "search"
 
         # 1. Overview popover widgets
         self.annotations_btn: Gtk.MenuButton = Gtk.MenuButton()
@@ -110,6 +113,12 @@ class AnnotationsController:
             tooltip="Remove the selected highlight",
             on_clicked=lambda b: self.remove_matching_highlights(),
         )
+        self.btn_link: Adw.SplitButton = Adw.SplitButton()
+        self.btn_remove_link: Gtk.Button = button(
+            label="Unlink",
+            tooltip="Remove custom link from selection",
+            on_clicked=lambda b: self.remove_matching_custom_links(),
+        )
         self.info_menu_btn: Gtk.MenuButton = Gtk.MenuButton()
         self.selection_toolbar: Gtk.Box = box(
             orientation=Gtk.Orientation.HORIZONTAL,
@@ -126,6 +135,8 @@ class AnnotationsController:
                         self.btn_remove_hl,
                         self.btn_copy_text,
                         self.btn_copy_tex,
+                        self.btn_link,
+                        self.btn_remove_link,
                     ],
                 ),
                 spacer(),
@@ -182,7 +193,8 @@ class AnnotationsController:
             self.update_annotations_button()
 
     def update_annotations_button(self):
-        count = len(self.win.highlights) + len(self.win.notes)
+        custom_links = getattr(self.win, "custom_links", [])
+        count = len(self.win.highlights) + len(self.win.notes) + len(custom_links)
         self.annotations_btn.set_visible(count > 0)
         self.annotations_count_label.set_text(f"Annotations ({count})")
 
@@ -197,6 +209,8 @@ class AnnotationsController:
             items.append((hl.get("page", 0), 0, float(hl.get("char_start", 0)), hl, "highlight"))
         for note in self.win.notes:
             items.append((note.get("page", 0), 1, float(note.get("y", 0.0)), note, "note"))
+        for cl in custom_links:
+            items.append((cl.get("page", 0), 2, float(cl.get("char_start", 0)), cl, "custom_link"))
         items.sort(key=lambda it: (it[0], it[1], it[2]))
 
         last_page: int | None = None
@@ -255,7 +269,7 @@ class AnnotationsController:
                         css_class="caption",
                     )
                 )
-            else:
+            elif kind == "note":
                 row_content.append(Gtk.Image.new_from_icon_name("mail-attachment-symbolic"))
                 md_preview = simplify_md_preview(item.get("markdown", ""))
                 row_content.append(
@@ -266,21 +280,41 @@ class AnnotationsController:
                         css_class="caption",
                     )
                 )
+            else:
+                img = Gtk.Image.new_from_icon_name("insert-link-symbolic")
+                img.add_css_class("annotation-link-icon")
+                row_content.append(img)
+                link_title = (
+                    item.get("title") or item.get("uri") or item.get("file_path") or "Link"
+                ).strip()
+                if len(link_title) > 40:
+                    link_title = link_title[:38] + "…"
+                row_content.append(
+                    label(
+                        text=link_title,
+                        ellipsize=Pango.EllipsizeMode.END,
+                        xalign=0,
+                        css_class="caption",
+                    )
+                )
 
             main_btn.set_child(row_content)
             if kind == "highlight":
                 main_btn.set_tooltip_text("Go to annotation")
                 main_btn.connect("clicked", lambda b, h=item: self.activate_annotation(h))
-            else:
+            elif kind == "note":
                 main_btn.set_tooltip_text("Go to note")
                 main_btn.connect("clicked", lambda b, n=item: self.activate_note(n))
+            else:
+                main_btn.set_tooltip_text("Go to link")
+                main_btn.connect("clicked", lambda b, cl=item: self.activate_annotation(cl))
             linked_box.append(main_btn)
 
             btn_delete = Gtk.Button(icon_name="user-trash-symbolic")
             if kind == "highlight":
                 btn_delete.set_tooltip_text("Delete annotation")
                 btn_delete.connect("clicked", lambda b, h=item: self.delete_annotation(h))
-            else:
+            elif kind == "note":
                 btn_delete.set_tooltip_text("Delete note")
                 btn_delete.connect(
                     "clicked",
@@ -288,6 +322,9 @@ class AnnotationsController:
                     if self.win.notes_layer
                     else None,
                 )
+            else:
+                btn_delete.set_tooltip_text("Delete link")
+                btn_delete.connect("clicked", lambda b, cl=item: self.delete_custom_link(cl))
             linked_box.append(btn_delete)
 
             self.annotations_list.append(linked_box)
@@ -306,6 +343,34 @@ class AnnotationsController:
         self.win.db_service.delete_highlight(hl["id"])
         self.win.canvas.set_highlights(self.win.highlights)
         self.win.canvas.queue_draw()
+        self.update_annotations_button()
+
+    def delete_custom_link(self, cl: dict):
+        if cl in self.win.custom_links:
+            self.win.custom_links.remove(cl)
+        self.win.db_service.delete_custom_link(cl["id"])
+        if self.win.doc_model:
+            self.win.doc_model.set_custom_links(self.win.custom_links)
+        doc_view = self.win.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "custom_links"):
+            doc_view.custom_links = list(self.win.custom_links)
+        if self.win.canvas:
+            self.win.canvas.queue_draw()
+        self.update_annotations_button()
+
+    def on_custom_links_loaded(self, custom_links: list[dict]):
+        from ..ui.document_view import PdfDocumentView
+
+        if self.win.initial_state is not None:
+            return
+        self.win.custom_links = custom_links
+        doc_view = self.win.get_active_doc_view()
+        if isinstance(doc_view, PdfDocumentView):
+            doc_view.custom_links = custom_links
+        if self.win.doc_model:
+            self.win.doc_model.set_custom_links(custom_links)
+        if self.win.canvas:
+            self.win.canvas.queue_draw()
         self.update_annotations_button()
 
     def on_highlights_loaded(self, highlights: list[dict]):
@@ -402,6 +467,52 @@ class AnnotationsController:
         popover_palette.set_child(popover_box)
         self.btn_highlight.set_popover(popover_palette)
 
+        # Setup btn_link and its options popover
+        self.btn_link.connect("clicked", lambda b: self.execute_default_link_action())
+        self.btn_remove_link.set_visible(False)
+        self.update_link_split_button()
+
+        popover_link = Gtk.Popover()
+        popover_link.add_css_class("compact-menu")
+        popover_link_box = box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=2,
+            margin_top=4,
+            margin_bottom=4,
+            margin_start=4,
+            margin_end=4,
+        )
+
+        def make_link_menu_item(title: str, icon: str, action: str) -> Gtk.Button:
+            btn = Gtk.Button()
+            btn.add_css_class("flat")
+            btn_box = box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            img = Gtk.Image.new_from_icon_name(icon)
+            lbl = label(text=title, xalign=0)
+            btn_box.append(img)
+            btn_box.append(lbl)
+            btn.set_child(btn_box)
+            btn.connect("clicked", lambda b: self._select_link_action(action, popover_link))
+            return btn
+
+        # Option 1: Search Article (OpenAlex & arXiv)
+        popover_link_box.append(
+            make_link_menu_item("Paper (OpenAlex & arXiv)...", "insert-link-symbolic", "search")
+        )
+
+        # Option 2: Local PDF File
+        popover_link_box.append(
+            make_link_menu_item("Local PDF File...", "document-open-symbolic", "file")
+        )
+
+        # Option 3: Web URL Link
+        popover_link_box.append(
+            make_link_menu_item("Web URL...", "globe-symbolic", "url")
+        )
+
+        popover_link.set_child(popover_link_box)
+        self.btn_link.set_popover(popover_link)
+
         self.selection_toolbar.set_visible(False)
 
         self.info_menu_btn.set_icon_name("dialog-information-symbolic")
@@ -479,7 +590,7 @@ class AnnotationsController:
             if rng is None:
                 continue
             char_start, char_end = rng
-            rects = sel.get_selection_rects(page_idx)
+            rects = sel.get_selection_line_rects(page_idx)
             text = sel.get_selected_text(page_idx)
             if not rects:
                 continue
@@ -650,6 +761,252 @@ class AnnotationsController:
             if is_tex_available:
                 self.btn_copy_tex.set_tooltip_text("Copy source TeX for selection [Ctrl+C]")
             self.btn_remove_hl.set_visible(bool(self.selection_matching_highlights()))
+            self.btn_remove_link.set_visible(bool(self.selection_matching_custom_links()))
             self.selection_toolbar.set_visible(True)
         else:
             self.selection_toolbar.set_visible(False)
+
+    def update_link_split_button(self):
+        bx = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        if self.last_link_action == "search":
+            icon_name = "insert-link-symbolic"
+            text = "Link Paper"
+            tooltip = "Link Article / Paper (OpenAlex & arXiv) [Click to link, menu for options]"
+        elif self.last_link_action == "file":
+            icon_name = "document-open-symbolic"
+            text = "Link File"
+            tooltip = "Link to Local PDF File [Click to choose file, menu for options]"
+        else:
+            icon_name = "globe-symbolic"
+            text = "Link URL"
+            tooltip = "Link to Web URL [Click to add URL, menu for options]"
+
+        img = Gtk.Image.new_from_icon_name(icon_name)
+        lbl = Gtk.Label(label=text)
+        bx.append(img)
+        bx.append(lbl)
+        self.btn_link.set_child(bx)
+        self.btn_link.set_tooltip_text(tooltip)
+
+    def _select_link_action(self, action: str, popover: Gtk.Popover):
+        popover.popdown()
+        self.last_link_action = action
+        self.update_link_split_button()
+        self.execute_default_link_action()
+
+    def execute_default_link_action(self):
+        if self.last_link_action == "search":
+            self.add_search_link_to_selection()
+        elif self.last_link_action == "file":
+            self.add_file_link_to_selection()
+        else:
+            self.add_url_link_to_selection()
+
+    def _get_current_selection_info(self) -> list[dict] | None:
+        sel = self.win.canvas.text_selection if self.win.canvas else None
+        if not sel or not sel.has_selection() or sel.anchor_page is None or sel.focus_page is None:
+            return None
+
+        p_start = min(sel.anchor_page, sel.focus_page)
+        p_end = max(sel.anchor_page, sel.focus_page)
+
+        results = []
+        for pi in range(p_start, p_end + 1):
+            rng = sel._selection_range(pi)
+            if not rng:
+                continue
+            rects = sel.get_selection_line_rects(pi)
+            if not rects:
+                continue
+            text = sel.get_selected_text(pi)
+            results.append({
+                "page": pi,
+                "char_start": rng[0],
+                "char_end": rng[1],
+                "rects": rects,
+                "text": text,
+            })
+        return results or None
+
+    def add_url_link_to_selection(self):
+        sel_info = self._get_current_selection_info()
+        if not sel_info:
+            return
+
+        initial_text = " ".join(item["text"] for item in sel_info if item.get("text")).strip()
+        initial_url = ""
+        initial_title = initial_text
+
+        if initial_text.startswith(("http://", "https://", "www.", "10.")):
+            initial_url = initial_text
+
+        def on_confirmed(url: str, title: str):
+            self.save_custom_link(
+                uri=url,
+                file_path=None,
+                title=title or initial_text or url,
+                sel_info=sel_info,
+            )
+
+        dlg = UrlInputDialog(
+            parent_window=self.win,
+            initial_url=initial_url,
+            initial_title=initial_title,
+            on_confirm=on_confirmed,
+        )
+        dlg.present()
+
+    def add_file_link_to_selection(self):
+        sel_info = self._get_current_selection_info()
+        if not sel_info:
+            return
+
+        initial_text = " ".join(item["text"] for item in sel_info if item.get("text")).strip()
+
+        dialog = Gtk.FileChooserNative.new(
+            "Link Local PDF File",
+            self.win,
+            Gtk.FileChooserAction.OPEN,
+            "Link File",
+            "Cancel",
+        )
+        filter_pdf = Gtk.FileFilter()
+        filter_pdf.set_name("PDF Files")
+        filter_pdf.add_mime_type("application/pdf")
+        filter_pdf.add_pattern("*.pdf")
+        dialog.add_filter(filter_pdf)
+
+        def _on_response(dlg, response_id):
+            if response_id == Gtk.ResponseType.ACCEPT:
+                file = dlg.get_file()
+                if file:
+                    path = file.get_path()
+                    if path:
+                        self.save_custom_link(
+                            uri=None,
+                            file_path=path,
+                            title=initial_text or os.path.basename(path),
+                            sel_info=sel_info,
+                        )
+            dlg.destroy()
+
+        dialog.connect("response", _on_response)
+        dialog.show()
+
+    def add_search_link_to_selection(self):
+        sel_info = self._get_current_selection_info()
+        if not sel_info:
+            return
+
+        query = " ".join(item["text"] for item in sel_info if item.get("text")).strip()
+
+        def on_article_selected(uri: str | None, pdf_url: str | None, title: str):
+            self.save_custom_link(
+                uri=uri or None,
+                file_path=pdf_url,
+                title=title or query,
+                sel_info=sel_info,
+            )
+
+        dlg = LinkSearchDialog(self.win, initial_query=query, on_selected=on_article_selected)
+        dlg.present()
+
+    def save_custom_link(
+        self,
+        uri: str | None = None,
+        file_path: str | None = None,
+        title: str | None = None,
+        sel_info: list[dict] | None = None,
+    ):
+        if sel_info is None:
+            sel_info = self._get_current_selection_info()
+        if not sel_info:
+            return
+
+        for item in sel_info:
+            page = item["page"]
+            char_start = item["char_start"]
+            char_end = item["char_end"]
+            rects = item["rects"]
+            link_title = title or item.get("text") or "Custom Link"
+
+            def make_on_saved(p, cs, ce, u, fp, t, r):
+                def _on_saved(lid: int):
+                    link_obj = {
+                        "id": lid,
+                        "page": p,
+                        "char_start": cs,
+                        "char_end": ce,
+                        "uri": u,
+                        "file_path": fp,
+                        "title": t,
+                        "rects": r,
+                    }
+                    self.win.custom_links.append(link_obj)
+                    if self.win.doc_model:
+                        self.win.doc_model.set_custom_links(self.win.custom_links)
+                    if self.win.canvas:
+                        self.win.canvas.queue_draw()
+                    self.update_annotations_button()
+
+                return _on_saved
+
+            self.win.db_service.save_custom_link(
+                page=page,
+                char_start=char_start,
+                char_end=char_end,
+                rects=rects,
+                text=item.get("text") or "",
+                uri=uri,
+                file_path=file_path,
+                title=link_title,
+                on_complete=make_on_saved(
+                    page, char_start, char_end, uri, file_path, link_title, rects
+                ),
+            )
+
+        if self.win.canvas:
+            self.win.canvas.clear_selection()
+            self.win.canvas.queue_draw()
+        self.update_selection_toolbar(False)
+
+    def selection_matching_custom_links(self) -> list[dict]:
+        sel = self.win.canvas.text_selection if self.win.canvas else None
+        if not sel or not sel.has_selection() or sel.anchor_page is None or sel.focus_page is None:
+            return []
+
+        p_start = min(sel.anchor_page, sel.focus_page)
+        p_end = max(sel.anchor_page, sel.focus_page)
+
+        matching = []
+        for cl in getattr(self.win, "custom_links", []):
+            cp = cl.get("page", -1)
+            if p_start <= cp <= p_end:
+                rng = sel._selection_range(cp)
+                if rng:
+                    sel_start, sel_end = rng
+                    cl_start = cl.get("char_start", 0)
+                    cl_end = cl.get("char_end", 0)
+                    if max(sel_start, cl_start) < min(sel_end, cl_end):
+                        matching.append(cl)
+        return matching
+
+    def remove_matching_custom_links(self):
+        to_remove = self.selection_matching_custom_links()
+        if not to_remove:
+            return
+        for cl in to_remove:
+            self.win.db_service.delete_custom_link(cl["id"])
+            if cl in self.win.custom_links:
+                self.win.custom_links.remove(cl)
+        if self.win.doc_model:
+            self.win.doc_model.set_custom_links(self.win.custom_links)
+        doc_view = self.win.get_active_doc_view()
+        if doc_view and hasattr(doc_view, "custom_links"):
+            doc_view.custom_links = list(self.win.custom_links)
+        if self.win.canvas:
+            self.win.canvas.queue_draw()
+            self.win.canvas.clear_selection()
+        self.update_annotations_button()
+        self.update_selection_toolbar(False)
+

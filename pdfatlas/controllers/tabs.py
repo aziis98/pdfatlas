@@ -46,6 +46,10 @@ class TabController:
             on_toast=self.win._show_toast,
             on_state_changed=self.win._schedule_state_save,
             on_annotations_changed=self.win._update_annotations_button,
+            on_remove_custom_link=self.win._on_remove_custom_link,
+            on_remove_matching_custom_links=self.win._on_remove_matching_custom_links,
+            on_highlight_selection=self.win._on_highlight_selection,
+            on_add_link_selection=self.win._on_add_link_selection,
         )
         doc_view.canvas.set_night_mode(
             self.win.is_effective_dark(),
@@ -166,6 +170,7 @@ class TabController:
                 self.win.notes_layer = doc_view.notes_layer
                 self.win.notes = doc_view.notes
                 self.win.highlights = doc_view.highlights
+                self.win.custom_links = getattr(doc_view, "custom_links", [])
 
                 # Sync night mode to the activated tab
                 doc_view.canvas.set_night_mode(

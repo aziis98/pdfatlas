@@ -159,6 +159,12 @@ class PDFCanvas(Gtk.Overlay):
         self.on_link_hovered: Callable[[int | None, dict | None], None] | None = None
         self.on_page_hovered: Callable[[int | None, float, float], None] | None = None
         self.on_selection_changed: Callable[[bool], None] | None = None
+        self.on_remove_custom_link: Callable[[dict], None] | None = None
+        self.on_remove_matching_custom_links: Callable[[], None] | None = None
+        self.on_highlight_selection: Callable[[], None] | None = None
+        self.on_add_link_selection: Callable[[], None] | None = None
+        self.on_copy_tex: Callable[[], None] | None = None
+        self.on_toast: Callable[[str], None] | None = None
         self.text_selection: TextSelection | None = None
         self.debug_arxiv_data: dict | None = None
         self.hover_caret: tuple[int, tuple[float, float, float]] | None = None
@@ -362,8 +368,188 @@ class PDFCanvas(Gtk.Overlay):
         gesture.connect("pressed", self._on_context_press)
         self.scrolled_window.add_controller(gesture)
 
+    def copy_selection(self) -> None:
+        """Copy active text selection to clipboard."""
+        if self.text_selection and self.text_selection.has_selection():
+            text = self.text_selection.get_selected_text()
+            if text:
+                display = Gdk.Display.get_default()
+                if display:
+                    display.get_clipboard().set(text)
+                if self.on_toast:
+                    self.on_toast("Copied selected text to clipboard")
+
+    def copy_link_address(self, link: dict) -> None:
+        """Copy URL, file path, or page destination of a link to clipboard."""
+        dest = link.get("uri") or link.get("file_path")
+        if not dest and link.get("page") is not None:
+            dest = f"Page {link['page'] + 1}"
+        if dest:
+            display = Gdk.Display.get_default()
+            if display:
+                display.get_clipboard().set(str(dest))
+            if self.on_toast:
+                self.on_toast("Copied link address to clipboard")
+
+    def _build_context_menu(
+        self, page_idx: int, pt: tuple[float, float], screen_x: float, screen_y: float
+    ) -> Gtk.Widget:
+        menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        menu_box.set_margin_top(6)
+        menu_box.set_margin_bottom(6)
+        menu_box.set_margin_start(6)
+        menu_box.set_margin_end(6)
+
+        def add_item(
+            title: str,
+            icon_name: str,
+            callback: Callable[[], None],
+            shortcut: str | None = None,
+            destructive: bool = False,
+        ) -> Gtk.Button:
+            btn = Gtk.Button()
+            btn.add_css_class("flat")
+            btn.add_css_class("canvas-menu-item")
+            btn.set_halign(Gtk.Align.FILL)
+            if destructive:
+                btn.add_css_class("destructive-action")
+
+            item_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            item_box.set_hexpand(True)
+
+            img = Gtk.Image.new_from_icon_name(icon_name)
+            img.set_pixel_size(16)
+            item_box.append(img)
+
+            lbl = Gtk.Label(label=title, halign=Gtk.Align.START, hexpand=True)
+            item_box.append(lbl)
+
+            if shortcut:
+                accel_lbl = Gtk.Label(label=shortcut, halign=Gtk.Align.END)
+                accel_lbl.add_css_class("caption")
+                accel_lbl.add_css_class("dim-label")
+                accel_lbl.set_margin_start(20)
+                item_box.append(accel_lbl)
+
+            btn.set_child(item_box)
+
+            def _on_clicked(_b):
+                if self._context_popover is not None:
+                    self._context_popover.popdown()
+                callback()
+
+            btn.connect("clicked", _on_clicked)
+            menu_box.append(btn)
+            return btn
+
+        has_items_before_notes = False
+
+        # 1. Link hit actions
+        hit_link = self._hit_test_link(screen_x, screen_y)
+        link = hit_link[1] if hit_link is not None else None
+        is_custom_link = bool(link and link.get("custom"))
+
+        if link is not None:
+            uri = link.get("uri")
+            file_path = link.get("file_path")
+            if uri and uri.startswith(("http://", "https://")):
+                open_title = "Open Link in Browser"
+                open_icon = "globe-symbolic"
+            elif file_path:
+                open_title = "Open Linked Document"
+                open_icon = "document-open-symbolic"
+            else:
+                open_title = "Open Link"
+                open_icon = "external-link-symbolic"
+
+            if self.on_link_clicked is not None:
+                on_click_cb = self.on_link_clicked
+                add_item(open_title, open_icon, lambda lnk=link, p=page_idx: on_click_cb(p, lnk))
+                has_items_before_notes = True
+
+            add_item("Copy Link Address", "edit-copy-symbolic", lambda lnk=link: self.copy_link_address(lnk))
+            has_items_before_notes = True
+
+            if is_custom_link:
+                def _do_remove_custom_link(target_link=link):
+                    if self.on_remove_custom_link:
+                        self.on_remove_custom_link(target_link)
+                    elif self.on_toast:
+                        self.on_toast("Link removed")
+
+                add_item("Remove Link", "user-trash-symbolic", _do_remove_custom_link, destructive=True)
+                has_items_before_notes = True
+
+        # 2. Text Selection actions
+        has_selection = bool(self.text_selection and self.text_selection.has_selection())
+        if has_selection:
+            if has_items_before_notes:
+                menu_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+            add_item("Copy", "edit-copy-symbolic", self.copy_selection, shortcut="Ctrl+C")
+            has_items_before_notes = True
+
+            win_obj = getattr(self, "win", None)
+            if win_obj and getattr(win_obj, "arxiv_mapper", None) and win_obj.arxiv_mapper.is_ready and self.on_copy_tex:
+                add_item("Copy TeX Source", "edit-copy-symbolic", self.on_copy_tex, shortcut="Ctrl+Shift+C")
+
+            if self.on_highlight_selection:
+                add_item("Highlight", "draw-highlight-symbolic", self.on_highlight_selection, shortcut="H")
+
+            if self.on_add_link_selection:
+                add_item("Add Link…", "insert-link-symbolic", self.on_add_link_selection)
+
+            # Check if selection overlaps custom links (if not already handled by hit_link)
+            if not is_custom_link and self.on_remove_matching_custom_links:
+                cl_list = getattr(win_obj, "custom_links", []) if win_obj else []
+                overlaps = False
+                if (
+                    self.text_selection
+                    and self.text_selection.anchor_page is not None
+                    and self.text_selection.focus_page is not None
+                ):
+                    p_start = min(self.text_selection.anchor_page, self.text_selection.focus_page)
+                    p_end = max(self.text_selection.anchor_page, self.text_selection.focus_page)
+                    for cl in cl_list:
+                        cp = cl.get("page", -1)
+                        if p_start <= cp <= p_end:
+                            rng = self.text_selection._selection_range(cp)
+                            if rng and max(rng[0], cl.get("char_start", 0)) < min(rng[1], cl.get("char_end", 0)):
+                                overlaps = True
+                                break
+                if overlaps:
+                    add_item(
+                        "Remove Link",
+                        "user-trash-symbolic",
+                        self.on_remove_matching_custom_links,
+                        destructive=True,
+                    )
+
+        # 3. Always: Add Note Here
+        if has_items_before_notes:
+            menu_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        cb = self.on_note_create
+        if cb is not None:
+            self._context_note_callback = lambda: cb(page_idx, pt[0], pt[1])
+            self._context_button = add_item(
+                "Add Note Here",
+                "mail-attachment-symbolic",
+                lambda: cb(page_idx, pt[0], pt[1]),
+            )
+        else:
+            self._context_note_callback = None
+            self._context_button = None
+
+        # 4. Deselect
+        if has_selection:
+            menu_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+            add_item("Deselect", "edit-clear-symbolic", self.clear_selection, shortcut="Esc")
+
+        return menu_box
+
     def _on_context_press(self, gesture, n_press, x, y):
-        """Show the context menu at a page point on right-click."""
+        """Show the classic context menu at a page point on right-click."""
         notes_layer = self.notes_layer
         if notes_layer is not None and notes_layer.icon_at(x, y):
             return  # over a note icon — its own Delete-note menu handles it
@@ -373,24 +559,21 @@ class PDFCanvas(Gtk.Overlay):
         pt = self._screen_to_pdf_point(x, y, page_idx)
         if pt is None:
             return
-        # Lazy creation: the canvas is realized by the time a right-click
-        # arrives, so parenting the popover then is safe (creating it in
-        # __init__ pre-realize could wedge its modal grab).
+
+        # Lazy creation: parenting popover after canvas realization
         if self._context_popover is None:
             popover = Gtk.Popover()
             popover.set_parent(self)
-            button = Gtk.Button(label="Add note here")
-            button.connect("clicked", self._on_context_clicked)
-            popover.set_child(button)
+            popover.set_has_arrow(False)
+            popover.add_css_class("menu")
+            popover.add_css_class("canvas-context-menu")
             self._context_popover = popover
-            self._context_button = button
-        self._context_note_callback = None
-        cb = self.on_note_create
-        if cb is not None:
-            self._context_note_callback = lambda: cb(page_idx, pt[0], pt[1])
-        # NOTE: Gdk.Rectangle() is a Boxed struct — positional ctor args are
-        # silently ignored (deprecated), leaving a (0,0,0,0) rect that anchors
-        # the popover at the parent's top-left. Set fields explicitly.
+        else:
+            self._context_popover.set_has_arrow(False)
+
+        menu_widget = self._build_context_menu(page_idx, pt, x, y)
+        self._context_popover.set_child(menu_widget)
+
         rect = Gdk.Rectangle()
         rect.x = int(x)
         rect.y = int(y)
@@ -400,12 +583,10 @@ class PDFCanvas(Gtk.Overlay):
         self._context_popover.popup()
 
     def _on_context_clicked(self, button):
-        popover = self._context_popover
-        if popover is not None:
-            popover.popdown()
-        cb = self._context_note_callback
-        if cb is not None:
-            cb()
+        if self._context_popover is not None:
+            self._context_popover.popdown()
+        if self._context_note_callback is not None:
+            self._context_note_callback()
 
     def _screen_to_pdf_point(self, x: float, y: float, page_index: int) -> tuple[float, float] | None:
         scale = layout_scale(self.zoom, self.dpi_scale_factor)

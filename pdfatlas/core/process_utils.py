@@ -5,6 +5,14 @@ import sys
 import time
 
 
+def is_dev_mode() -> bool:
+    """Return True if running directly from a source git checkout."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    return (repo_root / "pyproject.toml").is_file() and (repo_root / ".git").is_dir()
+
+
 def init_child_process_prelude() -> None:
     """
     Configure multiprocessing spawn child processes during early module import.

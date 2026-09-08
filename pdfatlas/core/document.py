@@ -115,6 +115,8 @@ class DocumentModel:
         # Pre-cache page rectangles and links to avoid retrieving them repeatedly during GL render passes
         self._page_rects = [self.doc[i].rect for i in range(self._page_count)]
         self._page_links: list[list[dict]] = []
+        self._custom_links: list[dict] = []
+        self._custom_links_by_page: dict[int, list[dict]] = {}
         for i in range(self._page_count):
             try:
                 page = self.doc[i]
@@ -129,13 +131,46 @@ class DocumentModel:
     def page_count(self) -> int:
         return self._page_count
 
+    def set_custom_links(self, links: list[dict]) -> None:
+        """Update active custom user links and index them by page."""
+        from .layout import coalesce_rects_by_line
+
+        self._custom_links = list(links)
+        by_page: dict[int, list[dict]] = {}
+        for lnk in links:
+            p = lnk.get("page", 0)
+            rects = lnk.get("rects", [])
+            merged_rects = coalesce_rects_by_line(rects)
+            for r in merged_rects:
+                if len(r) == 4:
+                    from_rect = fitz.Rect(r[0], r[1], r[2], r[3])
+                    by_page.setdefault(p, []).append({
+                        "kind": fitz.LINK_URI if lnk.get("uri") else fitz.LINK_GOTO,
+                        "from": from_rect,
+                        "uri": lnk.get("uri"),
+                        "file_path": lnk.get("file_path"),
+                        "title": lnk.get("title") or lnk.get("text"),
+                        "text": lnk.get("text"),
+                        "custom": True,
+                        "custom_id": lnk.get("id"),
+                    })
+        self._custom_links_by_page = by_page
+
+    def get_custom_links(self) -> list[dict]:
+        return self._custom_links
+
     def get_page_links(self, index: int) -> list[dict]:
         """
         Retrieve list of link dictionaries for a page.
         Pre-cached on init to ensure lock-free O(1) access during GL rendering.
+        Includes user-created custom links.
         """
         if 0 <= index < self._page_count:
-            return self._page_links[index]
+            native = self._page_links[index]
+            custom = self._custom_links_by_page.get(index)
+            if custom:
+                return native + custom
+            return native
         return []
 
     def get_page(self, index: int) -> fitz.Page:

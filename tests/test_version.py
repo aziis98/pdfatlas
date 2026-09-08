@@ -31,3 +31,15 @@ def test_custom_build_hook_generates_commit_file(tmp_path):
     assert target.exists()
     content = target.read_text(encoding="utf-8")
     assert "COMMIT =" in content
+
+
+def test_is_dev_mode_and_app_id():
+    from pdfatlas.main import is_dev_mode, PDFViewerApplication
+
+    assert is_dev_mode() is True
+    app = PDFViewerApplication()
+    assert app.get_application_id() == "com.aziis98.pdfatlas.dev"
+
+    app_custom = PDFViewerApplication(application_id="custom.app.id")
+    assert app_custom.get_application_id() == "custom.app.id"
+

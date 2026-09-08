@@ -36,6 +36,7 @@ from ..core.document import DocumentModel
 from ..core.index import DatabaseService
 from ..core.installation import ensure_app_installed, is_app_installed
 from ..core.pdf_source import PdfSource, RecentFilesManager
+from ..core.process_utils import is_dev_mode
 from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
 from .arxiv_dialog import ArxivDialog
@@ -95,13 +96,15 @@ class MainWindow(Adw.ApplicationWindow):
     ):
         super().__init__(application=app)
         self.app = app
+        self.debug_mode = debug_mode
+        self.window_group = Gtk.WindowGroup.new()
+        self.window_group.add_window(self)
         self.set_title("PDF Viewer")
         self.set_default_size(1000, 700)
 
         # 1. Window & CLI execution parameters
         self.initial_state = state
         self.follow_link = follow_link
-        self.debug_mode = debug_mode
         self.debug_note_rect = debug_note_rect
         self.render_workers = render_workers
         self.use_shm = use_shm
@@ -142,6 +145,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.pointer_y: float = 0.0
         self.highlights: list[dict] = []
         self.notes: list[dict] = []
+        self.custom_links: list[dict] = []
         self._active_progress_tasks: dict[str, dict] = {}
         self.night_mode = self.is_effective_dark()
         self._last_link_click_time: float = 0.0
@@ -188,6 +192,13 @@ class MainWindow(Adw.ApplicationWindow):
     @property
     def tab_bar(self) -> Adw.TabBar:
         return self.tab_controller.tab_bar
+
+    def set_title(self, title: str | None) -> None:
+        if title and (getattr(self, "debug_mode", False) or is_dev_mode()):
+            prefix = "[Dev] "
+            if not title.startswith(prefix):
+                title = f"{prefix}{title}"
+        super().set_title(title)
 
     @property
     def annotations_btn(self) -> Gtk.MenuButton:
@@ -551,6 +562,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.canvas.on_link_clicked = self._on_link_clicked
         self.canvas.on_page_hovered = self._on_page_hovered
         self.canvas.on_selection_changed = self._update_selection_toolbar
+        self.canvas.on_remove_custom_link = self._on_remove_custom_link
+        self.canvas.on_remove_matching_custom_links = self._on_remove_matching_custom_links
+        self.canvas.on_highlight_selection = self._on_highlight_selection
+        self.canvas.on_add_link_selection = self._on_add_link_selection
+        self.canvas.on_copy_tex = self._copy_tex_to_clipboard
+        self.canvas.on_toast = self._show_toast
         self._apply_color_scheme()
 
         self._build_floating_zoom_controls()
@@ -805,6 +822,35 @@ class MainWindow(Adw.ApplicationWindow):
     def _update_selection_toolbar(self, has_selection: bool | None = None):
         self.annotations_controller.update_selection_toolbar(has_selection)
 
+    def _on_remove_custom_link(self, link: dict):
+        custom_id = link.get("custom_id") or link.get("id")
+        cl = next((c for c in self.custom_links if c.get("id") == custom_id), None)
+        if cl:
+            self.annotations_controller.delete_custom_link(cl)
+            self._show_toast("Link removed")
+        elif custom_id and self.db_service:
+            self.db_service.delete_custom_link(custom_id)
+            self.custom_links = [c for c in self.custom_links if c.get("id") != custom_id]
+            if self.doc_model:
+                self.doc_model.set_custom_links(self.custom_links)
+            doc_view = self.get_active_doc_view()
+            if doc_view and hasattr(doc_view, "custom_links"):
+                doc_view.custom_links = list(self.custom_links)
+            if self.canvas:
+                self.canvas.queue_draw()
+            self._update_annotations_button()
+            self._show_toast("Link removed")
+
+    def _on_remove_matching_custom_links(self):
+        self.annotations_controller.remove_matching_custom_links()
+        self._show_toast("Link removed")
+
+    def _on_highlight_selection(self):
+        self.annotations_controller.apply_highlight_to_selection()
+
+    def _on_add_link_selection(self):
+        self.annotations_controller.execute_default_link_action()
+
     # --- Floating Controls Delegations ---
 
     def _build_floating_zoom_controls(self):
@@ -909,6 +955,12 @@ class MainWindow(Adw.ApplicationWindow):
             aid = arxiv_id_from_path(uri)
             if aid:
                 source = PdfSource(source_type="arxiv", uri=uri, display_name=f"arXiv:{aid}")
+            elif uri.startswith(("http://", "https://")):
+                source = PdfSource(
+                    source_type="url",
+                    uri=uri,
+                    display_name=os.path.basename(uri.split("?")[0].split("#")[0]) or uri,
+                )
             else:
                 source = PdfSource(source_type="file", uri=uri, display_name=os.path.basename(uri))
         self.open_document(source)
@@ -1014,6 +1066,61 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_link_clicked(self, page_index: int, link: dict):
         if not self.doc_model or not self.canvas or not self.canvas.page_layout:
+            return
+
+        if link.get("custom"):
+            if file_path := link.get("file_path"):
+                try:
+                    if file_path.startswith("arxiv:"):
+                        aid = file_path[len("arxiv:") :]
+                        now = time.monotonic()
+                        if self._last_link_click_time + 0.5 <= now:
+                            self._last_link_click_time = now
+                            source = PdfSource(
+                                source_type="arxiv",
+                                uri=f"arxiv:{aid}",
+                                display_name=f"arXiv:{aid}",
+                            )
+                            self.open_document(source, new_tab=True)
+                            return
+                    elif os.path.exists(file_path):
+                        source = PdfSource(
+                            source_type="file",
+                            uri=file_path,
+                            display_name=os.path.basename(file_path),
+                        )
+                        self.open_document(source, new_tab=True)
+                        return
+                    elif file_path.startswith(("http://", "https://")):
+                        source = PdfSource(
+                            source_type="url",
+                            uri=file_path,
+                            display_name=link.get("title") or os.path.basename(file_path),
+                            fallback_uri=link.get("uri"),
+                        )
+                        self.open_document(source, new_tab=True)
+                        return
+                except Exception as e:
+                    print(f"[MainWindow] Error opening custom link PDF {file_path}: {e}", flush=True)
+
+            if uri := link.get("uri"):
+                aid = extract_arxiv_id_from_raw(uri) or arxiv_id_from_path(uri)
+                if aid:
+                    now = time.monotonic()
+                    if self._last_link_click_time + 0.5 <= now:
+                        self._last_link_click_time = now
+                        source = PdfSource(
+                            source_type="arxiv",
+                            uri=f"arxiv:{aid}",
+                            display_name=f"arXiv:{aid}",
+                        )
+                        self.open_document(source, new_tab=True)
+                        return
+
+                try:
+                    Gtk.show_uri(self, uri, Gdk.CURRENT_TIME)
+                except Exception as e:
+                    print(f"[MainWindow] Error launching URI {uri}: {e}", flush=True)
             return
 
         target_page = link.get("page")

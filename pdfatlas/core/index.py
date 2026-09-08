@@ -352,6 +352,90 @@ def load_notes_from_db(conn: sqlite3.Connection) -> list[dict]:
         return []
 
 
+def ensure_custom_links_table(conn: sqlite3.Connection) -> None:
+    """Ensure the custom_links table exists in the database."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS custom_links (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            page        INTEGER NOT NULL,
+            char_start  INTEGER NOT NULL,
+            char_end    INTEGER NOT NULL,
+            rects_json  TEXT NOT NULL,
+            text        TEXT NOT NULL,
+            uri         TEXT,
+            file_path   TEXT,
+            title       TEXT,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_custom_links_page ON custom_links(page);")
+    conn.commit()
+
+
+def save_custom_link_to_db(
+    conn: sqlite3.Connection,
+    page: int,
+    char_start: int,
+    char_end: int,
+    rects: list[tuple[float, float, float, float]],
+    text: str,
+    uri: str | None = None,
+    file_path: str | None = None,
+    title: str | None = None,
+) -> int:
+    """Save a new custom user link to the database and return its row ID."""
+    import json
+    ensure_custom_links_table(conn)
+    rects_json = json.dumps(rects)
+    cursor = conn.execute(
+        """INSERT INTO custom_links (page, char_start, char_end, rects_json, text, uri, file_path, title)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (page, char_start, char_end, rects_json, text, uri, file_path, title),
+    )
+    conn.commit()
+    return cursor.lastrowid or 0
+
+
+def delete_custom_link_from_db(conn: sqlite3.Connection, link_id: int) -> None:
+    """Delete a custom link by ID from the database."""
+    ensure_custom_links_table(conn)
+    conn.execute("DELETE FROM custom_links WHERE id = ?", (link_id,))
+    conn.commit()
+
+
+def load_custom_links_from_db(conn: sqlite3.Connection) -> list[dict]:
+    """Load all custom user links for the document from the database."""
+    import json
+    try:
+        ensure_custom_links_table(conn)
+        rows = conn.execute(
+            """SELECT id, page, char_start, char_end, rects_json, text, uri, file_path, title
+               FROM custom_links ORDER BY page, char_start"""
+        ).fetchall()
+        results = []
+        for row in rows:
+            try:
+                raw_rects = json.loads(row[4])
+                rects = [(float(r[0]), float(r[1]), float(r[2]), float(r[3])) for r in raw_rects]
+            except Exception:
+                rects = []
+            results.append({
+                "id": row[0],
+                "page": row[1],
+                "char_start": row[2],
+                "char_end": row[3],
+                "rects": rects,
+                "text": row[5],
+                "uri": row[6],
+                "file_path": row[7],
+                "title": row[8],
+            })
+        return results
+    except Exception as e:
+        print(f"[Index] Error loading custom links: {e}", flush=True)
+        return []
+
+
 def ensure_crop_table(conn: sqlite3.Connection):
     """Ensure the crop_bboxes table exists in the database."""
     conn.execute("""
@@ -650,6 +734,57 @@ class DatabaseService:
     def _bg_save_arxiv_diff(self, mapper_data: dict[str, Any]):
         if self._conn:
             save_arxiv_diff_to_db(self._conn, mapper_data)
+
+    def save_custom_link(
+        self,
+        page: int,
+        char_start: int,
+        char_end: int,
+        rects: list[tuple[float, float, float, float]],
+        text: str,
+        uri: str | None = None,
+        file_path: str | None = None,
+        title: str | None = None,
+        on_complete: Callable[[int], None] | None = None,
+    ):
+        self._executor.submit(
+            self._bg_save_custom_link,
+            page, char_start, char_end, rects, text, uri, file_path, title, on_complete
+        )
+
+    def _bg_save_custom_link(
+        self,
+        page: int,
+        char_start: int,
+        char_end: int,
+        rects: list[tuple[float, float, float, float]],
+        text: str,
+        uri: str | None = None,
+        file_path: str | None = None,
+        title: str | None = None,
+        on_complete: Callable[[int], None] | None = None,
+    ):
+        if self._conn:
+            lid = save_custom_link_to_db(
+                self._conn, page, char_start, char_end, rects, text, uri, file_path, title
+            )
+            if on_complete:
+                GLib.idle_add(on_complete, lid)
+
+    def delete_custom_link(self, link_id: int):
+        self._executor.submit(self._bg_delete_custom_link, link_id)
+
+    def _bg_delete_custom_link(self, link_id: int):
+        if self._conn:
+            delete_custom_link_from_db(self._conn, link_id)
+
+    def load_custom_links(self, on_complete: Callable[[list[dict]], None]):
+        self._executor.submit(self._bg_load_custom_links, on_complete)
+
+    def _bg_load_custom_links(self, on_complete: Callable[[list[dict]], None]):
+        if self._conn:
+            links = load_custom_links_from_db(self._conn)
+            GLib.idle_add(on_complete, links)
 
     def close(self):
         """Close database connection on the DB thread and shutdown executor."""

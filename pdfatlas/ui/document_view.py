@@ -20,7 +20,6 @@ from ..core.pdf_source import PdfSource
 from ..core.renderer import RenderWorker
 from ..core.settings import CropSettings
 from .canvas import PDFCanvas
-from .components.selection_toolbar import SelectionToolbarComponent, SelectionToolbarState
 from .components.zoom import ZoomControlsComponent, ZoomState
 from .gui import label
 from .link_preview import LinkPreviewManager
@@ -47,6 +46,10 @@ class PdfDocumentView(Gtk.Box):
         on_toast: Callable[[str], None] | None = None,
         on_state_changed: Callable[[], None] | None = None,
         on_annotations_changed: Callable[[], None] | None = None,
+        on_remove_custom_link: Callable[[dict], None] | None = None,
+        on_remove_matching_custom_links: Callable[[], None] | None = None,
+        on_highlight_selection: Callable[[], None] | None = None,
+        on_add_link_selection: Callable[[], None] | None = None,
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.render_worker = render_worker
@@ -61,6 +64,10 @@ class PdfDocumentView(Gtk.Box):
         self.on_toast = on_toast
         self.on_state_changed = on_state_changed
         self.on_annotations_changed = on_annotations_changed
+        self.on_remove_custom_link = on_remove_custom_link
+        self.on_remove_matching_custom_links = on_remove_matching_custom_links
+        self.on_highlight_selection = on_highlight_selection
+        self.on_add_link_selection = on_add_link_selection
 
         self.doc_model: DocumentModel | None = None
         self.current_source: PdfSource | None = None
@@ -71,6 +78,7 @@ class PdfDocumentView(Gtk.Box):
         self.minimap_cache = MiniMapCache()
         self.highlights: list[dict] = []
         self.notes: list[dict] = []
+        self.custom_links: list[dict] = []
         self.zoom: float = 1.0
         self.debug_note_rect: bool = False
         self._pinch_anchor_x: float = 0.0
@@ -81,6 +89,12 @@ class PdfDocumentView(Gtk.Box):
         self.canvas.win = self
         self.canvas.on_link_clicked = self._handle_link_clicked
         self.canvas.on_selection_changed = self._handle_selection_changed
+        self.canvas.on_remove_custom_link = self._handle_remove_custom_link
+        self.canvas.on_remove_matching_custom_links = self._handle_remove_matching_custom_links
+        self.canvas.on_highlight_selection = self._handle_highlight_selection
+        self.canvas.on_add_link_selection = self._handle_add_link_selection
+        self.canvas.on_copy_tex = self.copy_selection_tex
+        self.canvas.on_toast = self.on_toast
 
         self.notes_layer = NotesLayer(self)
         self.canvas.notes_layer = self.notes_layer
@@ -112,18 +126,10 @@ class PdfDocumentView(Gtk.Box):
         self.zoom_floating_box = self.zoom_component.build_widget()
         self.zoom_label = self.zoom_component.zoom_label
 
-        # Selection toolbar
-        self.selection_toolbar_component = SelectionToolbarComponent(
-            on_copy_text=self.copy_selection_text,
-            on_copy_tex=self.copy_selection_tex,
-        )
-        self.selection_toolbar = self.selection_toolbar_component.build_widget()
-
         # Wire canvas overlays
         self.canvas.add_overlay(self.zoom_floating_box)
         self.canvas.add_overlay(self.link_preview_box)
         self.canvas.add_overlay(self.link_preview_manager.portal_card)
-        self.canvas.add_overlay(self.selection_toolbar)
 
         self.vadjustment = self.canvas.vadjustment
         self.hadjustment = self.canvas.hadjustment
@@ -230,6 +236,8 @@ class PdfDocumentView(Gtk.Box):
 
         self.notes.clear()
         self.notes_layer.clear()
+
+        self.custom_links.clear()
 
         self.render_cache.clear()
         self.minimap_cache.clear()
@@ -560,6 +568,33 @@ class PdfDocumentView(Gtk.Box):
             self.on_note_create(page, x, y)
 
     def _handle_selection_changed(self, has_selection: bool):
-        self.selection_toolbar_component.update_state(SelectionToolbarState(has_selection=has_selection))
         if self.on_selection_changed:
             self.on_selection_changed(has_selection)
+
+    def _handle_remove_custom_link(self, link: dict):
+        if self.on_remove_custom_link:
+            self.on_remove_custom_link(link)
+        else:
+            custom_id = link.get("custom_id") or link.get("id")
+            if self.db_service and custom_id is not None:
+                self.db_service.delete_custom_link(custom_id)
+            self.custom_links = [c for c in self.custom_links if c.get("id") != custom_id]
+            if self.doc_model:
+                self.doc_model.set_custom_links(self.custom_links)
+            self.canvas.queue_draw()
+            if self.on_toast:
+                self.on_toast("Link removed")
+            if self.on_annotations_changed:
+                self.on_annotations_changed()
+
+    def _handle_remove_matching_custom_links(self):
+        if self.on_remove_matching_custom_links:
+            self.on_remove_matching_custom_links()
+
+    def _handle_highlight_selection(self):
+        if self.on_highlight_selection:
+            self.on_highlight_selection()
+
+    def _handle_add_link_selection(self):
+        if self.on_add_link_selection:
+            self.on_add_link_selection()

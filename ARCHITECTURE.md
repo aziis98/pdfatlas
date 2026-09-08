@@ -16,6 +16,8 @@ This document provides an up-to-date outline of every component in **PDF Atlas**
    - [MinimapDialog (`pdfatlas.ui.minimap`)](#minimapdialog-pdfatlasuiminimap)
    - [SettingsWindow (`pdfatlas.ui.settings`)](#settingswindow-pdfatlasuisettings)
    - [ArxivDialog (`pdfatlas.ui.arxiv_dialog`)](#arxivdialog-pdfatlasuiarxiv_dialog)
+   - [LinkSearchDialog (`pdfatlas.ui.components.link_search_dialog`)](#linksearchdialog-pdfatlasuicomponentslink_search_dialog)
+   - [UrlInputDialog (`pdfatlas.ui.components.url_dialog`)](#urlinputdialog-pdfatlasuicomponentsurl_dialog)
    - [Search Portal & Previews (`pdfatlas.ui.portal`, `link_preview`)](#search-portal--previews-pdfatlasuiportal-link_preview)
 3. [Feature Controllers (`pdfatlas.controllers.*`)](#3-feature-controllers-pdfatlascontrollers)
 4. [Core Engine & Models (`pdfatlas.core.*`)](#4-core-engine--models-pdfatlascore)
@@ -95,6 +97,42 @@ Continuous scroll canvas. Houses the OpenGL background canvas and the transparen
 - **Gap-less Handling**: When `page_gaps = False`, `.page-shadow` and border-radius are suppressed to maintain a continuous, seamless vertical ribbon.
 - **Progressive Low-Res Pre-seeding**: In `set_document()`, `seed_initial_previews()` extracts an ultra-fast 0.25× low-resolution thumbnail into `RenderCache` so Frame 1 renders page content immediately on screen without a blank placeholder.
 
+#### Canvas Context Menu (`popover.menu.canvas-context-menu`)
+Official Libadwaita desktop context menu anchored to right-click coordinates (`_build_context_menu`):
+
+```
++-----------------------------------------------+
+| popover.menu.canvas-context-menu              |
+| +-------------------------------------------+ |
+| | [Globe]  Open Link in Browser             | |  <-- When right-clicking over a link
+| | [Copy]   Copy Link Address                | |
+| | [Trash]  Remove Link                      | |  <-- If custom user link (destructive)
+| |-------------------------------------------| |
+| | [Copy]   Copy                      Ctrl+C | |  <-- When text is selected
+| | [Copy]   Copy TeX Source     Ctrl+Shift+C | |  <-- If arXiv source ready
+| | [Brush]  Highlight                      H | |
+| | [Link]   Add Link…                        | |
+| | [Trash]  Remove Link                      | |  <-- If selection covers custom link
+| |-------------------------------------------| |
+| | [Note]   Add Note Here                    | |  <-- Always present on page area
+| |-------------------------------------------| |
+| | [Clear]  Deselect                     Esc | |  <-- When text is selected
+| +-------------------------------------------+ |
++-----------------------------------------------+
+```
+
+- **Native Libadwaita Metrics**: Inherits native `popover.menu` styling (15px rounded container, theme background, soft double shadow, `set_has_arrow(False)`). Menu items use official 32px row height with 9px rounded corners on hover (`color-mix(in srgb, currentColor 10%, transparent)`), 6px box padding, 12px icon-to-label spacing, and 6px separator vertical margins.
+- **Note Icon Context Menu (`NotesLayer` in `pdfatlas.ui.notes`)**:
+```
++-----------------------------------------------+
+| popover.menu.canvas-context-menu              |
+| +-------------------------------------------+ |
+| | [Edit]   Open Note                        | |
+| | [Trash]  Delete Note                      | |  <-- Destructive styling
+| +-------------------------------------------+ |
++-----------------------------------------------+
+```
+
 ---
 
 ### GLCanvas & OpenGL Pipeline (`pdfatlas.ui.gl_canvas`, `gl_renderer`)
@@ -168,6 +206,47 @@ Search and paper download modal.
 
 ---
 
+### LinkSearchDialog (`pdfatlas.ui.components.link_search_dialog`)
+Academic article search and paper link attachment modal using OpenAlex REST API.
+
+```
++-------------------------------------------------------------------------------+
+| Adw.HeaderBar [Title: "Link Academic Article"]            [Cancel] [Link Paper]|
++-------------------------------------------------------------------------------+
+| Gtk.Box                                                                       |
+|   ├─ Gtk.SearchEntry ("Search paper title, DOI, or author...")                |
+|   ├─ Gtk.Box: [Gtk.Spinner] [Gtk.Label: "Searching OpenAlex / Found N results"]|
+|   └─ Gtk.ScrolledWindow                                                       |
+|         └─ Gtk.ListBox                                                        |
+|               ├─ Row 0: Title, Authors, Year, DOI, [OA PDF / Closed badge]     |
+|               ├─ Row 1: Title, Authors, Year, DOI, [OA PDF / Closed badge]     |
+|               └─ Row N: Title, Authors, Year, DOI, [OA PDF / Closed badge]     |
++-------------------------------------------------------------------------------+
+```
+
+- **Dual-Target Model**: Resolves papers to `(Link?, Pdf?)`. When clicked, PDF Atlas prioritizes opening the open-access PDF directly in a new tab if available, falling back to opening the landing page/DOI in the default browser.
+- **Search Pipeline**: 350ms debounced background worker querying OpenAlex REST API (`https://api.openalex.org/works?search={query}&per_page=6`), extracting title, authors, publication year, DOI, open-access status, and PDF URLs.
+
+---
+
+### UrlInputDialog (`pdfatlas.ui.components.url_dialog`)
+Modal dialog for entering a web URL or DOI to attach to selected text.
+
+```
++-------------------------------------------------------------------------------+
+| Adw.HeaderBar [Title: "Add Web Link"]                     [Cancel] [Add Link] |
++-------------------------------------------------------------------------------+
+| Gtk.Box                                                                       |
+|   ├─ URL or DOI: Gtk.Entry ("https://... or 10.xxxx/...")                     |
+|   └─ Link Title: Gtk.Entry ("Display label for link")                         |
++-------------------------------------------------------------------------------+
+```
+
+- **Normalization**: Auto-prefixes raw DOIs (`10.xxxx/...` → `https://doi.org/10.xxxx/...`) and schemes (`domain.com` → `https://domain.com`).
+- **Selection Pre-fill**: Pre-fills the URL field if the selected document text resembles a web link or DOI.
+
+---
+
 ### Search Portal & Previews (`pdfatlas.ui.portal`, `link_preview`)
 Overlay cards for search matches and link destinations.
 
@@ -181,25 +260,25 @@ Overlay cards for search matches and link destinations.
 Controllers decouple business logic, state mutations, and external integrations from GTK view widgets:
 
 - **`PrintController` (`printing.py`)**: Native printing integration using `Gtk.PrintDialog.print_file()` to hand PDF files directly to the OS print spooler/portal.
-- **`DocumentLoader` (`document_loader.py`)**: Asynchronous document fetching (local path, URL, or arXiv ID), disk caching in `~/.cache/pdfatlas`, and progress notifications.
+- **`DocumentLoader` (`document_loader.py`)**: Asynchronous document opening pipeline for local files, remote web PDF URLs (`source_type="url"`), and arXiv papers (`source_type="arxiv"`). Checks local URL disk cache (`~/.cache/pdfatlas/urls/<hash>/<name>.pdf`), displays in-tab loading screen with progress bar during downloads, validates `%PDF-` magic header bytes, and falls back to opening the fallback DOI / landing page in the default web browser if direct PDF downloading fails.
 - **`SearchController` (`search.py`)**: Manages debounced text search, SQLite FTS queries, search portal card navigation, and match cycling (Enter / Shift+Enter).
 - **`NavigationController` (`navigation.py`)**: Scroll position synchronization, history stack (back/forward page jumps), and page input validation.
 - **`TabController` (`tabs.py`)**: Multi-tab lifecycle, tab reordering, and cross-window tab dragging.
-- **`AnnotationsController` (`annotations.py`)**: Text highlights, color palette swatches, and note popover CRUD.
+- **`AnnotationsController` (`annotations.py`)**: Text highlights, color palette swatches, note popover CRUD, and custom user link creation (`Adw.SplitButton` remembering most recent action among `Link Paper`, `Link File`, and `Link URL`; compact popover menu; unlinking; annotations list integration). Owns the unified selection toolbar attached to `MainWindow.content_overlay` with action order: `[Highlight, Remove, Copy, Copy Source TeX, Link, Unlink]`.
 - **`ClipboardController` (`clipboard.py`)**: Text selection copying, citation formatting, and LaTeX source extraction.
 
 ---
 
 ## 4. Core Engine & Models (`pdfatlas.core.*`)
 
-- **`DocumentModel` (`document.py`)**: Thread-safe PyMuPDF (`fitz.Document`) wrapper with mutex protection for multithreaded rasterization.
+- **`DocumentModel` (`document.py`)**: Thread-safe PyMuPDF (`fitz.Document`) wrapper with mutex protection for multithreaded rasterization. Maintains per-document custom user links (`_custom_links`, `_custom_links_by_page`) and merges them into `get_page_links()` via `coalesce_rects_by_line()` for transparent GL quad rendering and click hit-testing as clean single bounding boxes per line.
 - **`RenderWorker` & `RenderCache` (`renderer.py`, `cache.py`)**: Background render worker pool and LRU cache storing raw RGB pixel buffers.
 - **`CropAnalyzer` (`crop.py`)**: Background bounding-box analyzer calculating optimal page whitespace crops.
 - **`ArxivDiffMapper` (`arxiv_mapper.py`)**: Downloads arXiv LaTeX source bundles, parses TeX ASTs, and computes word-level sourcemaps between compiled PDF words and original TeX source lines.
-- **`SearchIndex` (`index.py`)**: In-memory / on-disk SQLite FTS5 index for fast full-text querying across hundreds of pages.
-- **`PdfSource` (`pdf_source.py`)**: Uniform data model for local files, remote URLs, and arXiv identifiers, plus `RecentFilesManager` (unlimited history persistence).
+- **`SearchIndex` & `DatabaseService` (`index.py`)**: In-memory / on-disk SQLite FTS5 index for fast full-text querying across hundreds of pages. Manages the `custom_links` SQLite table for storing user-attached links (page, character offsets, bounding rects, web URI, and local/OA PDF paths).
+- **`PdfSource` (`pdf_source.py`)**: Uniform data model for local files, remote web PDF URLs (`source_type="url"`), and arXiv identifiers (`source_type="arxiv"`), supporting `fallback_uri` for publisher DOI resolution and `RecentFilesManager` (unlimited history persistence).
 - **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, and shadow configurations serialized to `~/.config/pdfatlas/settings.json`.
-- **`TextSelection` (`text_selection.py`)**: Character-accurate spatial text selection state across multiple continuous pages.
+- **`TextSelection` (`text_selection.py`)**: Character-accurate spatial text selection state across multiple continuous pages. Provides `get_selection_line_rects()` to coalesce per-character bounding boxes into continuous, word/line-level rectangles.
 
 ---
 

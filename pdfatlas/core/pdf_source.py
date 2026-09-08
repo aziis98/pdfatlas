@@ -9,6 +9,7 @@ class PdfSource:
     source_type: str
     uri: str
     display_name: str
+    fallback_uri: str | None = None
 
     @property
     def is_arxiv(self) -> bool:
@@ -16,6 +17,12 @@ class PdfSource:
             return True
         from .arxiv_mapper import arxiv_id_from_path
         return arxiv_id_from_path(self.uri) is not None
+
+    @property
+    def is_url(self) -> bool:
+        if self.source_type == "url":
+            return True
+        return self.uri.startswith(("http://", "https://"))
 
 
 def get_recent_file_path() -> Path:
@@ -43,7 +50,12 @@ class RecentFilesManager:
             try:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 for item in data:
-                    src = PdfSource(**item)
+                    src = PdfSource(
+                        source_type=item["source_type"],
+                        uri=item["uri"],
+                        display_name=item.get("display_name", ""),
+                        fallback_uri=item.get("fallback_uri"),
+                    )
                     if not is_test_path(src.uri):
                         self._entries.append(src)
             except (json.JSONDecodeError, KeyError, TypeError, OSError):
@@ -71,17 +83,19 @@ class RecentFilesManager:
         return [e for e in self._entries if e.source_type == source_type][:n]
 
     def get_by_uri(self, uri: str) -> PdfSource | None:
+        for entry in self._entries:
+            if entry.uri == uri:
+                return entry
         try:
             norm_uri = os.path.abspath(uri)
+            for entry in self._entries:
+                try:
+                    if os.path.abspath(entry.uri) == norm_uri:
+                        return entry
+                except OSError:
+                    pass
         except OSError:
-            norm_uri = uri
-        for entry in self._entries:
-            try:
-                if os.path.abspath(entry.uri) == norm_uri or entry.uri == uri:
-                    return entry
-            except OSError:
-                if entry.uri == uri:
-                    return entry
+            pass
         return None
 
     def get_by_arxiv_id(self, aid: str) -> PdfSource | None:
