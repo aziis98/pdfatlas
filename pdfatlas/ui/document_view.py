@@ -403,6 +403,7 @@ class PdfDocumentView(Gtk.Box):
         anchor_y: float | None = None,
         center_x: float | None = None,
         center_y: float | None = None,
+        from_fit_width: bool = False,
     ):
         self.nav_controller.set_zoom_level(
             new_zoom,
@@ -410,6 +411,7 @@ class PdfDocumentView(Gtk.Box):
             anchor_y=anchor_y,
             center_x=center_x,
             center_y=center_y,
+            from_fit_width=from_fit_width,
         )
         self.zoom_component.update_state(ZoomState(zoom=self.zoom))
         if self.on_zoom_changed:

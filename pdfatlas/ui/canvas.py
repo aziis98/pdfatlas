@@ -143,6 +143,9 @@ class PDFCanvas(Gtk.Overlay):
         self.night_mode_hue_rotate = True
         self.page_gap = 12
         self.page_shadow = True
+        self.is_fit_width: bool = False
+        self._last_viewport_w: float | None = None
+        self._in_viewport_resize: bool = False
         self.highlighted_block = None
         self.containers = []
         self.in_flight = set()
@@ -231,10 +234,10 @@ class PDFCanvas(Gtk.Overlay):
         self.vadjustment.connect("value-changed", self._on_scroll)
         self.hadjustment.connect("value-changed", self._on_scroll)
 
-        # Reposition pages (x offsets) when the viewport width changes so pages
-        # stay horizontally centered even though GtkFixed does no auto-layout.
+        # Reposition pages (x offsets) and resize zoom to fit width when the
+        # viewport width changes so pages stay centered or fitted.
         self.hadjustment.connect(
-            "notify::page-size", lambda *_: self._reposition_pages()
+            "notify::page-size", self._on_viewport_width_changed
         )
 
         self.set_focusable(False)
@@ -326,6 +329,41 @@ class PDFCanvas(Gtk.Overlay):
         px = self.pointer_x if self.pointer_x is not None else (vw / 2.0)
         py = self.pointer_y if self.pointer_y is not None else (vh / 2.0)
         return float(px), float(py)
+
+    def _on_viewport_width_changed(self, *args):
+        """Handle viewport width adjustments during window resize. If the
+        document previously matched the viewport width (e.g. after pressing 'w'),
+        dynamically re-fit the zoom to match the new viewport width."""
+        if self._in_viewport_resize:
+            return
+        new_viewport_w = self._viewport_width()
+        if new_viewport_w <= 10.0:
+            return
+
+        old_viewport_w = self._last_viewport_w
+        self._last_viewport_w = new_viewport_w
+
+        if not self.page_layout or not self.containers:
+            return
+
+        if old_viewport_w is not None and old_viewport_w > 0:
+            if abs(new_viewport_w - old_viewport_w) > 0.5:
+                max_dw = max((dw for _, dw, _, _ in self.page_layout), default=0.0)
+                # Check if page width previously matched the viewport width
+                is_matching = getattr(self, "is_fit_width", False) or (
+                    max_dw > 0 and abs(max_dw - old_viewport_w) <= 2.0
+                )
+                if is_matching and self.win is not None:
+                    self._in_viewport_resize = True
+                    try:
+                        self.is_fit_width = True
+                        if hasattr(self.win, "zoom_fit_width"):
+                            self.win.zoom_fit_width()
+                        return
+                    finally:
+                        self._in_viewport_resize = False
+
+        self._reposition_pages(new_viewport_w)
 
     def _reposition_pages(self, viewport_w: float | None = None):
         """Absolutely position each PageContainer at its float page_layout
@@ -921,6 +959,8 @@ class PDFCanvas(Gtk.Overlay):
 
         self.containers = []
         self.page_layout = []
+        self.is_fit_width = False
+        self._last_viewport_w = self._viewport_width()
         self.update_layout()
         self.seed_initial_previews()
 
@@ -1005,6 +1045,8 @@ class PDFCanvas(Gtk.Overlay):
             self.render_worker.clear_canvas_render_jobs(self.doc_model.filepath if self.doc_model else None)
         if self.cache:
             self.cache.clear()
+        self.is_fit_width = False
+        self._last_viewport_w = self._viewport_width()
         self.update_layout()
         self._restore_anchor(anchor)
         self.queue_draw_overlays("crop-changed")
@@ -1088,6 +1130,10 @@ class PDFCanvas(Gtk.Overlay):
 
         if self.vadjustment:
             self.vadjustment.set_upper(current_y)
+
+        vw = self._viewport_width()
+        if vw > 10.0 and (self._last_viewport_w is None or self._last_viewport_w <= 0):
+            self._last_viewport_w = vw
 
         self._reposition_pages()
 

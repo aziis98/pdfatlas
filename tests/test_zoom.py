@@ -155,3 +155,75 @@ def test_multi_tab_zoom_isolation(tmp_path):
 
     view1.close()
     view2.close()
+
+
+def test_resize_window_auto_fit_width(tmp_path):
+    pdf_path = tmp_path / "test_resize_fit.pdf"
+    _create_sample_pdf(pdf_path, pages=2, width=500, height=1000)
+
+    doc_model = DocumentModel(str(pdf_path))
+    source = PdfSource(source_type="file", uri=str(pdf_path), display_name="Test")
+    view = PdfDocumentView(render_worker=MagicMock())
+    view.set_document(doc_model, source)
+
+    view.canvas.scrolled_window.set_size_request(1000, 800)
+    view.hadjustment.set_page_size(1000.0)
+    view.vadjustment.set_page_size(800.0)
+
+    # 1. Initially at zoom 1.0 (not fit width), resizing viewport should NOT change zoom
+    view.set_zoom_level(1.0)
+    assert view.zoom == 1.0
+    view.hadjustment.set_page_size(1100.0)
+    assert view.zoom == 1.0
+
+    # 2. Press 'w' / call zoom_fit_width() -> fits 1100.0
+    view.zoom_fit_width()
+    expected_zoom_1100 = 1100.0 / (500.0 * view.canvas.dpi_scale_factor)
+    assert abs(view.zoom - expected_zoom_1100) < 0.01
+
+    # 3. Resizing viewport to 1300.0 -> automatically resizes zoom together
+    view.hadjustment.set_page_size(1300.0)
+    expected_zoom_1300 = 1300.0 / (500.0 * view.canvas.dpi_scale_factor)
+    assert abs(view.zoom - expected_zoom_1300) < 0.01
+
+    # 4. Resizing viewport down to 850.0 -> automatically resizes zoom together
+    view.hadjustment.set_page_size(850.0)
+    expected_zoom_850 = 850.0 / (500.0 * view.canvas.dpi_scale_factor)
+    assert abs(view.zoom - expected_zoom_850) < 0.01
+
+    # 5. User manually zooms out -> breaks auto fit-width
+    view.zoom_out()
+    manual_zoom = view.zoom
+    assert abs(manual_zoom - expected_zoom_850) > 0.05
+
+    # 6. Resizing viewport to 1000.0 -> does NOT change zoom
+    view.hadjustment.set_page_size(1000.0)
+    assert view.zoom == manual_zoom
+
+    view.close()
+
+
+def test_resize_window_matching_page_width_without_w_shortcut(tmp_path):
+    pdf_path = tmp_path / "test_match_fit.pdf"
+    _create_sample_pdf(pdf_path, pages=2, width=500, height=1000)
+
+    doc_model = DocumentModel(str(pdf_path))
+    source = PdfSource(source_type="file", uri=str(pdf_path), display_name="Test")
+    view = PdfDocumentView(render_worker=MagicMock())
+    view.set_document(doc_model, source)
+
+    view.canvas.scrolled_window.set_size_request(1000, 800)
+    view.hadjustment.set_page_size(1000.0)
+    view.vadjustment.set_page_size(800.0)
+
+    # Manually set zoom so page width exactly matches viewport width (1000.0)
+    matching_zoom = 1000.0 / (500.0 * view.canvas.dpi_scale_factor)
+    view.set_zoom_level(matching_zoom)
+    assert abs(view.zoom - matching_zoom) < 1e-4
+
+    # Now resize viewport to 1200.0 -> because page width matched, it resizes together
+    view.hadjustment.set_page_size(1200.0)
+    expected_zoom_1200 = 1200.0 / (500.0 * view.canvas.dpi_scale_factor)
+    assert abs(view.zoom - expected_zoom_1200) < 0.01
+
+    view.close()

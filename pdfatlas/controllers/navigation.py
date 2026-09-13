@@ -119,6 +119,7 @@ class NavigationController:
         anchor_y: float | None = None,
         center_x: float | None = None,
         center_y: float | None = None,
+        from_fit_width: bool = False,
     ):
         """
         Updates canvas zoom level anchored at mouse position or viewport center.
@@ -130,6 +131,10 @@ class NavigationController:
 
         if not self.win.doc_model:
             return
+
+        if hasattr(self.win, "canvas") and self.win.canvas:
+            self.win.canvas.is_fit_width = from_fit_width
+            self.win.canvas._last_viewport_w = self.win.canvas._viewport_width()
 
         old_zoom = self.win.zoom
         min_zoom = self.win.settings.min_zoom
@@ -206,6 +211,8 @@ class NavigationController:
         upper = self.win.vadjustment.get_upper()
         max_y = max(lower, upper - viewport_h)
         target_v = clamp(lower, new_val_v, max_y)
+        if anchor_y is None and val_v <= 1.0:
+            target_v = 0.0
 
         self.win.vadjustment.set_value(target_v)
 
@@ -248,6 +255,9 @@ class NavigationController:
         if viewport_w <= 100:
             return
 
+        if hasattr(self.win.canvas, "is_fit_width"):
+            self.win.canvas.is_fit_width = True
+
         max_page_w = 0.0
         for i in range(self.win.doc_model.page_count):
             rect = None
@@ -260,7 +270,10 @@ class NavigationController:
 
         if max_page_w > 0:
             target_zoom = viewport_w / (max_page_w * self.win.canvas.dpi_scale_factor)
-            self.set_zoom_level(target_zoom)
+            self.set_zoom_level(target_zoom, from_fit_width=True)
+            if hasattr(self.win.canvas, "is_fit_width"):
+                self.win.canvas.is_fit_width = True
+            self.win.canvas._last_viewport_w = viewport_w
 
     def zoom_fit_page(self):
         if not self.win.doc_model or not self.win.canvas:

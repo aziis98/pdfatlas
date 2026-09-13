@@ -98,6 +98,7 @@ Continuous scroll canvas. Houses the OpenGL background canvas and the transparen
 - **`PageContainer`**: Outer `Gtk.Overlay` for each page. Holds CSS `.page-shadow` and `.page-container`, note popover pins, and link click hitboxes.
 - **Gap-less Handling**: When `page_gaps = False`, `.page-shadow` and border-radius are suppressed to maintain a continuous, seamless vertical ribbon.
 - **Progressive Low-Res Pre-seeding**: In `set_document()`, `seed_initial_previews()` extracts an ultra-fast 0.25× low-resolution thumbnail into `RenderCache` so Frame 1 renders page content immediately on screen without a blank placeholder.
+- **Dynamic Viewport Width Resizing**: Tracks whether the document page width matches the viewport width (e.g. after pressing `w` or via `--fit-width`). When the window and horizontal adjustment viewport resize (`notify::page-size`), `_on_viewport_width_changed()` detects if the page was fitted and automatically recalculates zoom to continuously resize the page together with the window.
 
 #### Canvas Context Menu (`popover.menu.canvas-context-menu`)
 Official Libadwaita desktop context menu anchored to right-click coordinates (`_build_context_menu`):

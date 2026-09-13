@@ -1611,6 +1611,7 @@ class MainWindow(Adw.ApplicationWindow):
         anchor_y: float | None = None,
         center_x: float | None = None,
         center_y: float | None = None,
+        from_fit_width: bool = False,
     ):
         doc_view = self.get_active_doc_view()
         if doc_view is not None:
@@ -1620,6 +1621,7 @@ class MainWindow(Adw.ApplicationWindow):
                 anchor_y=anchor_y,
                 center_x=center_x,
                 center_y=center_y,
+                from_fit_width=from_fit_width,
             )
         else:
             self.nav_controller.set_zoom_level(
@@ -1628,6 +1630,7 @@ class MainWindow(Adw.ApplicationWindow):
                 anchor_y=anchor_y,
                 center_x=center_x,
                 center_y=center_y,
+                from_fit_width=from_fit_width,
             )
         self._schedule_state_save()
 
