@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Callable
 
 import gi
@@ -53,7 +54,7 @@ class PdfDocumentView(Gtk.Box):
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.render_worker = render_worker
-        self.settings = settings or CropSettings()
+        self.settings = copy.copy(settings) if settings is not None else CropSettings()
         self.db_service = db_service
         self.on_page_changed = on_page_changed
         self.on_zoom_changed = on_zoom_changed

@@ -1284,25 +1284,45 @@ class MainWindow(Adw.ApplicationWindow):
     # --- Toggles & Crop Analyzer ---
 
     def toggle_crop(self):
-        self.settings.enabled = not self.settings.enabled
-        self._on_crop_settings_updated()
-        if self.settings.enabled:
-            self._scan_crop_if_needed()
+        active = self.get_active_doc_view()
+        if active and active.settings:
+            active.settings.enabled = not active.settings.enabled
+            self._on_crop_settings_updated()
+            if active.settings.enabled:
+                self._scan_crop_if_needed()
+            self._schedule_state_save()
+        else:
+            self.settings.enabled = not self.settings.enabled
+            self._on_crop_settings_updated()
 
     def _scan_crop_if_needed(self):
-        if self.settings.enabled and self.crop_analyzer and not all(self.crop_analyzer.scanned):
+        active = self.get_active_doc_view()
+        settings = active.settings if (active and active.settings) else self.settings
+        crop_analyzer = active.crop_analyzer if active else self.crop_analyzer
+        if settings.enabled and crop_analyzer and not all(crop_analyzer.scanned):
             self._start_crop_analysis()
 
     def toggle_gapless(self):
-        self.settings.page_gaps = not self.settings.page_gaps
-        self.gapless_action.set_state(GLib.Variant.new_boolean(not self.settings.page_gaps))
-        self._on_crop_settings_updated()
+        active = self.get_active_doc_view()
+        if active and active.settings:
+            active.settings.page_gaps = not active.settings.page_gaps
+            self._on_crop_settings_updated()
+            self._schedule_state_save()
+        else:
+            self.settings.page_gaps = not self.settings.page_gaps
+            self._on_crop_settings_updated()
 
     def _on_crop_btn_toggled(self, btn):
-        self.settings.enabled = btn.get_active()
-        self._on_crop_settings_updated()
-        if self.settings.enabled:
-            self._scan_crop_if_needed()
+        active = self.get_active_doc_view()
+        if active and active.settings:
+            active.settings.enabled = btn.get_active()
+            self._on_crop_settings_updated()
+            if active.settings.enabled:
+                self._scan_crop_if_needed()
+            self._schedule_state_save()
+        else:
+            self.settings.enabled = btn.get_active()
+            self._on_crop_settings_updated()
 
     def _on_settings_btn_clicked(self, btn):
         SettingsWindow(
@@ -1322,7 +1342,32 @@ class MainWindow(Adw.ApplicationWindow):
         ).present(self)
 
     def _on_settings_changed(self):
+        self.settings.save()
+        from ..ui.document_view import PdfDocumentView
+
+        for i in range(self.tab_view.get_n_pages()):
+            page = self.tab_view.get_nth_page(i)
+            child = page.get_child()
+            if isinstance(child, PdfDocumentView) and child.settings:
+                child.settings.min_padding_left = self.settings.min_padding_left
+                child.settings.min_padding_right = self.settings.min_padding_right
+                child.settings.min_padding_top = self.settings.min_padding_top
+                child.settings.min_padding_bottom = self.settings.min_padding_bottom
+                child.settings.crop_mode = self.settings.crop_mode
+                child.settings.whitespace_threshold = self.settings.whitespace_threshold
+                child.settings.sparse_strategy = self.settings.sparse_strategy
+                child.settings.page_shadow = self.settings.page_shadow
+                child.settings.color_scheme = self.settings.color_scheme
+                child.settings.night_mode_invert = self.settings.night_mode_invert
+                child.settings.night_mode_hue_rotate = self.settings.night_mode_hue_rotate
+                child.settings.max_texture_zoom = self.settings.max_texture_zoom
+                child.settings.min_zoom = self.settings.min_zoom
+                child.settings.max_zoom = self.settings.max_zoom
+
         self._on_crop_settings_updated()
+        active = self.get_active_doc_view()
+        if active:
+            self._schedule_state_save()
         min_zoom = self.settings.min_zoom
         max_zoom = self.settings.max_zoom
         if self.zoom < min_zoom or self.zoom > max_zoom:
@@ -1331,40 +1376,49 @@ class MainWindow(Adw.ApplicationWindow):
             self.run_search(self._last_query)
 
     def _on_crop_settings_updated(self):
+        active = self.get_active_doc_view()
+        settings = active.settings if (active and active.settings) else self.settings
         if self.crop_action:
-            self.crop_action.set_state(GLib.Variant.new_boolean(self.settings.enabled))
+            self.crop_action.set_state(GLib.Variant.new_boolean(settings.enabled))
         if self.gapless_action:
-            self.gapless_action.set_state(GLib.Variant.new_boolean(self.settings.page_gaps))
+            self.gapless_action.set_state(GLib.Variant.new_boolean(not settings.page_gaps))
         self._apply_color_scheme()
-        self.settings.save()
 
-        if self.crop_analyzer:
-            self.crop_analyzer.compute_crop_rects(self.settings)
+        crop_analyzer = active.crop_analyzer if active else self.crop_analyzer
+        if crop_analyzer:
+            crop_analyzer.compute_crop_rects(settings)
 
-        if self.canvas:
-            self.canvas.on_crop_changed()
+        canvas = active.canvas if active else self.canvas
+        if canvas:
+            canvas.on_crop_changed()
 
     def _on_reanalyze(self):
         self._start_crop_analysis(force=True)
 
     def _start_crop_analysis(self, force: bool = False):
-        if not self.doc_model or not self.crop_analyzer:
+        active = self.get_active_doc_view()
+        crop_analyzer = active.crop_analyzer if active else self.crop_analyzer
+        doc_model = active.doc_model if active else self.doc_model
+        settings = active.settings if (active and active.settings) else self.settings
+        canvas = active.canvas if active else self.canvas
+
+        if not doc_model or not crop_analyzer:
             return
-        if not force and not self.settings.enabled:
+        if not force and not settings.enabled:
             return
 
-        page_count = self.doc_model.page_count
+        page_count = doc_model.page_count
 
         if not force and self.db_service:
             def _on_loaded(cached_bboxes):
-                if not self.crop_analyzer or not self.doc_model:
+                if not crop_analyzer or not doc_model:
                     return
                 if cached_bboxes is not None and len(cached_bboxes) == page_count:
-                    self.crop_analyzer.raw_bboxes = cached_bboxes
-                    self.crop_analyzer.scanned = [True] * page_count
-                    self.crop_analyzer.compute_crop_rects(self.settings)
-                    if self.canvas:
-                        self.canvas.on_crop_changed()
+                    crop_analyzer.raw_bboxes = cached_bboxes
+                    crop_analyzer.scanned = [True] * page_count
+                    crop_analyzer.compute_crop_rects(settings)
+                    if canvas:
+                        canvas.on_crop_changed()
                     return
                 self._run_crop_scan()
 
@@ -1373,11 +1427,16 @@ class MainWindow(Adw.ApplicationWindow):
             self._run_crop_scan()
 
     def _run_crop_scan(self):
-        if not self.doc_model or not self.crop_analyzer:
+        active = self.get_active_doc_view()
+        crop_analyzer = active.crop_analyzer if active else self.crop_analyzer
+        doc_model = active.doc_model if active else self.doc_model
+        settings = active.settings if (active and active.settings) else self.settings
+
+        if not doc_model or not crop_analyzer:
             return
-        page_count = self.doc_model.page_count
-        self.crop_analyzer.scanned = [False] * page_count
-        self.crop_analyzer.raw_bboxes = [None] * page_count
+        page_count = doc_model.page_count
+        crop_analyzer.scanned = [False] * page_count
+        crop_analyzer.raw_bboxes = [None] * page_count
 
         self.crop_scanned_count = 0
         self._show_progress("crop_analysis", "Scanning page margins for auto-crop...", 0.0)
@@ -1385,17 +1444,19 @@ class MainWindow(Adw.ApplicationWindow):
         for i in range(page_count):
             if self.render_worker:
                 self.render_worker.queue_crop_job(
-                    self.doc_model,
-                    self.crop_analyzer,
+                    doc_model,
+                    crop_analyzer,
                     i,
-                    self.settings,
+                    settings,
                     self._on_crop_page_scanned,
                     self._on_crop_analysis_complete,
                 )
 
     def _on_crop_page_scanned(self, page_index):
         self.crop_scanned_count += 1
-        total = self.doc_model.page_count if self.doc_model else 1
+        active = self.get_active_doc_view()
+        doc_model = active.doc_model if active else self.doc_model
+        total = doc_model.page_count if doc_model else 1
         self._show_progress(
             "crop_analysis",
             "Scanning page margins for auto-crop...",
@@ -1404,10 +1465,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_crop_analysis_complete(self):
         self._hide_progress("crop_analysis")
-        if self.db_service and self.crop_analyzer:
-            self.db_service.save_crop_bboxes(self.crop_analyzer.raw_bboxes)
-        if self.canvas:
-            self.canvas.on_crop_changed()
+        active = self.get_active_doc_view()
+        crop_analyzer = active.crop_analyzer if active else self.crop_analyzer
+        canvas = active.canvas if active else self.canvas
+        if self.db_service and crop_analyzer:
+            self.db_service.save_crop_bboxes(crop_analyzer.raw_bboxes)
+        if canvas:
+            canvas.on_crop_changed()
 
     def _show_progress(self, task_id: str, description: str, fraction: float):
         pct = int(round(fraction * 100))
@@ -1635,7 +1699,12 @@ class MainWindow(Adw.ApplicationWindow):
         new_state = not old_state
         action.set_state(GLib.Variant.new_boolean(new_state))
 
-        self.settings.page_gaps = not new_state
+        active = self.get_active_doc_view()
+        if active and active.settings:
+            active.settings.page_gaps = not new_state
+            self._schedule_state_save()
+        else:
+            self.settings.page_gaps = not new_state
         self._on_crop_settings_updated()
 
     def _on_crop_action_activated(self, action, parameter):
@@ -1643,7 +1712,16 @@ class MainWindow(Adw.ApplicationWindow):
         new_state = not old_state
         action.set_state(GLib.Variant.new_boolean(new_state))
 
-        self.settings.enabled = new_state
+        active = self.get_active_doc_view()
+        if active and active.settings:
+            active.settings.enabled = new_state
+            if active.settings.enabled:
+                self._scan_crop_if_needed()
+            self._schedule_state_save()
+        else:
+            self.settings.enabled = new_state
+            if self.settings.enabled:
+                self._scan_crop_if_needed()
         self._on_crop_settings_updated()
 
     def is_effective_dark(self) -> bool:

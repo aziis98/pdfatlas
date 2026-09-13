@@ -537,9 +537,14 @@ class DocumentLoader:
 
             if state.zoom is not None:
                 self.win.set_zoom_level(state.zoom)
+            active = self.win.get_active_doc_view()
             if state.crop is not None:
+                if active and active.settings:
+                    active.settings.enabled = state.crop
                 self.win.settings.enabled = state.crop
             if state.page_gaps is not None:
+                if active and active.settings:
+                    active.settings.page_gaps = state.page_gaps
                 self.win.settings.page_gaps = state.page_gaps
             if state.color_scheme is not None:
                 self.win.settings.color_scheme = state.color_scheme
@@ -728,14 +733,28 @@ class DocumentLoader:
             self.win.entry.set_text(query)
             self.win.run_search(query)
 
-        # Restore saved zoom & scroll_x/scroll_y state from .db if no CLI state was specified
+        # Restore saved zoom & scroll_x/scroll_y & crop/page_gaps state from .db if no CLI state was specified
         if not self.win.initial_state and conn is not None:
             saved_state = load_doc_state(conn)
+            active = self.win.get_active_doc_view()
+            settings_updated = False
+            if active and active.settings:
+                if "crop_enabled" in saved_state:
+                    active.settings.enabled = bool(saved_state["crop_enabled"])
+                    settings_updated = True
+                if "page_gaps" in saved_state:
+                    active.settings.page_gaps = bool(saved_state["page_gaps"])
+                    settings_updated = True
+                if settings_updated:
+                    self.win._on_crop_settings_updated()
+                    if active.settings.enabled:
+                        self.win._scan_crop_if_needed()
+
             if "zoom" in saved_state:
-                self.win.set_zoom_level(saved_state["zoom"])
+                self.win.set_zoom_level(float(saved_state["zoom"]))
             if "scroll_x" in saved_state or "scroll_y" in saved_state:
-                scroll_x = saved_state.get("scroll_x", 0.0)
-                scroll_y = saved_state.get("scroll_y", 0.0)
+                scroll_x = float(saved_state.get("scroll_x", 0.0))
+                scroll_y = float(saved_state.get("scroll_y", 0.0))
 
                 def apply_saved_scroll():
                     if "scroll_x" in saved_state and self.win.hadjustment:
@@ -758,7 +777,10 @@ class DocumentLoader:
 
     def save_current_doc_state(self):
         if self.win.db_service:
+            active = self.win.get_active_doc_view()
             zoom = self.win.zoom
             scroll_y = self.win.vadjustment.get_value() if self.win.vadjustment else 0.0
             scroll_x = self.win.hadjustment.get_value() if self.win.hadjustment else 0.0
-            self.win.db_service.save_state(zoom, scroll_y, scroll_x)
+            crop_enabled = active.settings.enabled if (active and active.settings) else self.win.settings.enabled
+            page_gaps = active.settings.page_gaps if (active and active.settings) else self.win.settings.page_gaps
+            self.win.db_service.save_state(zoom, scroll_y, scroll_x, crop_enabled, page_gaps)

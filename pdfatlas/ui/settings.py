@@ -15,6 +15,7 @@ class SettingsWindow(Adw.PreferencesDialog):
 
     def __init__(self, parent_window, settings: CropSettings, on_changed, on_reanalyze):
         super().__init__()
+        self.parent_window = parent_window
         self.settings = settings
         self.on_changed = on_changed
         self.on_reanalyze = on_reanalyze
@@ -68,12 +69,20 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.shadow_switch.set_active(self.settings.page_shadow)
         self.shadow_switch.connect("notify::active", self._on_shadow_toggled)
 
+        active_doc = (
+            self.parent_window.get_active_doc_view()
+            if self.parent_window and hasattr(self.parent_window, "get_active_doc_view")
+            else None
+        )
+        initial_enabled = active_doc.settings.enabled if (active_doc and active_doc.settings) else self.settings.enabled
+        initial_gaps = active_doc.settings.page_gaps if (active_doc and active_doc.settings) else self.settings.page_gaps
+
         self.enable_switch = Adw.SwitchRow(title="Enable auto-crop")
-        self.enable_switch.set_active(self.settings.enabled)
+        self.enable_switch.set_active(initial_enabled)
         self.enable_switch.connect("notify::active", self._on_enable_toggled)
 
         self.gaps_switch = Adw.SwitchRow(title="Page gaps")
-        self.gaps_switch.set_active(self.settings.page_gaps)
+        self.gaps_switch.set_active(initial_gaps)
         self.gaps_switch.connect("notify::active", self._on_gaps_toggled)
 
         self._add_group(page, "Appearance", [self.theme_combo, self.shadow_switch, self.invert_spin, self.hue_rotate_switch])
@@ -298,11 +307,21 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.on_changed()
 
     def _on_enable_toggled(self, row, pspec):
-        self.settings.enabled = row.get_active()
+        val = row.get_active()
+        self.settings.enabled = val
+        if self.parent_window and hasattr(self.parent_window, "get_active_doc_view"):
+            active = self.parent_window.get_active_doc_view()
+            if active and active.settings:
+                active.settings.enabled = val
         self.on_changed()
 
     def _on_gaps_toggled(self, row, pspec):
-        self.settings.page_gaps = row.get_active()
+        val = row.get_active()
+        self.settings.page_gaps = val
+        if self.parent_window and hasattr(self.parent_window, "get_active_doc_view"):
+            active = self.parent_window.get_active_doc_view()
+            if active and active.settings:
+                active.settings.page_gaps = val
         self.on_changed()
 
     def _on_padding_changed(self, adjustment, attr_name):

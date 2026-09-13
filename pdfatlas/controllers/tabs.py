@@ -5,7 +5,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw
+from gi.repository import Adw, GLib
 
 if TYPE_CHECKING:
     from ..ui.document_view import PdfDocumentView
@@ -178,6 +178,15 @@ class TabController:
                     invert_amount=self.win.settings.night_mode_invert,
                     hue_rotate=self.win.settings.night_mode_hue_rotate,
                 )
+
+                # Sync per-document crop & gapless action states
+                if self.win.crop_action and doc_view.settings:
+                    self.win.crop_action.set_state(GLib.Variant.new_boolean(doc_view.settings.enabled))
+                if self.win.gapless_action and doc_view.settings:
+                    self.win.gapless_action.set_state(GLib.Variant.new_boolean(not doc_view.settings.page_gaps))
+
+                if doc_view.settings and doc_view.settings.enabled:
+                    self.win._scan_crop_if_needed()
 
                 # Restore scroll position safely
                 doc_view.restore_scroll_position()

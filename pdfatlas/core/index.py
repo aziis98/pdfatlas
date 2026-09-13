@@ -227,8 +227,15 @@ def ensure_state_table(conn: sqlite3.Connection):
     conn.commit()
 
 
-def save_doc_state(conn: sqlite3.Connection, zoom: float, scroll_y: float, scroll_x: float):
-    """Save document view state (zoom, scroll_x, scroll_y) to the database."""
+def save_doc_state(
+    conn: sqlite3.Connection,
+    zoom: float,
+    scroll_y: float,
+    scroll_x: float,
+    crop_enabled: bool | None = None,
+    page_gaps: bool | None = None,
+) -> None:
+    """Save document view state (zoom, scroll_x, scroll_y, crop_enabled, page_gaps) to the database."""
     try:
         ensure_state_table(conn)
         conn.execute(
@@ -243,22 +250,36 @@ def save_doc_state(conn: sqlite3.Connection, zoom: float, scroll_y: float, scrol
             "INSERT INTO doc_state (key, value) VALUES ('scroll_x', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (str(scroll_x),),
         )
+        if crop_enabled is not None:
+            conn.execute(
+                "INSERT INTO doc_state (key, value) VALUES ('crop_enabled', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("1" if crop_enabled else "0",),
+            )
+        if page_gaps is not None:
+            conn.execute(
+                "INSERT INTO doc_state (key, value) VALUES ('page_gaps', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("1" if page_gaps else "0",),
+            )
         conn.commit()
     except Exception as e:
         print(f"[Index] Error saving document state: {e}", flush=True)
 
 
-def load_doc_state(conn: sqlite3.Connection) -> dict[str, float]:
+def load_doc_state(conn: sqlite3.Connection) -> dict[str, float | bool]:
     """Load document view state from the database."""
     try:
         ensure_state_table(conn)
         rows = conn.execute("SELECT key, value FROM doc_state").fetchall()
-        result: dict[str, float] = {}
+        result: dict[str, float | bool] = {}
         for k, v in rows:
-            try:
-                result[str(k)] = float(v)
-            except ValueError:
-                pass
+            key = str(k)
+            if key in ("crop_enabled", "page_gaps"):
+                result[key] = str(v).strip().lower() in ("1", "true")
+            else:
+                try:
+                    result[key] = float(v)
+                except ValueError:
+                    pass
         return result
     except Exception as e:
         print(f"[Index] Error loading document state: {e}", flush=True)
@@ -647,13 +668,27 @@ class DatabaseService:
 
         GLib.idle_add(on_results, results, search_id)
 
-    def save_state(self, zoom: float, scroll_y: float, scroll_x: float):
-        """Save document view state (zoom, scroll_x, scroll_y) on the DB thread."""
-        self._executor.submit(self._bg_save_state, zoom, scroll_y, scroll_x)
+    def save_state(
+        self,
+        zoom: float,
+        scroll_y: float,
+        scroll_x: float,
+        crop_enabled: bool | None = None,
+        page_gaps: bool | None = None,
+    ) -> None:
+        """Save document view state (zoom, scroll_x, scroll_y, crop_enabled, page_gaps) on the DB thread."""
+        self._executor.submit(self._bg_save_state, zoom, scroll_y, scroll_x, crop_enabled, page_gaps)
 
-    def _bg_save_state(self, zoom: float, scroll_y: float, scroll_x: float):
+    def _bg_save_state(
+        self,
+        zoom: float,
+        scroll_y: float,
+        scroll_x: float,
+        crop_enabled: bool | None = None,
+        page_gaps: bool | None = None,
+    ) -> None:
         if self._conn:
-            save_doc_state(self._conn, zoom, scroll_y, scroll_x)
+            save_doc_state(self._conn, zoom, scroll_y, scroll_x, crop_enabled, page_gaps)
 
     def save_highlight(
         self,

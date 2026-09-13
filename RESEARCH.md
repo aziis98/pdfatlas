@@ -505,12 +505,23 @@ This document records durable technical findings, architectural decisions, mathe
   3. Dialog modernization: Use non-deprecated `Gtk.FileDialog` with `set_initial_folder(Gio.File.new_for_path(initial_dir))` on GTK 4.10+, with graceful fallback to `Gtk.FileChooserNative.set_current_folder()`.
   4. Auto-persistence on selection: When any file is chosen, `_record_last_open_dir(os.path.dirname(path))` saves the directory to settings.json immediately, keeping session and tab states in sync.
 
+### 1.40. Per-Document Crop & Gap-less State Architecture
+
+- **Background:** Auto-crop Mode (`settings.enabled`) and Gap-less Mode (`not settings.page_gaps`) were previously treated as global application preferences stored in `~/.config/pdfatlas/settings.json`. All open tabs shared the exact same `CropSettings` object reference in memory. Toggling crop (`c`) or gapless (`g`) in one document immediately mutated other open tabs and rewrote global settings. This disrupted reading workflows when switching between academic papers (which require whitespace cropping) and presentations/books (which require uncropped, full-page margins).
+- **Resolution Strategy:**
+  1. **SQLite `doc_state` Persistence:** Extended the per-document SQLite cache (`~/.cache/pdfatlas/<hash>_v2.db`) key-value table `doc_state` to store `'crop_enabled'` (`'1'`/`'0'`) and `'page_gaps'` (`'1'`/`'0'`) alongside existing `'zoom'`, `'scroll_x'`, and `'scroll_y'`. This requires zero schema migrations.
+  2. **Per-Tab `CropSettings` Isolation:** When constructing a `PdfDocumentView`, `settings` is cloned via `copy.copy(settings)`. Each tab manages its own isolated `enabled` and `page_gaps` properties without cross-polluting other tabs or overwriting `settings.json`.
+  3. **Reactivity on Tab Switch:** `TabController.on_selected_tab_changed` reactively synchronizes `win.crop-mode` and `win.gapless-mode` GTK action states (`set_state()`) to match the activated tab's document settings, ensuring menu toggles and shortcuts always reflect the active tab.
+  4. **Action Boolean Correction:** Fixed a bug in `_on_crop_settings_updated` where `gapless_action.set_state()` passed `settings.page_gaps` instead of `not settings.page_gaps` (gap-less mode is active when page gaps are disabled).
+  5. **Global Defaults Role:** `settings.json` is preserved as the global defaults template for newly opened documents with no stored state.
+
 ---
 
 ## 2. Rejected Approaches
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **Global `settings.json` mutation on crop / gapless toggles** | Mutating global settings on `c` or `g` toggled modes across all open tabs and clobbered document-specific viewing states when opening different document formats (e.g. 2-column papers vs full-bleed slides). | Clone `CropSettings` per tab in `PdfDocumentView`, persist `crop_enabled` and `page_gaps` per document in SQLite `doc_state`, and use `settings.json` only as the initial default template. |
 | **In-memory only directory tracking (`self._last_open_dir`)** | Lost remembered folder state across application restarts, forcing users to navigate to their papers directory every time the application launched. | Persist `last_open_dir` in `CropSettings` serialized to `~/.config/pdfatlas/settings.json`. |
 | **Parsing only `/Contents` for PDF annotations** | Acrobat and modern viewers store rich formatting, line breaks, and styling in the `/RC` XHTML string; `/Contents` often collapses into unformatted single lines or strips markup. | Inspect `/RC` rich text key first via `doc.xref_get_key()`, fall back to `/Contents` only if `/RC` is missing, and pass both through `html_to_markdown()`. |
 | **Anchoring imported highlight notes at `(x0, y0)`** | Placing note icons at the top-left of the highlight bbox puts the icon directly over the initial words of the highlighted sentence, obscuring reading. | Anchor at the mid-right edge `(rect.x1, (rect.y0 + rect.y1) / 2.0)`, positioning the note icon cleanly to the right of the highlighted phrase. |

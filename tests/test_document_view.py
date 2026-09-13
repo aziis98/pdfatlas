@@ -178,5 +178,117 @@ def test_document_view_selection_change_callback():
     assert selection_events == [True, False]
 
 
+def test_document_view_isolated_settings():
+    from pdfatlas.core.settings import CropSettings
+
+    base_settings = CropSettings(enabled=False, page_gaps=True)
+    view1 = PdfDocumentView(settings=base_settings)
+    view2 = PdfDocumentView(settings=base_settings)
+
+    # They should have cloned settings, not shared reference
+    assert view1.settings is not view2.settings
+    assert view1.settings is not base_settings
+
+    # Mutate view1
+    view1.settings.enabled = True
+    view1.settings.page_gaps = False
+
+    # view2 and base_settings remain unaffected
+    assert view2.settings.enabled is False
+    assert view2.settings.page_gaps is True
+    assert base_settings.enabled is False
+    assert base_settings.page_gaps is True
+
+
+def test_doc_state_save_and_load_crop_and_gaps():
+    import sqlite3
+    from pdfatlas.core.index import load_doc_state, save_doc_state
+
+    conn = sqlite3.connect(":memory:")
+    save_doc_state(conn, zoom=1.5, scroll_y=250.0, scroll_x=50.0, crop_enabled=True, page_gaps=False)
+
+    state = load_doc_state(conn)
+    assert state["zoom"] == 1.5
+    assert state["scroll_y"] == 250.0
+    assert state["scroll_x"] == 50.0
+    assert state["crop_enabled"] is True
+    assert state["page_gaps"] is False
+
+    # Update state
+    save_doc_state(conn, zoom=2.0, scroll_y=0.0, scroll_x=0.0, crop_enabled=False, page_gaps=True)
+    updated = load_doc_state(conn)
+    assert updated["zoom"] == 2.0
+    assert updated["crop_enabled"] is False
+    assert updated["page_gaps"] is True
+
+
+def test_tab_switch_syncs_crop_and_gapless_action_states(tmp_path):
+    import gi
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+    from pdfatlas.ui.window import MainWindow
+
+    # Create two temporary sample PDFs
+    doc1_path = tmp_path / "doc1.pdf"
+    doc2_path = tmp_path / "doc2.pdf"
+    doc = fitz.open()
+    doc.new_page(width=500, height=800)
+    doc.save(str(doc1_path))
+    doc.save(str(doc2_path))
+    doc.close()
+
+    app = Adw.Application(application_id="com.example.testcropgapsync")
+    win = MainWindow(app)
+
+    source1 = PdfSource(source_type="file", uri=str(doc1_path), display_name="Doc 1")
+    source2 = PdfSource(source_type="file", uri=str(doc2_path), display_name="Doc 2")
+
+    win.open_document(source1, new_tab=False)
+    win.open_document(source2, new_tab=True)
+
+    assert win.tab_view.get_n_pages() == 2
+
+    # Tab 2 is active
+    doc_view2 = win.get_active_doc_view()
+    assert doc_view2 is not None
+
+    # Switch to Tab 1
+    page1 = win.tab_view.get_nth_page(0)
+    win.tab_view.set_selected_page(page1)
+    doc_view1 = win.get_active_doc_view()
+    assert doc_view1 is not None
+
+    # Set Tab 1 to crop enabled and gapless
+    win.toggle_crop()
+    win.toggle_gapless()
+    assert doc_view1.settings.enabled is True
+    assert doc_view1.settings.page_gaps is False
+    c_state = win.crop_action.get_state()
+    g_state = win.gapless_action.get_state()
+    assert c_state is not None and c_state.get_boolean() is True
+    assert g_state is not None and g_state.get_boolean() is True
+
+    # Switch to Tab 2
+    page2 = win.tab_view.get_nth_page(1)
+    win.tab_view.set_selected_page(page2)
+
+    # Tab 2 should still have defaults (not cropped, not gapless)
+    assert doc_view2.settings.enabled is False
+    assert doc_view2.settings.page_gaps is True
+    c_state2 = win.crop_action.get_state()
+    g_state2 = win.gapless_action.get_state()
+    assert c_state2 is not None and c_state2.get_boolean() is False
+    assert g_state2 is not None and g_state2.get_boolean() is False
+
+    # Switch back to Tab 1
+    win.tab_view.set_selected_page(page1)
+    c_state1_again = win.crop_action.get_state()
+    g_state1_again = win.gapless_action.get_state()
+    assert c_state1_again is not None and c_state1_again.get_boolean() is True
+    assert g_state1_again is not None and g_state1_again.get_boolean() is True
+
+    win.close()
+
+
 
 

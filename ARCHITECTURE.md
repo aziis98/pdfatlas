@@ -75,6 +75,8 @@ Tab content wrapper. Manages the transition between paper download/loading state
 +-------------------------------------------------------------------------------+
 ```
 
+- **Per-Document Settings Isolation**: Owns an isolated, cloned copy of `CropSettings` (`self.settings = copy.copy(settings)`). Toggling auto-crop (`enabled`) or gap-less mode (`page_gaps`) mutates only this tab's instance and persists directly to the document's SQLite cache database (`doc_state`), leaving other open tabs unaffected.
+
 ---
 
 ### PDFCanvas & PageContainer (`pdfatlas.ui.canvas`)
@@ -263,7 +265,7 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`DocumentLoader` (`document_loader.py`)**: Asynchronous document opening pipeline for local files, remote web PDF URLs (`source_type="url"`), and arXiv papers (`source_type="arxiv"`). Checks local URL disk cache (`~/.cache/pdfatlas/urls/<hash>/<name>.pdf`), displays in-tab loading screen with progress bar during downloads, validates `%PDF-` magic header bytes, and falls back to opening the fallback DOI / landing page in the default web browser if direct PDF downloading fails.
 - **`SearchController` (`search.py`)**: Manages debounced text search, SQLite FTS queries, search portal card navigation, and match cycling (Enter / Shift+Enter).
 - **`NavigationController` (`navigation.py`)**: Document navigation, viewport scroll synchronization, zoom anchoring, continuous step scrolling (80 px), and page-height-aware navigation (`Left`/`Right` arrow keys and vim `h`/`l` keys scrolling by `1 page height + gap` using `canvas.page_layout` and `canvas.page_gap`).
-- **`TabController` (`tabs.py`)**: Multi-tab lifecycle, tab reordering, and cross-window tab dragging.
+- **`TabController` (`tabs.py`)**: Multi-tab lifecycle, tab reordering, cross-window tab dragging, and tab state synchronization (restores viewport scroll position and reactively synchronizes `win.crop-mode` and `win.gapless-mode` GTK action states with the activated document's isolated `CropSettings`).
 - **`AnnotationsController` (`annotations.py`)**: Text highlights, color palette swatches, note popover CRUD, and custom user link creation (`Adw.SplitButton` remembering most recent action among `Link Paper`, `Link File`, and `Link URL`; compact popover menu; unlinking; annotations list integration). Owns the unified selection toolbar attached to `MainWindow.content_overlay` with action order: `[Highlight, Remove, Copy, Copy Source TeX, Link, Unlink]`.
 - **`ClipboardController` (`clipboard.py`)**: Text selection copying, citation formatting, and LaTeX source extraction.
 
@@ -275,9 +277,9 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`RenderWorker` & `RenderCache` (`renderer.py`, `cache.py`)**: Background render worker pool and LRU cache storing raw RGB pixel buffers.
 - **`CropAnalyzer` (`crop.py`)**: Background bounding-box analyzer calculating optimal page whitespace crops.
 - **`ArxivDiffMapper` (`arxiv_mapper.py`)**: Downloads arXiv LaTeX source bundles, parses TeX ASTs, and computes word-level sourcemaps between compiled PDF words and original TeX source lines.
-- **`SearchIndex` & `DatabaseService` (`index.py`)**: In-memory / on-disk SQLite FTS5 index for fast full-text querying across hundreds of pages. Manages the `custom_links` SQLite table for storing user-attached links (page, character offsets, bounding rects, web URI, and local/OA PDF paths).
+- **`SearchIndex` & `DatabaseService` (`index.py`)**: In-memory / on-disk SQLite FTS5 index for fast full-text querying across hundreds of pages. Manages the `doc_state` SQLite table for persistent per-document reading state (`zoom`, `scroll_x`, `scroll_y`, `crop_enabled`, `page_gaps`), and the `custom_links` table for storing user-attached links.
 - **`PdfSource` (`pdf_source.py`)**: Uniform data model for local files, remote web PDF URLs (`source_type="url"`), and arXiv identifiers (`source_type="arxiv"`), supporting `fallback_uri` for publisher DOI resolution and `RecentFilesManager` (unlimited history persistence).
-- **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, shadow, and last-opened file chooser directory configurations serialized to `~/.config/pdfatlas/settings.json`.
+- **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, shadow, and last-opened file chooser directory configurations serialized to `~/.config/pdfatlas/settings.json`. Serves as the global defaults template for newly opened documents, while per-document reading state overrides `enabled` and `page_gaps` per tab.
 - **`TextSelection` (`text_selection.py`)**: Character-accurate spatial text selection state across multiple continuous pages. Provides `get_selection_line_rects()` to coalesce per-character bounding boxes into continuous, word/line-level rectangles.
 - **`HTMLToMarkdown` (`html_to_markdown.py`)**: Lightweight, dependency-free HTML/XHTML to Markdown parser converting rich annotation text (Acrobat `/RC` XML fragments, inline styles, formatting, and links) into clean Markdown.
 - **`PdfNotesImporter` (`pdf_notes_import.py`)**: Embedded PDF annotation scanner extracting comments from highlights and sticky notes, converting markup to Markdown, and positioning imported notes at the mid-right edge of annotation bounding boxes (`x = rect.x1`, `y = (rect.y0 + rect.y1) / 2.0`).

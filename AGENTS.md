@@ -110,3 +110,11 @@ pdfatlas/
 - **Rule (Mandatory):** Maintain and append entries to [`RESEARCH.md`](RESEARCH.md) whenever discovering non-obvious library behavior, architectural trade-offs, or failed experiments.
 - Always document **why** an approach failed and **how** the durable solution works to prevent regression loops.
 
+---
+
+## 7. Git Workflow & Uncommitted Changes Prompting
+
+- **Rule (Mandatory):** Whenever finishing work on a feature, bug fix, or refactor (after automated tests and quality checks pass), check `git status` and **explicitly notify the user of uncommitted work**.
+- **Prompt for Commit:** Proactively ask the user if they would like you to commit the changes, providing a clear proposed commit message (or prompt for commit confirmation). Do not leave feature work concluded without warning the user that changes remain uncommitted in the working tree.
+
+
