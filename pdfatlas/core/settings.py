@@ -27,6 +27,7 @@ class CropSettings:
     color_scheme: str = "system"  # "system", "light", or "dark"
     night_mode_invert: float = 0.95  # 0.0 .. 1.0 (95% default)
     night_mode_hue_rotate: bool = True
+    last_open_dir: str | None = None
 
     @classmethod
     def load(cls, path: Path | None = None) -> "CropSettings":

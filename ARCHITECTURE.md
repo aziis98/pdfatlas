@@ -262,7 +262,7 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`PrintController` (`printing.py`)**: Native printing integration using `Gtk.PrintDialog.print_file()` to hand PDF files directly to the OS print spooler/portal.
 - **`DocumentLoader` (`document_loader.py`)**: Asynchronous document opening pipeline for local files, remote web PDF URLs (`source_type="url"`), and arXiv papers (`source_type="arxiv"`). Checks local URL disk cache (`~/.cache/pdfatlas/urls/<hash>/<name>.pdf`), displays in-tab loading screen with progress bar during downloads, validates `%PDF-` magic header bytes, and falls back to opening the fallback DOI / landing page in the default web browser if direct PDF downloading fails.
 - **`SearchController` (`search.py`)**: Manages debounced text search, SQLite FTS queries, search portal card navigation, and match cycling (Enter / Shift+Enter).
-- **`NavigationController` (`navigation.py`)**: Scroll position synchronization, history stack (back/forward page jumps), and page input validation.
+- **`NavigationController` (`navigation.py`)**: Document navigation, viewport scroll synchronization, zoom anchoring, continuous step scrolling (80 px), and page-height-aware navigation (`Left`/`Right` arrow keys and vim `h`/`l` keys scrolling by `1 page height + gap` using `canvas.page_layout` and `canvas.page_gap`).
 - **`TabController` (`tabs.py`)**: Multi-tab lifecycle, tab reordering, and cross-window tab dragging.
 - **`AnnotationsController` (`annotations.py`)**: Text highlights, color palette swatches, note popover CRUD, and custom user link creation (`Adw.SplitButton` remembering most recent action among `Link Paper`, `Link File`, and `Link URL`; compact popover menu; unlinking; annotations list integration). Owns the unified selection toolbar attached to `MainWindow.content_overlay` with action order: `[Highlight, Remove, Copy, Copy Source TeX, Link, Unlink]`.
 - **`ClipboardController` (`clipboard.py`)**: Text selection copying, citation formatting, and LaTeX source extraction.
@@ -277,8 +277,10 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`ArxivDiffMapper` (`arxiv_mapper.py`)**: Downloads arXiv LaTeX source bundles, parses TeX ASTs, and computes word-level sourcemaps between compiled PDF words and original TeX source lines.
 - **`SearchIndex` & `DatabaseService` (`index.py`)**: In-memory / on-disk SQLite FTS5 index for fast full-text querying across hundreds of pages. Manages the `custom_links` SQLite table for storing user-attached links (page, character offsets, bounding rects, web URI, and local/OA PDF paths).
 - **`PdfSource` (`pdf_source.py`)**: Uniform data model for local files, remote web PDF URLs (`source_type="url"`), and arXiv identifiers (`source_type="arxiv"`), supporting `fallback_uri` for publisher DOI resolution and `RecentFilesManager` (unlimited history persistence).
-- **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, and shadow configurations serialized to `~/.config/pdfatlas/settings.json`.
+- **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, shadow, and last-opened file chooser directory configurations serialized to `~/.config/pdfatlas/settings.json`.
 - **`TextSelection` (`text_selection.py`)**: Character-accurate spatial text selection state across multiple continuous pages. Provides `get_selection_line_rects()` to coalesce per-character bounding boxes into continuous, word/line-level rectangles.
+- **`HTMLToMarkdown` (`html_to_markdown.py`)**: Lightweight, dependency-free HTML/XHTML to Markdown parser converting rich annotation text (Acrobat `/RC` XML fragments, inline styles, formatting, and links) into clean Markdown.
+- **`PdfNotesImporter` (`pdf_notes_import.py`)**: Embedded PDF annotation scanner extracting comments from highlights and sticky notes, converting markup to Markdown, and positioning imported notes at the mid-right edge of annotation bounding boxes (`x = rect.x1`, `y = (rect.y0 + rect.y1) / 2.0`).
 
 ---
 

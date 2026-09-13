@@ -9,7 +9,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Pango", "1.0")
-from gi.repository import Adw, Gdk, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, Gtk, Pango
 
 from ..ui.cairo_utils import hsl_to_hex
 from ..ui.components import LinkSearchDialog, UrlInputDialog
@@ -863,6 +863,42 @@ class AnnotationsController:
 
         initial_text = " ".join(item["text"] for item in sel_info if item.get("text")).strip()
 
+        initial_dir = self.win._get_default_open_dir()
+
+        if hasattr(Gtk, "FileDialog"):
+            dialog = Gtk.FileDialog(title="Link Local PDF File")
+            dialog.set_accept_label("Link File")
+            filter_pdf = Gtk.FileFilter()
+            filter_pdf.set_name("PDF Files")
+            filter_pdf.add_mime_type("application/pdf")
+            filter_pdf.add_pattern("*.pdf")
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(filter_pdf)
+            dialog.set_filters(filters)
+            dialog.set_default_filter(filter_pdf)
+
+            if initial_dir:
+                dialog.set_initial_folder(Gio.File.new_for_path(initial_dir))
+
+            def _on_file_dialog_finish(dlg: Gtk.FileDialog, result: Gio.AsyncResult):
+                try:
+                    file = dlg.open_finish(result)
+                    if file:
+                        path = file.get_path()
+                        if path:
+                            self.win._record_last_open_dir(os.path.dirname(path))
+                            self.save_custom_link(
+                                uri=None,
+                                file_path=path,
+                                title=initial_text or os.path.basename(path),
+                                sel_info=sel_info,
+                            )
+                except Exception:
+                    pass
+
+            dialog.open(self.win, None, _on_file_dialog_finish)
+            return
+
         dialog = Gtk.FileChooserNative.new(
             "Link Local PDF File",
             self.win,
@@ -875,6 +911,8 @@ class AnnotationsController:
         filter_pdf.add_mime_type("application/pdf")
         filter_pdf.add_pattern("*.pdf")
         dialog.add_filter(filter_pdf)
+        if initial_dir:
+            dialog.set_current_folder(Gio.File.new_for_path(initial_dir))
 
         def _on_response(dlg, response_id):
             if response_id == Gtk.ResponseType.ACCEPT:
@@ -882,6 +920,7 @@ class AnnotationsController:
                 if file:
                     path = file.get_path()
                     if path:
+                        self.win._record_last_open_dir(os.path.dirname(path))
                         self.save_custom_link(
                             uri=None,
                             file_path=path,

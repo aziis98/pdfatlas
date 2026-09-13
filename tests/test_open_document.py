@@ -272,3 +272,47 @@ def test_seed_initial_previews_populates_render_cache(tmp_path):
     assert isinstance(best, PageTexture)
     assert best.width == 100
     assert best.height == 150
+
+
+def test_last_open_dir_settings_persistence(tmp_path):
+    from pdfatlas.core.settings import CropSettings
+
+    settings_path = tmp_path / "settings.json"
+    settings = CropSettings.load(settings_path)
+    assert settings.last_open_dir is None
+
+    test_dir = str(tmp_path / "my_docs")
+    settings.last_open_dir = test_dir
+    settings.save(settings_path)
+
+    reloaded = CropSettings.load(settings_path)
+    assert reloaded.last_open_dir == test_dir
+
+
+def test_get_default_open_dir_priority(tmp_path):
+    win = _make_window(tmp_path)
+    settings_file = tmp_path / "settings.json"
+    win.settings = win.settings.__class__.load(settings_file)
+
+    # 1. When neither settings nor doc_model is set
+    assert win._get_default_open_dir() is None
+
+    # 2. When doc_model is set with a valid file
+    doc_dir = tmp_path / "academic_papers"
+    doc_dir.mkdir()
+    doc_file = doc_dir / "paper.pdf"
+    doc_file.write_text("fake pdf")
+
+    mock_doc = MagicMock()
+    mock_doc.filepath = str(doc_file)
+    win.doc_model = mock_doc
+    assert win._get_default_open_dir() == str(doc_dir)
+
+    # 3. When settings.last_open_dir is set, it takes priority over doc_model
+    custom_dir = tmp_path / "custom_folder"
+    custom_dir.mkdir()
+    win._record_last_open_dir(str(custom_dir))
+    assert win._get_default_open_dir() == str(custom_dir)
+    assert win.settings.last_open_dir == str(custom_dir)
+
+    win.close()

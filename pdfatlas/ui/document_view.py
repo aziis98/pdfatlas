@@ -474,6 +474,9 @@ class PdfDocumentView(Gtk.Box):
     def page_step(self, direction: int):
         self.nav_controller.scroll_page(forward=(direction > 0))
 
+    def scroll_page(self, forward: bool = True):
+        self.nav_controller.scroll_page(forward=forward)
+
     def set_highlighted_block(self, page_idx: int, bbox: tuple[float, float, float, float] | None):
         self.canvas.set_highlighted_block(page_idx, bbox)
 

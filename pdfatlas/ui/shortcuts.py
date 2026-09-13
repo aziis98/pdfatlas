@@ -70,7 +70,7 @@ class ShortcutsController:
         # `_setup_nav_key_capture` because GTK consumes them for focus navigation
         # before the shortcut controller sees them.
 
-        # Scrolling - Vim Keys (h & l: viewport height; j & k: step scroll)
+        # Scrolling - Vim Keys (h & l: 1 page height + gap; j & k: step scroll)
         self._add_nav_shortcut("h", lambda: self.win.scroll_page(forward=False))
         self._add_nav_shortcut("j", lambda: self.win.scroll_step(forward=True))
         self._add_nav_shortcut("k", lambda: self.win.scroll_step(forward=False))

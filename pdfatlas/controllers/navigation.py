@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from typing import TYPE_CHECKING
 
 from ..core.layout import layout_scale
@@ -289,11 +290,50 @@ class NavigationController:
             self.set_zoom_level(target_zoom)
 
     def scroll_page(self, forward: bool = True):
-        page_size = self.win.vadjustment.get_page_size()
-        delta = page_size if forward else -page_size
-        self.win.vadjustment.set_value(max(0.0, self.win.vadjustment.get_value() + delta))
+        canvas = getattr(self.win, "canvas", None)
+        page_layout = canvas.page_layout if canvas else None
+        if not canvas or not page_layout or not self.win.vadjustment:
+            page_size = self.win.vadjustment.get_page_size() if self.win.vadjustment else 700.0
+            delta = page_size if forward else -page_size
+            if self.win.vadjustment:
+                max_scroll = max(0.0, self.win.vadjustment.get_upper() - page_size)
+                self.win.vadjustment.set_value(max(0.0, min(self.win.vadjustment.get_value() + delta, max_scroll)))
+            return
+
+        page_gap = float(canvas.page_gap)
+        half_gap = page_gap / 2.0
+        val = self.win.vadjustment.get_value()
+
+        # Binary search for the page index corresponding to the current vertical scroll position.
+        # Adding half_gap + 1e-4 treats the lower half of an inter-page gap as belonging to the next page.
+        offsets = [layout[0] for layout in page_layout]
+        idx = bisect_right(offsets, val + half_gap + 1e-4) - 1
+        current_idx = max(0, min(idx, len(page_layout) - 1))
+
+        if forward:
+            # Distance of current page plus its trailing inter-page gap
+            _y, _dw, dh, _crop = page_layout[current_idx]
+            delta = dh + page_gap
+            new_val = val + delta
+        else:
+            # Distance of preceding page plus its trailing inter-page gap
+            target_idx = current_idx - 1 if current_idx > 0 else 0
+            _y, _dw, dh, _crop = page_layout[target_idx]
+            delta = dh + page_gap
+            new_val = val - delta
+
+        viewport_h = self.win.vadjustment.get_page_size()
+        max_scroll = max(0.0, self.win.vadjustment.get_upper() - viewport_h)
+        target_val = max(0.0, min(new_val, max_scroll))
+
+        self.win.vadjustment.set_value(target_val)
 
     def scroll_step(self, forward: bool = True):
+        if not self.win.vadjustment:
+            return
         step_size = 80.0
         delta = step_size if forward else -step_size
-        self.win.vadjustment.set_value(max(0.0, self.win.vadjustment.get_value() + delta))
+        viewport_h = self.win.vadjustment.get_page_size()
+        max_scroll = max(0.0, self.win.vadjustment.get_upper() - viewport_h)
+        target_val = max(0.0, min(self.win.vadjustment.get_value() + delta, max_scroll))
+        self.win.vadjustment.set_value(target_val)

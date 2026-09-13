@@ -473,6 +473,37 @@ This document records durable technical findings, architectural decisions, mathe
      - "Deselect" (`Esc`) at the bottom.
   5. **Universal Document Action:** "Add Note Here" (`mail-attachment-symbolic`) remains anchored to the exact right-click coordinates on the page.
   6. **Note Icon Context Menu:** The right-click popover on note pin icons in `NotesLayer` also uses the exact same Libadwaita menu metrics, presenting "Open Note" and "Delete Note" (`destructive-action`).
+  7. **Page Navigation Distance (1 Page Height + Gap):**
+      - **Problem:** In GTK's `Gtk.Adjustment`, `get_page_size()` returns the viewport height of the window allocation, not the document's content page size. Using `vadjustment.get_page_size()` for `scroll_page()` caused irregular jumps: when zoomed out, it skipped multiple pages; when zoomed in, it only moved partway down the current page.
+      - **Mathematical Solution:** In continuous vertical layout, page tops are located at $y_i = \sum_{k=0}^{i-1} (dh_k + G)$, where $dh$ is the rendered height (`rect.height * layout_scale(zoom, dpi_scale_factor)`) and $G$ is `canvas.page_gap` ($12.0\text{ px}$ normal, $0.0\text{ px}$ gapless). The exact distance between consecutive page tops is $y_{i+1} - y_i = dh_i + G$.
+      - **Current Page Detection:** Binary search via `bisect_right(offsets, val + half_gap + 1e-4) - 1` maps the current vertical scroll position `val` to page index $i$ (treating the lower half of each inter-page gap as belonging to the next page).
+### 1.38. Embedded PDF Annotation Extraction, Rich-Text HTML Conversion & Mid-Right Anchoring
+
+- **Background:** Academic and review workflows often involve PDFs pre-annotated by editors or collaborators using Adobe Acrobat, Okular, or Apple Preview. In these tools, comment threads attached to highlights, underlines, or sticky notes are stored as XML/XHTML rich-text payloads inside the annotation object's `/RC` key (`<?xml ...><body ...><p ...><span ...>...</span></p></body>`), with fallback plain text in `/Contents`.
+- **Parsing Strategy:**
+  1. Priority inspection: Check the annotation xref dictionary via `doc.xref_get_key(xref, "RC")`. If present and typed as a string, parse the rich XHTML string. If absent, fall back to `annot.info.get("content")` or `/Contents`.
+  2. Standalone standard-library parser ([`pdfatlas/core/html_to_markdown.py`](pdfatlas/core/html_to_markdown.py)): Subclasses `html.parser.HTMLParser` with `html.unescape` to strip XML declarations and convert `<p>`, `<div>`, `<br>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<code>`, headings (`<h1>`–`<h6>`), lists (`<ul>`/`<ol>`/`<li>`), and links (`<a>`) directly to clean Markdown.
+- **Mid-Right Bounding Box Anchor Coordinate System:**
+  - Standard PDF highlight bounding boxes (`annot.rect = fitz.Rect(x0, y0, x1, y1)`) span across the text line or block.
+  - To position the PDF Atlas note icon (`mail-attachment-symbolic`) neatly alongside the highlighted text without obscuring the reading content:
+    $$x = \text{rect.x1}$$
+    $$y = \frac{\text{rect.y0} + \text{rect.y1}}{2.0}$$
+  - Notes are recorded with 1-indexed `page = page_idx + 1`, matching PDF Atlas's SQLite database schema.
+- **Deduplication & Automatic Cache Sync:**
+  - Initial database creation (`extract_text_to_db`) imports embedded annotations alongside text extraction.
+  - For previously created document databases, `get_db_for_pdf` invokes `sync_embedded_notes(pdf_path, conn)`, checking existing note `(page, round(x, 1), round(y, 1))` coordinates to insert any missing embedded annotations idempotently without creating duplicates.
+
+### 1.39. Persistent File Dialog Directory Remembering (`Gtk.FileDialog` & Settings)
+
+- **Background:** Clicking "Open File" from a new tab's welcome view, the headerbar split button, `Ctrl+O`, or attaching a local PDF link opened file chooser dialogs without remembering previously navigated directories. On Linux desktops running GTK4 / Libadwaita, resetting to the default home directory on every file pick disrupted multi-document academic workflows where papers reside within specific project or research folders.
+- **Resolution Strategy:**
+  1. `CropSettings.last_open_dir`: Added persistent tracking to `CropSettings` serialized in `~/.config/pdfatlas/settings.json`.
+  2. Dynamic initial folder resolution priority:
+     - `self.settings.last_open_dir` if non-empty and `os.path.isdir(directory)` exists.
+     - Fallback to parent directory of the currently open document (`os.path.dirname(self.doc_model.filepath)`).
+     - Default system home / documents folder if neither exists.
+  3. Dialog modernization: Use non-deprecated `Gtk.FileDialog` with `set_initial_folder(Gio.File.new_for_path(initial_dir))` on GTK 4.10+, with graceful fallback to `Gtk.FileChooserNative.set_current_folder()`.
+  4. Auto-persistence on selection: When any file is chosen, `_record_last_open_dir(os.path.dirname(path))` saves the directory to settings.json immediately, keeping session and tab states in sync.
 
 ---
 
@@ -480,6 +511,9 @@ This document records durable technical findings, architectural decisions, mathe
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **In-memory only directory tracking (`self._last_open_dir`)** | Lost remembered folder state across application restarts, forcing users to navigate to their papers directory every time the application launched. | Persist `last_open_dir` in `CropSettings` serialized to `~/.config/pdfatlas/settings.json`. |
+| **Parsing only `/Contents` for PDF annotations** | Acrobat and modern viewers store rich formatting, line breaks, and styling in the `/RC` XHTML string; `/Contents` often collapses into unformatted single lines or strips markup. | Inspect `/RC` rich text key first via `doc.xref_get_key()`, fall back to `/Contents` only if `/RC` is missing, and pass both through `html_to_markdown()`. |
+| **Anchoring imported highlight notes at `(x0, y0)`** | Placing note icons at the top-left of the highlight bbox puts the icon directly over the initial words of the highlighted sentence, obscuring reading. | Anchor at the mid-right edge `(rect.x1, (rect.y0 + rect.y1) / 2.0)`, positioning the note icon cleanly to the right of the highlighted phrase. |
 | **Version-controlling `_build_commit.py` in git** | Generated build artifact churned `git status` on every package build, lagged 1 commit behind HEAD, and caused merge conflicts. | Add `_build_commit.py` to `.gitignore`, package it via `build_data['artifacts']`, clean up in `finalize()`, and import dynamically via `importlib`. |
 | **Artificial 22px shrunk-down custom buttons for context menus** | Overriding item height to 22px with 12px text made the menu feel cramped, shrunk, and unlike standard Libadwaita desktop apps. | Official Libadwaita `popover.menu` metrics: 32px rows, 9px rounded hover states, 15px popover corners, and `set_has_arrow(False)`. |
 | **Single-button isolated popover for canvas right-click (`[ Add note here ]`)** | Right-clicking on links or selections offered no contextual desktop operations; users expect standard options like open, copy address, copy text, remove link, etc. | Native context menu dynamically populated based on link hitbox, selection state, and page coordinates. |
@@ -518,6 +552,7 @@ This document records durable technical findings, architectural decisions, mathe
 | **Treating remote PDF URLs as local file paths (`os.path.exists(url)`)** | Throws "File not found: https://..." error dialog when clicking Open Access article links or passing URLs on the CLI, because Python's `os.path.exists()` returns `False` for remote URI schemes. | First-class `source_type="url"` pipeline in `DocumentLoader`: background streaming download with in-tab loading screen, content hash caching under `~/.cache/pdfatlas/urls/`, and browser DOI fallback. |
 | **Parsing arbitrary HTTP URL path segments for arXiv IDs** | `arxiv_id_from_path` scanned path segments with regex `\d{4}\.\d{4,5}`, falsely treating general web URLs containing date or paper-like numbers (e.g. `example.com/2023/1234.5678.pdf`) as arXiv sources. | URLs starting with `http://` or `https://` are only treated as arXiv if they explicitly match `arxiv.org` domains or arXiv DOIs. All other web URLs route to the URL download pipeline. |
 | **Trusting HTTP 200 OK Content-Type for remote PDFs without magic byte inspection** | Academic portals and paywalls frequently return HTTP 200 OK with HTML landing pages or Cloudflare bot challenges, corrupting the local cache and crashing PyMuPDF parser. | Validate `b"%PDF-" in chunk[:1024]` on the first streaming chunk before writing to disk; raise `ValueError` to trigger graceful fallback to DOI in the user's browser. |
+| **Using `vadjustment.get_page_size()` for `scroll_page`** | In GTK, `Adjustment.get_page_size()` is the viewport window height, completely unrelated to PDF page height. It skipped multiple pages when zoomed out and moved fractional page distances when zoomed in. | Compute exact `1 page height + gap` delta using `canvas.page_layout` and `canvas.page_gap`, stepping by the current page's $dh_i + G$ forward and preceding page's $dh_{i-1} + G$ backward. |
 
 
 

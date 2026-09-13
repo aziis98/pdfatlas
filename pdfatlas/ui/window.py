@@ -875,7 +875,43 @@ class MainWindow(Adw.ApplicationWindow):
             self.notes_layer.hide_preview()
         self._schedule_state_save()
 
+    def _get_default_open_dir(self) -> str | None:
+        """Get the preferred initial folder for opening or linking local files."""
+        if self.settings.last_open_dir and os.path.isdir(self.settings.last_open_dir):
+            return self.settings.last_open_dir
+        if self.doc_model and self.doc_model.filepath and os.path.isfile(self.doc_model.filepath):
+            doc_dir = os.path.dirname(self.doc_model.filepath)
+            if os.path.isdir(doc_dir):
+                return doc_dir
+        return None
+
+    def _record_last_open_dir(self, directory: str | None):
+        """Save the last used file directory to user settings."""
+        if directory and os.path.isdir(directory):
+            if self.settings.last_open_dir != directory:
+                self.settings.last_open_dir = directory
+                self.settings.save()
+
     def _open_file_dialog(self):
+        initial_dir = self._get_default_open_dir()
+
+        if hasattr(Gtk, "FileDialog"):
+            dialog = Gtk.FileDialog(title="Open PDF File")
+            filter_pdf = Gtk.FileFilter()
+            filter_pdf.set_name("PDF Files")
+            filter_pdf.add_mime_type("application/pdf")
+            filter_pdf.add_pattern("*.pdf")
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(filter_pdf)
+            dialog.set_filters(filters)
+            dialog.set_default_filter(filter_pdf)
+
+            if initial_dir:
+                dialog.set_initial_folder(Gio.File.new_for_path(initial_dir))
+
+            dialog.open(self, None, self._on_file_dialog_finish)
+            return
+
         dialog = Gtk.FileChooserNative.new(
             "Open PDF File", self, Gtk.FileChooserAction.OPEN, "Open", "Cancel"
         )
@@ -884,25 +920,42 @@ class MainWindow(Adw.ApplicationWindow):
         filter_pdf.add_mime_type("application/pdf")
         filter_pdf.add_pattern("*.pdf")
         dialog.add_filter(filter_pdf)
+        if initial_dir:
+            dialog.set_current_folder(Gio.File.new_for_path(initial_dir))
         dialog.connect("response", self._on_open_response)
         dialog.show()
+
+    def _on_file_dialog_finish(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult):
+        try:
+            gfile = dialog.open_finish(result)
+            if gfile:
+                path = gfile.get_path()
+                if path:
+                    self._record_last_open_dir(os.path.dirname(path))
+                    self._open_selected_pdf_path(path)
+        except Exception:
+            pass
+
+    def _open_selected_pdf_path(self, path: str):
+        existing = self.recent_files.get_by_uri(path)
+        aid = arxiv_id_from_path(path)
+        if not existing and aid:
+            existing = self.recent_files.get_by_arxiv_id(aid)
+
+        if existing:
+            source = existing
+        elif aid:
+            source = PdfSource(source_type="arxiv", uri=path, display_name=f"arXiv:{aid}")
+        else:
+            source = PdfSource(source_type="file", uri=path, display_name=os.path.basename(path))
+        self.open_document(source)
 
     def _on_open_response(self, dialog, response_id):
         if response_id == Gtk.ResponseType.ACCEPT:
             path = dialog.get_file().get_path()
             if path:
-                existing = self.recent_files.get_by_uri(path)
-                aid = arxiv_id_from_path(path)
-                if not existing and aid:
-                    existing = self.recent_files.get_by_arxiv_id(aid)
-
-                if existing:
-                    source = existing
-                elif aid:
-                    source = PdfSource(source_type="arxiv", uri=path, display_name=f"arXiv:{aid}")
-                else:
-                    source = PdfSource(source_type="file", uri=path, display_name=os.path.basename(path))
-                self.open_document(source)
+                self._record_last_open_dir(os.path.dirname(path))
+                self._open_selected_pdf_path(path)
         dialog.destroy()
 
     def _show_error_dialog(self, message):
@@ -1049,11 +1102,6 @@ class MainWindow(Adw.ApplicationWindow):
         """Redraws the OpenGL background canvas."""
         if self.canvas:
             self.canvas.queue_draw_overlays("redraw")
-
-    def page_step(self, forward: bool):
-        current_idx = self.get_current_page_index()
-        target_idx = current_idx + 1 if forward else current_idx - 1
-        self.jump_to_page(target_idx)
 
     def _open_new_instance_for_source(self, target: str):
         from ..core.process_utils import launch_pdfatlas_process
@@ -1557,7 +1605,7 @@ class MainWindow(Adw.ApplicationWindow):
     def scroll_page(self, forward: bool = True):
         doc_view = self.get_active_doc_view()
         if doc_view is not None:
-            doc_view.page_step(1 if forward else -1)
+            doc_view.scroll_page(forward=forward)
         else:
             self.nav_controller.scroll_page(forward=forward)
 

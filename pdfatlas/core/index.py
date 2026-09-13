@@ -113,14 +113,58 @@ def extract_text_to_db(pdf_path: str, conn: sqlite3.Connection) -> int:
                     text,
                 )
             )
-    doc.close()
     conn.executemany(
         """INSERT INTO blocks (page, block_no, x0, y0, x1, y1, width, height, text)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()
+
+    # Import any embedded annotations (e.g. highlight notes, sticky notes)
+    try:
+        from pdfatlas.core.pdf_notes_import import extract_embedded_notes_from_doc
+        embedded_notes = extract_embedded_notes_from_doc(doc)
+        if embedded_notes:
+            ensure_notes_table(conn)
+            for n in embedded_notes:
+                conn.execute(
+                    "INSERT INTO notes (page, x, y, markdown) VALUES (?, ?, ?, ?)",
+                    (n["page"], n["x"], n["y"], n["markdown"]),
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"[Index] Error importing embedded notes: {e}", flush=True)
+
+    doc.close()
     return len(rows)
+
+
+def sync_embedded_notes(pdf_path: str, conn: sqlite3.Connection) -> None:
+    """
+    Sync any embedded notes from the PDF into the SQLite database if they aren't already present.
+    Ensures existing databases created prior to annotation import also get them.
+    """
+    try:
+        ensure_notes_table(conn)
+        existing = conn.execute("SELECT page, x, y FROM notes").fetchall()
+        existing_coords = {(row[0], round(row[1], 1), round(row[2], 1)) for row in existing}
+
+        from pdfatlas.core.pdf_notes_import import extract_embedded_notes_from_file
+        embedded_notes = extract_embedded_notes_from_file(pdf_path)
+        inserted = False
+        for n in embedded_notes:
+            key = (n["page"], round(n["x"], 1), round(n["y"], 1))
+            if key not in existing_coords:
+                conn.execute(
+                    "INSERT INTO notes (page, x, y, markdown) VALUES (?, ?, ?, ?)",
+                    (n["page"], n["x"], n["y"], n["markdown"]),
+                )
+                existing_coords.add(key)
+                inserted = True
+        if inserted:
+            conn.commit()
+    except Exception as e:
+        print(f"[Index] Error syncing embedded notes: {e}", flush=True)
 
 
 def get_db_for_pdf(pdf_path: str) -> sqlite3.Connection:
@@ -141,6 +185,8 @@ def get_db_for_pdf(pdf_path: str) -> sqlite3.Connection:
             if os.path.exists(db_path):
                 os.remove(db_path)
             raise e
+    else:
+        sync_embedded_notes(pdf_path, conn)
     return conn
 
 
