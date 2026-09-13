@@ -84,3 +84,69 @@ def test_search_coordinator_orchestration():
     coordinator.run_search("transformer")
     assert view_changes[-1] == "search-view"
     mock_provider.search.assert_called_once()
+
+
+def test_search_results_view_empty_state():
+    results_view = SearchResultsView()
+    assert results_view.stack.get_visible_child_name() == "results"
+
+    # Render with no results
+    results_view.render_results([], query="quantum entanglement", active_filepath="/tmp/test.pdf")
+    assert results_view.stack.get_visible_child_name() == "empty"
+    assert results_view.status_page.get_title() == "No Results Found"
+    desc = results_view.status_page.get_description()
+    assert desc is not None and "quantum entanglement" in desc
+
+    # Render with results switches back to results view
+    sample = {
+        "id": 101,
+        "page": 1,
+        "block_no": 2,
+        "x0": 50,
+        "y0": 100,
+        "x1": 200,
+        "y1": 120,
+        "text": "Quantum mechanics foundation",
+    }
+    results_view.render_results([sample], query="quantum", active_filepath="/tmp/test.pdf")
+    assert results_view.stack.get_visible_child_name() == "results"
+
+    # Clearing resets view to results
+    results_view.clear()
+    assert results_view.stack.get_visible_child_name() == "results"
+
+
+def test_search_results_view_pinned_with_empty_live():
+    import gi
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+
+    results_view = SearchResultsView()
+    sample_pinned = {
+        "id": 202,
+        "page": 2,
+        "block_no": 1,
+        "x0": 40,
+        "y0": 60,
+        "x1": 150,
+        "y1": 80,
+        "text": "Pinned note",
+    }
+    results_view.pinned[202] = {"result": sample_pinned, "query_terms": {"pinned"}}
+
+    # When pinned items exist but live search has 0 results, stack stays on results
+    # and results_box contains pinned cards + empty status page
+    results_view.render_results([], query="unmatched_keyword", active_filepath="/tmp/test.pdf")
+    assert results_view.stack.get_visible_child_name() == "results"
+
+    # Verify there is an Adw.StatusPage inside results_box
+    child = results_view.results_box.get_first_child()
+    found_status = False
+    while child is not None:
+        if isinstance(child, Adw.StatusPage):
+            found_status = True
+            assert child.get_title() == "No Results Found"
+            assert "unmatched_keyword" in (child.get_description() or "")
+        child = child.get_next_sibling()
+    assert found_status is True
+

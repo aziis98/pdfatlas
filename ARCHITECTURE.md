@@ -17,8 +17,8 @@ This document provides an up-to-date outline of every component in **PDF Atlas**
    - [SettingsWindow (`pdfatlas.ui.settings`)](#settingswindow-pdfatlasuisettings)
    - [ArxivDialog (`pdfatlas.ui.arxiv_dialog`)](#arxivdialog-pdfatlasuiarxiv_dialog)
    - [LinkSearchDialog (`pdfatlas.ui.components.link_search_dialog`)](#linksearchdialog-pdfatlasuicomponentslink_search_dialog)
-   - [UrlInputDialog (`pdfatlas.ui.components.url_dialog`)](#urlinputdialog-pdfatlasuicomponentsurl_dialog)
-   - [Search Portal & Previews (`pdfatlas.ui.portal`, `link_preview`)](#search-portal--previews-pdfatlasuiportal-link_preview)
+   - [UrlInputDialog (`pdfatlas.ui.components.url_dialog`)](#urlinputdialog-pdfatlasuiurl_dialog)
+   - [SearchResultsView & Previews (`pdfatlas.ui.components.search_results_view`, `pdfatlas.ui.portal`, `link_preview`)](#search-results-view--previews-pdfatlasuicomponentssearch_results_view-pdfatlasuiportal-link_preview)
 3. [Feature Controllers (`pdfatlas.controllers.*`)](#3-feature-controllers-pdfatlascontrollers)
 4. [Core Engine & Models (`pdfatlas.core.*`)](#4-core-engine--models-pdfatlascore)
 5. [Build & Packaging Pipeline (`hatch_build.py`, `pdfatlas._version`)](#5-build--packaging-pipeline-hatch_buildpy-pdfatlas_version)
@@ -249,8 +249,32 @@ Modal dialog for entering a web URL or DOI to attach to selected text.
 
 ---
 
-### Search Portal & Previews (`pdfatlas.ui.portal`, `link_preview`)
-Overlay cards for search matches and link destinations.
+### SearchResultsView & Previews (`pdfatlas.ui.components.search_results_view`, `pdfatlas.ui.portal`, `link_preview`)
+Search results container view and overlay cards for search matches and link destinations.
+
+#### SearchResultsView (`pdfatlas.ui.components.search_results_view`)
+Full-screen search results view activated when searching across document text. Switched via an internal `Gtk.Stack`:
+
+```
++-------------------------------------------------------------------------------+
+| SearchResultsView (Gtk.Box: .search-results-view)                             |
+| +---------------------------------------------------------------------------+ |
+| | Gtk.Stack                                                                 | |
+|   ├─ "results": Gtk.ScrolledWindow                                          | |
+|   │     └─ Gtk.Viewport                                                     | |
+|   │           └─ Gtk.Box (.search-results-container)                        | |
+|   │                 ├─ Pinned Cards (ResultRow items with pin badge)        | |
+|   │                 ├─ Gtk.Separator (visible if pinned cards exist)        | |
+|   │                 └─ Live Matches (ResultRow cards or Adw.StatusPage)     | |
+|   └─ "empty": Adw.StatusPage                                                | |
+|         ├─ Icon: "system-search-symbolic"                                   | |
+|         ├─ Title: "No Results Found"                                        | |
+|         └─ Description: "No matches found for “<query>”. Try different..."  | |
+| +---------------------------------------------------------------------------+ |
++-------------------------------------------------------------------------------+
+```
+
+- **Empty State Display**: When a search query yields no matches and no cards are pinned, `SearchResultsView` switches `Gtk.Stack` to `"empty"`, rendering an `Adw.StatusPage` with `system-search-symbolic`, "No Results Found", and the search query. If pinned cards exist but no live matches are found, the view stays on `"results"` to keep pinned items accessible while showing the empty status page notice below the pinned list separator.
 
 - **`ResultRow` (`pdfatlas.ui.portal`)**: Search result card embedding a 1:1 physical pixel Cairo rasterized snippet of the search match context.
 - **`LinkPreviewManager` (`pdfatlas.ui.link_preview`)**: Hover popover rendering destination snippets when lingering over citations or internal cross-references.

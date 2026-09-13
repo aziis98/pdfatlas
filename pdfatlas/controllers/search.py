@@ -74,7 +74,12 @@ class SearchCoordinator:
 
         provider = self.provider_getter()
         if not provider:
-            self.results_view.clear()
+            self.results_view.render_results(
+                [],
+                query=query,
+                active_filepath=self.get_active_filepath(),
+                is_grid=self.get_is_grid(),
+            )
             return
 
         def _on_results(results: list[SearchResult], sid: int):
@@ -178,6 +183,13 @@ class SearchController:
 
         if not self.win.db_service:
             print("[Search] Warning: DatabaseService not available", flush=True)
+            if self.win.search_results_view is not None:
+                self.win.search_results_view.render_results(
+                    [],
+                    query=query,
+                    active_filepath=self.win.doc_model.filepath if self.win.doc_model else "",
+                    is_grid=self.win.settings.search_layout == "grid",
+                )
             return
 
         self._current_search_id += 1

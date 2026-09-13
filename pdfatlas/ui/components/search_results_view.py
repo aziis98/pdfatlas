@@ -7,7 +7,8 @@ from typing import Callable
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk
 
 from ..gui import box, scrolled_window
 from ..portal import ResultRow
@@ -16,7 +17,7 @@ from ..portal import ResultRow
 class SearchResultsView(Gtk.Box):
     """
     Self-contained search results container with scrolled portal cards,
-    pinned portals, and support for list / grid layouts.
+    pinned portals, support for list / grid layouts, and empty state feedback.
     """
 
     def __init__(
@@ -31,6 +32,12 @@ class SearchResultsView(Gtk.Box):
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
         self.pinned: dict[int, dict] = {}
 
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(150)
+        self.stack.set_vexpand(True)
+        self.stack.set_hexpand(True)
+
         self.scrolled = scrolled_window()
         self.results_box = box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -39,7 +46,17 @@ class SearchResultsView(Gtk.Box):
             margin_bottom=24,
         )
         self.scrolled.set_child(self.results_box)
-        self.append(self.scrolled)
+
+        self.status_page = Adw.StatusPage()
+        self.status_page.set_icon_name("system-search-symbolic")
+        self.status_page.set_title("No Results Found")
+        self.status_page.set_description("Try searching with different keywords or terms.")
+        self.status_page.set_vexpand(True)
+        self.status_page.set_hexpand(True)
+
+        self.stack.add_named(self.scrolled, "results")
+        self.stack.add_named(self.status_page, "empty")
+        self.append(self.stack)
 
     def reset_executor(self):
         self.executor.shutdown(wait=False, cancel_futures=True)
@@ -55,6 +72,7 @@ class SearchResultsView(Gtk.Box):
             nxt = child.get_next_sibling()
             self.results_box.remove(child)
             child = nxt
+        self.stack.set_visible_child_name("results")
 
     def render_results(
         self,
@@ -65,6 +83,19 @@ class SearchResultsView(Gtk.Box):
     ):
         self.clear()
         query_terms = {t.strip(string.punctuation).lower() for t in query.strip().split() if t}
+
+        # If there are no results and no pinned portals, display empty state
+        if not results and not self.pinned:
+            clean_query = query.strip()
+            self.status_page.set_title("No Results Found")
+            if clean_query:
+                self.status_page.set_description(f"No matches found for “{clean_query}”. Try different keywords.")
+            else:
+                self.status_page.set_description("Try searching with different keywords or terms.")
+            self.stack.set_visible_child_name("empty")
+            return
+
+        self.stack.set_visible_child_name("results")
 
         pinned_grid = None
         live_grid = None
@@ -106,14 +137,24 @@ class SearchResultsView(Gtk.Box):
                 else:
                     self.results_box.append(row)
 
-            # Separator between pinned and live results
-            if results:
-                sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                sep.set_margin_top(16)
-                sep.set_margin_bottom(16)
-                sep.set_margin_start(16)
-                sep.set_margin_end(16)
-                self.results_box.append(sep)
+            # Separator between pinned and live results (or pinned and empty notice)
+            sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            sep.set_margin_top(16)
+            sep.set_margin_bottom(16)
+            sep.set_margin_start(16)
+            sep.set_margin_end(16)
+            self.results_box.append(sep)
+
+            if not results:
+                pinned_empty = Adw.StatusPage()
+                pinned_empty.set_icon_name("system-search-symbolic")
+                pinned_empty.set_title("No Results Found")
+                clean_query = query.strip()
+                if clean_query:
+                    pinned_empty.set_description(f"No matches found for “{clean_query}”.")
+                else:
+                    pinned_empty.set_description("Try searching with different keywords or terms.")
+                self.results_box.append(pinned_empty)
 
         # 2. Live Search Results
         if is_grid and results:
