@@ -78,7 +78,7 @@ def extract_embedded_notes_from_doc(doc: fitz.Document) -> list[dict[str, Any]]:
                     bbox_y0 = float(rect.y0)
                     bbox_y1 = float(rect.y1)
 
-                offset_x = 8.0  # margin offset to the right of the highlight border
+                offset_x = 12.0  # margin offset to the right of the highlight border
                 x = bbox_x1 + offset_x
                 y = float((bbox_y0 + bbox_y1) / 2.0)
 
