@@ -33,8 +33,8 @@ def test_extract_notes_from_synthetic_pdf(tmp_path):
     # Verify highlight note
     h_note = [n for n in notes if "highlight" in n["markdown"]][0]
     assert h_note["page"] == 0
-    # mid-right of rect(100, 200, 300, 250): x = 300, y = 225
-    assert h_note["x"] == pytest.approx(300.0, 0.1)
+    # mid-right of rect(100, 200, 300, 250) + 8 pt offset: x = 308, y = 225
+    assert h_note["x"] == pytest.approx(308.0, 0.1)
     assert h_note["y"] == pytest.approx(225.0, 0.1)
     assert h_note["markdown"] == "This is a test note from a highlight"
 
@@ -57,13 +57,13 @@ def test_extract_notes_from_sample_student_report():
     # Check page 6 (0-indexed page 5) note
     note_p5 = [n for n in notes if n["page"] == 5][0]
     assert "a bit overselling" in note_p5["markdown"]
-    assert note_p5["x"] == pytest.approx(346.62, 0.1)
-    assert note_p5["y"] == pytest.approx(330.69, 0.1)
+    assert note_p5["x"] == pytest.approx(490.28, 0.1)
+    assert note_p5["y"] == pytest.approx(324.12, 0.1)
 
     # Check page 8 (0-indexed page 7) note
     note_p7 = [n for n in notes if n["page"] == 7][0]
     assert "inconsistency with next notations" in note_p7["markdown"]
-    assert note_p7["x"] == pytest.approx(349.10, 0.1)
+    assert note_p7["x"] == pytest.approx(357.41, 0.1)
     assert note_p7["y"] == pytest.approx(667.57, 0.1)
 
 
@@ -84,7 +84,7 @@ def test_import_notes_into_db(tmp_path):
         assert len(notes) == 1
         assert notes[0]["page"] == 0
         assert notes[0]["markdown"] == "Persistent note"
-        assert notes[0]["x"] == pytest.approx(300.0, 0.1)
+        assert notes[0]["x"] == pytest.approx(308.0, 0.1)
         assert notes[0]["y"] == pytest.approx(225.0, 0.1)
     finally:
         conn.close()
@@ -131,7 +131,7 @@ def test_recalc_embedded_notes_matching_by_text(tmp_path):
         recalced = [n for n in notes if n["id"] == old_pdf_note_id]
         assert len(recalced) == 1
         assert recalced[0]["page"] == 0
-        assert recalced[0]["x"] == pytest.approx(300.0, 0.1)
+        assert recalced[0]["x"] == pytest.approx(308.0, 0.1)
         assert recalced[0]["y"] == pytest.approx(225.0, 0.1)
     finally:
         conn.close()

@@ -57,22 +57,30 @@ def extract_embedded_notes_from_doc(doc: fitz.Document) -> list[dict[str, Any]]:
                 continue
 
             # Calculate note anchor position
-            vertices = getattr(annot, "vertices", None)
             annot_type = annot.type[1] if isinstance(annot.type, tuple) else ""
             if annot_type == "Text":
                 # Sticky note: center on icon
                 x = float((rect.x0 + rect.x1) / 2.0)
                 y = float((rect.y0 + rect.y1) / 2.0)
-            elif vertices and len(vertices) >= 4 and len(vertices) % 4 == 0:
-                # Text markup (Highlight, Underline, etc.): end of the last highlighted line
-                last_ur_x, last_ur_y = _pt_coord(vertices[-3])
-                last_lr_x, last_lr_y = _pt_coord(vertices[-1])
-                x = max(last_ur_x, last_lr_x)
-                y = (last_ur_y + last_lr_y) / 2.0
             else:
-                # Default: mid-right edge of annotation bounding box
-                x = float(rect.x1)
-                y = float((rect.y0 + rect.y1) / 2.0)
+                # Highlight / text markup annotation:
+                # Compute the whole bbox of the highlight and place the note slightly
+                # to the right (+8 pt) of the mid-right border point.
+                vertices = getattr(annot, "vertices", None)
+                if vertices and len(vertices) >= 4:
+                    vx = [_pt_coord(v)[0] for v in vertices]
+                    vy = [_pt_coord(v)[1] for v in vertices]
+                    bbox_x1 = max(float(rect.x1), max(vx))
+                    bbox_y0 = min(float(rect.y0), min(vy))
+                    bbox_y1 = max(float(rect.y1), max(vy))
+                else:
+                    bbox_x1 = float(rect.x1)
+                    bbox_y0 = float(rect.y0)
+                    bbox_y1 = float(rect.y1)
+
+                offset_x = 8.0  # margin offset to the right of the highlight border
+                x = bbox_x1 + offset_x
+                y = float((bbox_y0 + bbox_y1) / 2.0)
 
             notes.append({
                 "page": page_idx,  # 0-indexed
