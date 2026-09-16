@@ -143,28 +143,87 @@ def sync_embedded_notes(pdf_path: str, conn: sqlite3.Connection) -> None:
     """
     Sync any embedded notes from the PDF into the SQLite database if they aren't already present.
     Ensures existing databases created prior to annotation import also get them.
+    Checks both coordinates and text content to avoid creating duplicate entries.
     """
     try:
         ensure_notes_table(conn)
-        existing = conn.execute("SELECT page, x, y FROM notes").fetchall()
+        existing = conn.execute("SELECT page, x, y, markdown FROM notes").fetchall()
         existing_coords = {(row[0], round(row[1], 1), round(row[2], 1)) for row in existing}
+        existing_texts = {(row[3] or "").strip() for row in existing if (row[3] or "").strip()}
 
         from pdfatlas.core.pdf_notes_import import extract_embedded_notes_from_file
         embedded_notes = extract_embedded_notes_from_file(pdf_path)
         inserted = False
         for n in embedded_notes:
-            key = (n["page"], round(n["x"], 1), round(n["y"], 1))
-            if key not in existing_coords:
+            coord_key = (n["page"], round(n["x"], 1), round(n["y"], 1))
+            text_norm = (n["markdown"] or "").strip()
+            if coord_key not in existing_coords and (not text_norm or text_norm not in existing_texts):
                 conn.execute(
                     "INSERT INTO notes (page, x, y, markdown) VALUES (?, ?, ?, ?)",
                     (n["page"], n["x"], n["y"], n["markdown"]),
                 )
-                existing_coords.add(key)
+                existing_coords.add(coord_key)
+                if text_norm:
+                    existing_texts.add(text_norm)
                 inserted = True
         if inserted:
             conn.commit()
     except Exception as e:
         print(f"[Index] Error syncing embedded notes: {e}", flush=True)
+
+
+def recalc_embedded_notes(pdf_path: str, conn: sqlite3.Connection) -> dict[str, int]:
+    """
+    Reload/recalculate embedded notes positions from the PDF file.
+    Matches existing notes in the database by text content:
+    - Updates (page, x, y) for matched notes so their coordinates are corrected.
+    - Inserts any embedded notes from the PDF that were missing.
+    - Keeps any user-created / new notes intact (notes whose text does not match any embedded note).
+    Returns stats dict: {"updated": int, "inserted": int, "kept": int}.
+    """
+    ensure_notes_table(conn)
+    existing_rows = conn.execute("SELECT id, page, x, y, markdown FROM notes").fetchall()
+
+    from pdfatlas.core.pdf_notes_import import extract_embedded_notes_from_file
+    fresh_embedded = extract_embedded_notes_from_file(pdf_path)
+
+    # Index existing notes by normalized text
+    existing_by_text: dict[str, list[tuple[int, int, float, float, str]]] = {}
+    for row in existing_rows:
+        norm = (row[4] or "").strip()
+        existing_by_text.setdefault(norm, []).append(row)
+
+    matched_ids: set[int] = set()
+    updated_count = 0
+    inserted_count = 0
+
+    for fresh in fresh_embedded:
+        fresh_norm = (fresh["markdown"] or "").strip()
+        candidates = existing_by_text.get(fresh_norm, [])
+        matched = None
+        for c in candidates:
+            if c[0] not in matched_ids:
+                matched = c
+                break
+
+        if matched is not None:
+            nid = matched[0]
+            matched_ids.add(nid)
+            conn.execute(
+                "UPDATE notes SET page = ?, x = ?, y = ? WHERE id = ?",
+                (fresh["page"], fresh["x"], fresh["y"], nid),
+            )
+            updated_count += 1
+        else:
+            conn.execute(
+                "INSERT INTO notes (page, x, y, markdown) VALUES (?, ?, ?, ?)",
+                (fresh["page"], fresh["x"], fresh["y"], fresh["markdown"]),
+            )
+            inserted_count += 1
+
+    conn.commit()
+    kept_count = len(existing_rows) - len(matched_ids)
+    return {"updated": updated_count, "inserted": inserted_count, "kept": kept_count}
 
 
 def get_db_for_pdf(pdf_path: str) -> sqlite3.Connection:
@@ -782,6 +841,35 @@ class DatabaseService:
         if self._conn:
             notes = load_notes_from_db(self._conn)
             GLib.idle_add(on_complete, notes)
+
+    def reload_embedded_notes(
+        self,
+        pdf_path: str,
+        on_complete: Callable[[dict[str, int], list[dict]], None] | None = None,
+    ):
+        """Recalculate embedded notes positions from the PDF file on the dedicated DB thread."""
+        self._executor.submit(self._bg_reload_embedded_notes, pdf_path, on_complete)
+
+    def _bg_reload_embedded_notes(
+        self,
+        pdf_path: str,
+        on_complete: Callable[[dict[str, int], list[dict]], None] | None = None,
+    ):
+        if not self._conn:
+            if on_complete:
+                GLib.idle_add(on_complete, {"updated": 0, "inserted": 0, "kept": 0}, [])
+            return
+
+        try:
+            stats = recalc_embedded_notes(pdf_path, self._conn)
+            notes = load_notes_from_db(self._conn)
+            if on_complete:
+                GLib.idle_add(on_complete, stats, notes)
+        except Exception as e:
+            print(f"[DatabaseService] Failed to reload embedded notes: {e}", flush=True)
+            if on_complete:
+                GLib.idle_add(on_complete, {"updated": 0, "inserted": 0, "kept": 0}, [])
+
     def load_crop_bboxes(self, page_count: int, on_complete: Callable[[list[fitz.Rect | None] | None], None]):
         self._executor.submit(self._bg_load_crop_bboxes, page_count, on_complete)
 

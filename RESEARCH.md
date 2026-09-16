@@ -515,12 +515,37 @@ This document records durable technical findings, architectural decisions, mathe
   4. **Action Boolean Correction:** Fixed a bug in `_on_crop_settings_updated` where `gapless_action.set_state()` passed `settings.page_gaps` instead of `not settings.page_gaps` (gap-less mode is active when page gaps are disabled).
   5. **Global Defaults Role:** `settings.json` is preserved as the global defaults template for newly opened documents with no stored state.
 
+### 1.41. GTK4 GLArea OpenGL Function Pointer Dispatching in Rust via `libepoxy`
+- **Background:** Unlike standalone game windowing libraries (`glutin`, `SDL2`, `GLFW`), GTK's `GLArea` and `GdkGLContext` manage only widget render cycles and FBO integration. GTK does **not** expose a public `get_proc_address` function. In C, GTK apps link `libepoxy` and include `<epoxy/gl.h>`, which wraps calls like `glClear` to `epoxy_glClear`.
+- **Rust Integration Idiom (`glow` + `libepoxy`):**
+  - When using `glow` in Rust (`glow::Context::from_loader_function`), a dynamic loader closure is required.
+  - The official pattern maintained by the `gtk-rs` team (`gtk4-rs/examples/glium_gl_area`) uses `libepoxy` directly.
+  - In `libepoxy`, symbols named `epoxy_<name>` (e.g. `epoxy_glClear`) are entries in its internal dispatch table rather than direct function symbols. Dereferencing the symbol pointer once (`*(entry as *const *const c_void)`) yields the actual function dispatcher for the active `GdkGLContext`.
+  - Loading `libepoxy.so.0` via `libloading` with a `OnceLock` guarantees full compatibility across Wayland, X11, EGL, and desktop OpenGL ES without manual driver detection.
+
+### 1.42. PDF Annotation Note Positioning, 0-Indexing, and Content-Preserving Recalibration
+- **0-Indexed Page Alignment:**
+  - PDF Atlas layout (`PDFCanvas.page_layout`), GTK page containers (`PDFCanvas.containers`), and user-created SQLite notes (`save_note_to_db`) strictly use 0-indexed page numbers.
+  - The initial embedded notes importer mistakenly saved annotations with 1-indexed pages (`page_idx + 1`). This caused notes to render on page $N+1$ instead of $N$ (and dropped notes on the final page entirely due to container bounds checks).
+- **Accurate Anchor Point Positioning:**
+  - Sticky text notes (`annot.type[1] == "Text"`): centered at `((rect.x0 + rect.x1) / 2.0, (rect.y0 + rect.y1) / 2.0)`.
+  - Text markup annotations (Highlights, Underlines): multi-line highlights have an overall `annot.rect` whose `x1` corresponds to the longest line, not where the highlighted passage ends. Using `annot.vertices[-3]` and `annot.vertices[-1]` (the upper-right and lower-right of the final quadrilateral) places the note anchor right at the end of the highlighted text phrase.
+- **Content-Preserving Recalibration (`recalc_embedded_notes`):**
+  - When users re-run note extraction via the Settings > Debug panel, existing notes are matched to PDF metadata annotations by normalized markdown text content (`markdown.strip()`).
+  - Matched notes have their `(page, x, y)` coordinates updated in SQLite.
+  - Newly added PDF annotations are inserted.
+  - Existing user-created notes (notes created within PDF Atlas whose text does not exist in the PDF annotation metadata) are strictly preserved and untouched.
+
 ---
 
 ## 2. Rejected Approaches
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **Using `annot.rect.x1` for multi-line highlight note anchors** | For multi-line text highlights, `rect.x1` reflects the rightmost edge of the longest line (often the full column width) rather than where the highlighted sentence actually finishes on the last line. | Extract the right edge of the final quadpoint in `annot.vertices[-3]` and `annot.vertices[-1]`. |
+| **1-indexed page storage for imported PDF annotations** | PDF Atlas's SQLite database, layout list, and container widgets are 0-indexed; 1-indexed pages displaced all annotations by +1 page and caused index errors on the document's last page. | Store 0-indexed `page_idx` consistently across database, notes layer, and canvas overlays. |
+| **Wiping notes table on embedded note re-import** | Deleting all existing notes on reload permanently destroys notes and comments added manually by the user within PDF Atlas. | Content-based matching by normalized markdown text (`recalc_embedded_notes`), updating coordinates for matched PDF annotations while preserving all user-created notes. |
+| **Manual `dlsym` + `eglGetProcAddress` + `glXGetProcAddressARB` GL proc loader** | Hand-rolled platform resolution bypasses GTK's internal OpenGL layer and duplicates driver detection logic for Wayland/X11. | Idiomatic `libepoxy` dispatch pointer dereferencing via `libloading` matching the official `gtk4-rs/examples/glium_gl_area` pattern. |
 | **Global `settings.json` mutation on crop / gapless toggles** | Mutating global settings on `c` or `g` toggled modes across all open tabs and clobbered document-specific viewing states when opening different document formats (e.g. 2-column papers vs full-bleed slides). | Clone `CropSettings` per tab in `PdfDocumentView`, persist `crop_enabled` and `page_gaps` per document in SQLite `doc_state`, and use `settings.json` only as the initial default template. |
 | **In-memory only directory tracking (`self._last_open_dir`)** | Lost remembered folder state across application restarts, forcing users to navigate to their papers directory every time the application launched. | Persist `last_open_dir` in `CropSettings` serialized to `~/.config/pdfatlas/settings.json`. |
 | **Parsing only `/Contents` for PDF annotations** | Acrobat and modern viewers store rich formatting, line breaks, and styling in the `/RC` XHTML string; `/Contents` often collapses into unformatted single lines or strips markup. | Inspect `/RC` rich text key first via `doc.xref_get_key()`, fall back to `/Contents` only if `/RC` is missing, and pass both through `html_to_markdown()`. |

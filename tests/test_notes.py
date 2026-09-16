@@ -150,3 +150,45 @@ def test_note_editor_escape_closes_window():
     editor._on_close_request(editor)
     mock_win.notes_layer.save_content.assert_called_with(1, "test content")
     assert 1 not in mock_win.notes_layer._editors
+
+
+def test_settings_debug_recalc_notes():
+    from unittest.mock import MagicMock
+    from pdfatlas.core.settings import CropSettings
+    from pdfatlas.ui.settings import SettingsWindow
+
+    mock_win = MagicMock()
+    mock_doc = MagicMock()
+    mock_doc.filepath = "/path/to/test.pdf"
+    mock_win.get_active_doc_view.return_value = mock_win
+    mock_win.doc_model = mock_doc
+    mock_win.db_service = MagicMock()
+    mock_win.notes_layer = MagicMock()
+    mock_win.annotations_controller = MagicMock()
+
+    settings = CropSettings()
+    dialog = SettingsWindow(
+        parent_window=mock_win,
+        settings=settings,
+        on_changed=lambda: None,
+        on_reanalyze=lambda: None,
+    )
+
+    assert hasattr(dialog, "recalc_notes_btn")
+    assert hasattr(dialog, "recalc_notes_row")
+
+    # Simulate button click
+    dialog.recalc_notes_btn.emit("clicked")
+
+    # db_service.reload_embedded_notes should have been called
+    assert mock_win.db_service.reload_embedded_notes.called
+    args, _kwargs = mock_win.db_service.reload_embedded_notes.call_args
+    assert args[0] == "/path/to/test.pdf"
+
+    # Execute callback
+    callback = args[1]
+    callback({"updated": 2, "inserted": 1, "kept": 3}, [{"id": 1, "page": 0, "x": 10.0, "y": 20.0, "markdown": "note"}])
+
+    assert mock_win.notes_layer.set_notes.called
+    assert mock_win.annotations_controller.update_annotations_button.called
+

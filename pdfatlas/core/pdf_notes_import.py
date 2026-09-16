@@ -2,7 +2,7 @@
 PDF embedded annotations extractor.
 Extracts annotations (such as highlights and sticky notes) containing comments,
 converts rich text / HTML comments to Markdown, and calculates anchor coordinates
-at the mid-right edge of the annotation bounding box.
+at the exact note / highlight position.
 """
 
 from typing import Any
@@ -11,11 +11,18 @@ import pymupdf as fitz
 from pdfatlas.core.html_to_markdown import html_to_markdown
 
 
+def _pt_coord(pt: Any) -> tuple[float, float]:
+    """Safely extract (x, y) from a point object or tuple/list."""
+    if isinstance(pt, (tuple, list)):
+        return float(pt[0]), float(pt[1])
+    return float(pt.x), float(pt.y)
+
+
 def extract_embedded_notes_from_doc(doc: fitz.Document) -> list[dict[str, Any]]:
     """
     Extract notes from embedded annotations in a PyMuPDF Document.
     Returns a list of dicts: [{"page": int, "x": float, "y": float, "markdown": str}, ...]
-    where 'page' is 1-indexed (matching PDF Atlas SQLite schema).
+    where 'page' is 0-indexed (matching PDF Atlas layout and database schema).
     """
     notes: list[dict[str, Any]] = []
 
@@ -49,15 +56,28 @@ def extract_embedded_notes_from_doc(doc: fitz.Document) -> list[dict[str, Any]]:
             if not markdown:
                 continue
 
-            # Position note at the mid-right edge of the annotation bbox
-            # x = rect.x1, y = (rect.y0 + rect.y1) / 2.0
-            mid_right_x = float(rect.x1)
-            mid_right_y = float((rect.y0 + rect.y1) / 2.0)
+            # Calculate note anchor position
+            vertices = getattr(annot, "vertices", None)
+            annot_type = annot.type[1] if isinstance(annot.type, tuple) else ""
+            if annot_type == "Text":
+                # Sticky note: center on icon
+                x = float((rect.x0 + rect.x1) / 2.0)
+                y = float((rect.y0 + rect.y1) / 2.0)
+            elif vertices and len(vertices) >= 4 and len(vertices) % 4 == 0:
+                # Text markup (Highlight, Underline, etc.): end of the last highlighted line
+                last_ur_x, last_ur_y = _pt_coord(vertices[-3])
+                last_lr_x, last_lr_y = _pt_coord(vertices[-1])
+                x = max(last_ur_x, last_lr_x)
+                y = (last_ur_y + last_lr_y) / 2.0
+            else:
+                # Default: mid-right edge of annotation bounding box
+                x = float(rect.x1)
+                y = float((rect.y0 + rect.y1) / 2.0)
 
             notes.append({
-                "page": page_idx + 1,  # 1-indexed
-                "x": mid_right_x,
-                "y": mid_right_y,
+                "page": page_idx,  # 0-indexed
+                "x": x,
+                "y": y,
                 "markdown": markdown,
             })
 

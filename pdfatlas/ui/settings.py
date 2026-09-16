@@ -29,6 +29,7 @@ class SettingsWindow(Adw.PreferencesDialog):
         self._build_crop_page()
         self._build_search_page()
         self._build_zoom_page()
+        self._build_debug_page()
 
     def _add_group(self, page: Adw.PreferencesPage, title: str, rows: list) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title=title)
@@ -262,6 +263,23 @@ class SettingsWindow(Adw.PreferencesDialog):
 
         self.add(page)
 
+    def _build_debug_page(self):
+        page = Adw.PreferencesPage(title="Debug", icon_name="applications-engineering-symbolic")
+
+        self.recalc_notes_btn = Gtk.Button(label="Reload", valign=Gtk.Align.CENTER)
+        self.recalc_notes_btn.add_css_class("suggested-action")
+        self.recalc_notes_btn.connect("clicked", self._on_recalc_notes_clicked)
+
+        self.recalc_notes_row = Adw.ActionRow(
+            title="Reload & Recalculate Notes",
+            subtitle="Re-extract embedded PDF annotations and recalculate note positions while preserving user notes",
+        )
+        self.recalc_notes_row.add_suffix(self.recalc_notes_btn)
+        self.recalc_notes_row.set_activatable_widget(self.recalc_notes_btn)
+
+        self._add_group(page, "PDF Annotations", [self.recalc_notes_row])
+        self.add(page)
+
     def _on_info_enter(self, controller, x, y):
         self._cancel_popdown()
         self.texture_zoom_popover.popup()
@@ -372,3 +390,67 @@ class SettingsWindow(Adw.PreferencesDialog):
 
     def _on_reanalyze_clicked(self, button):
         self.on_reanalyze()
+
+    def _on_recalc_notes_clicked(self, button: Gtk.Button):
+        active_doc = (
+            self.parent_window.get_active_doc_view()
+            if self.parent_window and hasattr(self.parent_window, "get_active_doc_view")
+            else None
+        )
+        doc_model = (
+            active_doc.doc_model
+            if (active_doc and active_doc.doc_model)
+            else getattr(self.parent_window, "doc_model", None)
+        )
+        db_service = getattr(self.parent_window, "db_service", None) or (
+            active_doc.db_service if active_doc else None
+        )
+
+        if not doc_model or not getattr(doc_model, "filepath", None) or not db_service:
+            self.add_toast(Adw.Toast.new("No open PDF document to reload notes for"))
+            return
+
+        button.set_sensitive(False)
+        original_label = button.get_label() or "Reload"
+        button.set_label("Reloading…")
+
+        def _on_complete(stats: dict[str, int], notes: list[dict]):
+            try:
+                button.set_sensitive(True)
+                button.set_label(original_label)
+            except Exception:
+                pass
+
+            if hasattr(self.parent_window, "notes"):
+                self.parent_window.notes = notes
+            if active_doc is not None:
+                active_doc.notes = notes
+                if hasattr(active_doc, "notes_layer") and active_doc.notes_layer is not None:
+                    active_doc.notes_layer.set_notes(notes)
+                if hasattr(active_doc, "on_annotations_changed") and callable(active_doc.on_annotations_changed):
+                    active_doc.on_annotations_changed()
+
+            if hasattr(self.parent_window, "notes_layer") and self.parent_window.notes_layer is not None:
+                self.parent_window.notes_layer.set_notes(notes)
+
+            if hasattr(self.parent_window, "annotations_controller") and self.parent_window.annotations_controller is not None:
+                self.parent_window.annotations_controller.update_annotations_button()
+
+            updated = stats.get("updated", 0)
+            inserted = stats.get("inserted", 0)
+            kept = stats.get("kept", 0)
+            if inserted > 0:
+                msg = f"Notes reloaded: {updated} updated, {inserted} added, {kept} user notes kept"
+            else:
+                msg = f"Notes reloaded: {updated} updated, {kept} user notes kept"
+
+            try:
+                self.add_toast(Adw.Toast.new(msg))
+            except Exception:
+                pass
+
+            if self.parent_window and hasattr(self.parent_window, "_show_toast"):
+                self.parent_window._show_toast(msg)
+
+        db_service.reload_embedded_notes(doc_model.filepath, _on_complete)
+

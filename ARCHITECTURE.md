@@ -181,15 +181,21 @@ Preferences modal configured with Libadwaita rows.
 ```
 +-------------------------------------------------------------------------------+
 | Adw.PreferencesDialog                                                         |
-|   └─ Adw.PreferencesPage                                                      |
-|         ├─ Adw.PreferencesGroup ("Appearance")                                |
-|         │     ├─ Theme Mode: System / Light / Dark (Adw.ComboRow)             |
-|         │     ├─ Page shadows: Enable / Disable (Adw.SwitchRow)               |
-|         │     ├─ Invert Amount: 0 - 100% (Adw.SpinRow)                        |
-|         │     └─ Hue Rotate: 180° Preservation (Adw.SwitchRow)                |
-|         └─ Adw.PreferencesGroup ("Cropping")                                  |
-|               ├─ Enable auto-crop: Whitespace trimming (Adw.SwitchRow)        |
-|               └─ Page gaps: 12px / 0px gapless (Adw.SwitchRow)                |
+|   ├─ Adw.PreferencesPage ("General")                                          |
+|   │     ├─ Adw.PreferencesGroup ("Appearance")                                |
+|   │     │     ├─ Theme Mode: System / Light / Dark (Adw.ComboRow)             |
+|   │     │     ├─ Page shadows: Enable / Disable (Adw.SwitchRow)               |
+|   │     │     ├─ Invert Amount: 0 - 100% (Adw.SpinRow)                        |
+|   │     │     └─ Hue Rotate: 180° Preservation (Adw.SwitchRow)                |
+|   │     └─ Adw.PreferencesGroup ("Cropping")                                  |
+|   │           ├─ Enable auto-crop: Whitespace trimming (Adw.SwitchRow)        |
+|   │           └─ Page gaps: 12px / 0px gapless (Adw.SwitchRow)                |
+|   ├─ Adw.PreferencesPage ("Crop")                                             |
+|   ├─ Adw.PreferencesPage ("Search")                                           |
+|   ├─ Adw.PreferencesPage ("Zoom")                                             |
+|   └─ Adw.PreferencesPage ("Debug")                                            |
+|         └─ Adw.PreferencesGroup ("PDF Annotations")                           |
+|               └─ Reload & Recalculate Notes: Re-extract & update (ActionRow)  |
 +-------------------------------------------------------------------------------+
 ```
 
@@ -306,8 +312,8 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`PdfSource` (`pdf_source.py`)**: Uniform data model for local files, remote web PDF URLs (`source_type="url"`), and arXiv identifiers (`source_type="arxiv"`), supporting `fallback_uri` for publisher DOI resolution and `RecentFilesManager` (unlimited history persistence).
 - **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, shadow, and last-opened file chooser directory configurations serialized to `~/.config/pdfatlas/settings.json`. Serves as the global defaults template for newly opened documents, while per-document reading state overrides `enabled` and `page_gaps` per tab.
 - **`TextSelection` (`text_selection.py`)**: Character-accurate spatial text selection state across multiple continuous pages. Provides `get_selection_line_rects()` to coalesce per-character bounding boxes into continuous, word/line-level rectangles.
-- **`HTMLToMarkdown` (`html_to_markdown.py`)**: Lightweight, dependency-free HTML/XHTML to Markdown parser converting rich annotation text (Acrobat `/RC` XML fragments, inline styles, formatting, and links) into clean Markdown.
-- **`PdfNotesImporter` (`pdf_notes_import.py`)**: Embedded PDF annotation scanner extracting comments from highlights and sticky notes, converting markup to Markdown, and positioning imported notes at the mid-right edge of annotation bounding boxes (`x = rect.x1`, `y = (rect.y0 + rect.y1) / 2.0`).
+- **`PdfNotesImporter` (`pdf_notes_import.py`)**: Embedded PDF annotation scanner extracting comments from highlights and sticky notes, converting markup to Markdown, and positioning imported notes at 0-indexed page coordinates using quadpoint right-edge endpoints for text markup highlights and icon centers for sticky notes. Provides `recalc_embedded_notes` in `index.py` to recalibrate note anchors by matching markdown content while preserving user-created notes.
+
 
 ---
 
