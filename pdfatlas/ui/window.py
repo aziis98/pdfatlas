@@ -657,6 +657,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_welcome(self):
         """Show the empty-window welcome screen with fresh recents and a tip."""
+        if hasattr(self, "recent_files") and hasattr(self.recent_files, "reload"):
+            self.recent_files.reload()
         self.welcome_view.refresh(self.recent_files)
         self.stack.set_visible_child_name("welcome-view")
 

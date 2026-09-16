@@ -141,6 +141,8 @@ class TabController:
 
         if isinstance(doc_view, WelcomeView):
             self.win.stack.set_visible_child_name("document-view")
+            if hasattr(self.win, "recent_files") and hasattr(self.win.recent_files, "reload"):
+                self.win.recent_files.reload()
             doc_view.refresh(self.win.recent_files)
             self.win.filename_label.set_label("PDF Atlas")
             self.win.set_title("PDF Atlas")
@@ -250,6 +252,8 @@ class TabController:
         """Open a new tab with the welcome view."""
         from ..ui.welcome import WelcomeView
 
+        if hasattr(self.win, "recent_files") and hasattr(self.win.recent_files, "reload"):
+            self.win.recent_files.reload()
         welcome = WelcomeView(self.win)
         welcome.refresh(self.win.recent_files)
         page = self.tab_view.append(welcome)

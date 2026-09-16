@@ -65,6 +65,11 @@ class RecentFilesManager:
         data = [asdict(e) for e in self._entries if not is_test_path(e.uri)]
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
+    def reload(self):
+        """Reload recent files from the JSON file on disk."""
+        self._entries = []
+        self._load()
+
     def add(self, source: PdfSource):
         if is_test_path(source.uri):
             return

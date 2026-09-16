@@ -171,6 +171,8 @@ class WelcomeView(Gtk.Box):
         content.append(self.recent_empty_label)
 
     def refresh(self, recents: "RecentFilesManager"):
+        if hasattr(recents, "reload"):
+            recents.reload()
         while (child := self.recent_list.get_first_child()) is not None:
             self.recent_list.remove(child)
 

@@ -121,3 +121,79 @@ def test_recents_unlimited_by_default():
         assert len(entries) == 25
         assert entries[0].display_name == "Paper 24"
         assert entries[-1].display_name == "Paper 0"
+
+
+def test_recents_manager_reload():
+    import json
+    import tempfile
+    from pathlib import Path
+    from pdfatlas.core.pdf_source import PdfSource, RecentFilesManager
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        recent_file = Path(tmpdir) / "recent.json"
+        recents = RecentFilesManager(path=recent_file)
+        recents.add(PdfSource("file", "/home/user/papers/first.pdf", "First Paper"))
+        assert len(recents.get_recent()) == 1
+
+        # Simulate another window or process writing to recent.json
+        data = [
+            {"source_type": "file", "uri": "/home/user/papers/second.pdf", "display_name": "Second Paper"},
+            {"source_type": "file", "uri": "/home/user/papers/first.pdf", "display_name": "First Paper"},
+        ]
+        recent_file.write_text(json.dumps(data), encoding="utf-8")
+
+        # Before reload, in-memory entries still has 1
+        assert len(recents.get_recent()) == 1
+
+        # After reload, entries are updated from disk
+        recents.reload()
+        updated = recents.get_recent()
+        assert len(updated) == 2
+        assert updated[0].display_name == "Second Paper"
+
+
+def test_new_tab_reloads_recents_list():
+    import json
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import MagicMock
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from pdfatlas.core.pdf_source import PdfSource, RecentFilesManager
+    from pdfatlas.controllers.tabs import TabController
+    from pdfatlas.ui.welcome import WelcomeView
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        recent_file = Path(tmpdir) / "recent.json"
+        recents = RecentFilesManager(path=recent_file)
+        recents.add(PdfSource("file", "/home/user/papers/paper1.pdf", "Paper 1"))
+
+        win_mock = MagicMock()
+        win_mock.recent_files = recents
+        win_mock.stack = MagicMock()
+
+        tabs = TabController(win_mock)
+        win_mock.tab_view = tabs.tab_view
+
+        # External change to recent.json
+        data = [
+            {"source_type": "file", "uri": "/home/user/papers/paper2.pdf", "display_name": "Paper 2"},
+            {"source_type": "file", "uri": "/home/user/papers/paper1.pdf", "display_name": "Paper 1"},
+        ]
+        recent_file.write_text(json.dumps(data), encoding="utf-8")
+
+        tabs.new_tab()
+
+        assert tabs.tab_view.get_n_pages() == 1
+        page = tabs.tab_view.get_nth_page(0)
+        welcome = page.get_child()
+        assert isinstance(welcome, WelcomeView)
+
+        # Verify welcome view's list box has the reloaded items
+        count = 0
+        child = welcome.recent_list.get_first_child()
+        while child is not None:
+            count += 1
+            child = child.get_next_sibling()
+        assert count == 2
