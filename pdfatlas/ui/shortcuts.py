@@ -45,8 +45,8 @@ class ShortcutsController:
         self._add_nav_shortcut("q", self.win.close)
 
         # Focus search bar [Ctrl+F]
-        self._add_shortcut("<Control>f", self.win.entry.grab_focus)
-        self._add_shortcut("<Control>F", self.win.entry.grab_focus)
+        self._add_shortcut("<Control>f", self.win.focus_search)
+        self._add_shortcut("<Control>F", self.win.focus_search)
 
         # Zoom keys
         self._add_shortcut("plus", self.win.zoom_in)

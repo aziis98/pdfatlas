@@ -1046,6 +1046,21 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- Search Engine Wiring ---
 
+    def focus_search(self) -> None:
+        """Focus the search entry. If text is currently selected in the active document, search for it."""
+        doc_view = self.get_active_doc_view()
+        canvas = doc_view.canvas if (doc_view and hasattr(doc_view, "canvas")) else getattr(self, "canvas", None)
+        sel = canvas.text_selection if (canvas and hasattr(canvas, "text_selection")) else None
+
+        if sel is not None and sel.has_selection():
+            selected_text = " ".join(sel.get_selected_text().split())
+            if selected_text:
+                self.entry.set_text(selected_text)
+                self.run_search(selected_text)
+
+        self.entry.grab_focus()
+        self.entry.select_region(0, -1)
+
     def run_search(self, query: str):
         self.search_controller.run_search(query)
 

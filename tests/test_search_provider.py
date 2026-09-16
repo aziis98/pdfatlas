@@ -150,3 +150,61 @@ def test_search_results_view_pinned_with_empty_live():
         child = child.get_next_sibling()
     assert found_status is True
 
+
+def test_focus_search_with_selected_text():
+    from unittest.mock import MagicMock
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Gtk
+    from pdfatlas.ui.window import MainWindow
+
+    win = MagicMock(spec=MainWindow)
+    win.entry = Gtk.SearchEntry()
+    win.run_search = MagicMock()
+    win.get_active_doc_view = MagicMock()
+
+    mock_doc_view = MagicMock()
+    mock_canvas = MagicMock()
+    mock_sel = MagicMock()
+    mock_sel.has_selection.return_value = True
+    mock_sel.get_selected_text.return_value = "quantum\n  entanglement"
+    mock_canvas.text_selection = mock_sel
+    mock_doc_view.canvas = mock_canvas
+    win.get_active_doc_view.return_value = mock_doc_view
+
+    MainWindow.focus_search(win)
+
+    assert win.entry.get_text() == "quantum entanglement"
+    win.run_search.assert_called_once_with("quantum entanglement")
+
+
+def test_focus_search_without_selection():
+    from unittest.mock import MagicMock
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Gtk
+    from pdfatlas.ui.window import MainWindow
+
+    win = MagicMock(spec=MainWindow)
+    win.entry = Gtk.SearchEntry()
+    win.entry.set_text("existing query")
+    win.run_search = MagicMock()
+    win.get_active_doc_view = MagicMock()
+
+    mock_doc_view = MagicMock()
+    mock_canvas = MagicMock()
+    mock_sel = MagicMock()
+    mock_sel.has_selection.return_value = False
+    mock_canvas.text_selection = mock_sel
+    mock_doc_view.canvas = mock_canvas
+    win.get_active_doc_view.return_value = mock_doc_view
+
+    MainWindow.focus_search(win)
+
+    # Should keep existing query and not trigger new run_search
+    assert win.entry.get_text() == "existing query"
+    win.run_search.assert_not_called()
+
+
