@@ -1,8 +1,6 @@
+import functools
 import os
 import re
-import tarfile
-import threading
-import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -11,7 +9,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gtk
 
 from ..core.arxiv_mapper import (
     arxiv_id_from_path as _arxiv_id_from_path,
@@ -43,6 +41,7 @@ def clean_arxiv_title(raw_title: str) -> str:
     return cleaned
 
 
+@functools.lru_cache(maxsize=128)
 def _fetch_arxiv_title(arxiv_id: str) -> str | None:
     try:
         url = ARXIV_API_URL.format(arxiv_id)
@@ -68,8 +67,7 @@ class ArxivDialog(Gtk.Window):
         )
         self.set_default_size(420, -1)
         self._on_source = on_source
-
-        self._cache_dir: Path | None = None
+        self.recent_files = recent_files
 
         header = Adw.HeaderBar()
         self.set_titlebar(header)
@@ -91,16 +89,12 @@ class ArxivDialog(Gtk.Window):
         self.status_label.set_visible(False)
         vbox.append(self.status_label)
 
-        self.spinner = Gtk.Spinner()
-        self.spinner.set_visible(False)
-        vbox.append(self.spinner)
-
         self.fetch_btn = Gtk.Button(label="Fetch & Open")
         self.fetch_btn.add_css_class("suggested-action")
         self.fetch_btn.connect("clicked", lambda b: self._on_fetch())
         vbox.append(self.fetch_btn)
 
-        recent = recent_files.get_recent_by_type("arxiv", 5)
+        recent = recent_files.get_recent_by_type("arxiv", 5) if recent_files else []
         if recent:
             sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
             vbox.append(sep)
@@ -144,14 +138,19 @@ class ArxivDialog(Gtk.Window):
             self._set_status("Invalid arXiv ID or URL")
             return
 
-        self.fetch_btn.set_sensitive(False)
-        self.entry.set_sensitive(False)
-        self.spinner.set_visible(True)
-        self.spinner.start()
-        self._set_status("Downloading...")
+        cache_dir = ARXIV_CACHE_ROOT / arxiv_id
+        pdf_path = cache_dir / "paper.pdf"
 
-        thread = threading.Thread(target=self._download_worker, args=(arxiv_id,), daemon=True)
-        thread.start()
+        existing = self.recent_files.get_by_arxiv_id(arxiv_id) if self.recent_files else None
+        title = existing.display_name if (existing and existing.display_name) else f"arXiv:{arxiv_id}"
+
+        pdf_source = PdfSource(
+            source_type="arxiv",
+            uri=str(pdf_path),
+            display_name=title,
+        )
+        self._on_source(pdf_source)
+        self.destroy()
 
     def _make_recent_handler(self, source):
         def handler(row):
@@ -159,68 +158,6 @@ class ArxivDialog(Gtk.Window):
             self.destroy()
         return handler
 
-    def _download_worker(self, arxiv_id: str):
-        try:
-            cache_dir = ARXIV_CACHE_ROOT / arxiv_id
-            cache_dir.mkdir(parents=True, exist_ok=True)
-
-            pdf_path = cache_dir / "paper.pdf"
-            if not pdf_path.exists():
-                self._idle_status("Downloading PDF...")
-                pdf_url = ARXIV_PDF_URL.format(arxiv_id)
-                urllib.request.urlretrieve(pdf_url, pdf_path)
-
-            eprint_path = cache_dir / "source.tar.gz"
-            if not eprint_path.exists():
-                self._idle_status("Downloading source tarball...")
-                eprint_url = ARXIV_EPRINT_URL.format(arxiv_id)
-                urllib.request.urlretrieve(eprint_url, eprint_path)
-
-            self._idle_status("Extracting source files...")
-            with tarfile.open(eprint_path, "r:gz") as tar:
-                tar.extractall(path=cache_dir)
-            eprint_path.unlink()
-
-            self._idle_status("Fetching paper metadata...")
-            title = _fetch_arxiv_title(arxiv_id) or f"arXiv:{arxiv_id}"
-            self._idle_title(title)
-
-            pdf_source = PdfSource(
-                source_type="arxiv",
-                uri=str(cache_dir / "paper.pdf"),
-                display_name=title,
-            )
-            self._idle_done(pdf_source)
-        except urllib.error.HTTPError as e:
-            self._idle_error(f"HTTP error: {e.code} {e.reason}")
-        except urllib.error.URLError as e:
-            self._idle_error(f"Network error: {e.reason}")
-        except Exception as e:
-            self._idle_error(f"Error: {e}")
-
-    def _idle_status(self, msg: str):
-        GLib.idle_add(self._set_status, msg)
-
     def _set_status(self, msg: str):
         self.status_label.set_label(msg)
         self.status_label.set_visible(bool(msg))
-
-    def _idle_error(self, msg: str):
-        GLib.idle_add(self._on_error, msg)
-
-    def _on_error(self, msg: str):
-        self._set_status(msg)
-        self.fetch_btn.set_sensitive(True)
-        self.entry.set_sensitive(True)
-        self.spinner.stop()
-        self.spinner.set_visible(False)
-
-    def _idle_done(self, source: PdfSource):
-        GLib.idle_add(self._on_done, source)
-
-    def _on_done(self, source: PdfSource):
-        self._on_source(source)
-        self.destroy()
-
-    def _idle_title(self, title: str):
-        GLib.idle_add(self._set_status, title)

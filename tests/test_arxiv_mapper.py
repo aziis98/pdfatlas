@@ -190,3 +190,40 @@ def test_arxiv_mapper_sqlite_save_load(tmp_path):
     assert loaded_mapper.word_metadata == [(0, 0, 5), (0, 6, 11)]
     conn.close()
 
+
+def test_download_arxiv_source_caching(tmp_path, monkeypatch):
+    import pdfatlas.core.arxiv_mapper as arxiv_mod
+    from unittest.mock import MagicMock
+
+    cache_root = tmp_path / "cache" / "source-arxiv"
+    monkeypatch.setattr(arxiv_mod, "ARXIV_CACHE_ROOT", cache_root)
+
+    aid = "2305.12345"
+    paper_dir = cache_root / aid
+    paper_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = paper_dir / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-mock")
+
+    # 1. Existing .source_extracted marker should skip network download of source
+    marker = paper_dir / ".source_extracted"
+    marker.touch()
+
+    urlopen_mock = MagicMock(side_effect=AssertionError("Network called when source is already cached"))
+    monkeypatch.setattr(arxiv_mod.urllib.request, "urlopen", urlopen_mock)
+
+    out_pdf, out_dir = arxiv_mod.download_arxiv_source(aid, download_pdf=False, download_source=True)
+    assert out_pdf == pdf_path
+    assert out_dir == paper_dir
+    urlopen_mock.assert_not_called()
+
+    # 2. Existing .tex files should also skip network download and create marker
+    aid2 = "2305.99999"
+    paper_dir2 = cache_root / aid2
+    paper_dir2.mkdir(parents=True, exist_ok=True)
+    (paper_dir2 / "main.tex").write_text("Hello TeX")
+
+    out_pdf2, out_dir2 = arxiv_mod.download_arxiv_source(aid2, download_pdf=False, download_source=True)
+    assert (paper_dir2 / ".source_extracted").exists()
+    urlopen_mock.assert_not_called()
+
+

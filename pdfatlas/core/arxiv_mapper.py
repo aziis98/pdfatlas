@@ -3,6 +3,7 @@ import re
 import sys
 import tarfile
 import time
+import urllib.error
 import urllib.request
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -125,8 +126,9 @@ def download_arxiv_source(
                 progress_callback(1.0, "Opening document...")
 
     if download_source:
+        marker_path = cache_dir / ".source_extracted"
         eprint_path = cache_dir / "source.tar.gz"
-        if not any(cache_dir.glob("*.tex")):
+        if not marker_path.exists() and not any(cache_dir.rglob("*.tex")):
             try:
                 if not eprint_path.exists():
                     print(f"[ArxivMapper] Downloading source tarball for {arxiv_id}...", file=sys.stderr, flush=True)
@@ -144,12 +146,26 @@ def download_arxiv_source(
                     progress_callback(0.9, f"Extracting LaTeX sources for {arxiv_id}...")
                 with tarfile.open(eprint_path, "r:gz") as tar:
                     tar.extractall(path=cache_dir)
+                marker_path.touch()
                 if eprint_path.exists():
                     eprint_path.unlink()
+            except urllib.error.HTTPError as e:
+                if e.code in (404, 410):
+                    marker_path.touch()
+                if not download_pdf:
+                    raise
+                print(f"[ArxivMapper] Warning: Could not download LaTeX source for {arxiv_id}: {e}", file=sys.stderr, flush=True)
+            except tarfile.ReadError:
+                marker_path.touch()
+                if not download_pdf:
+                    raise
+                print(f"[ArxivMapper] Warning: Source archive for {arxiv_id} is not a valid tar: skipping", file=sys.stderr, flush=True)
             except Exception as e:
                 if not download_pdf:
                     raise
                 print(f"[ArxivMapper] Warning: Could not download/extract LaTeX source for {arxiv_id}: {e}", file=sys.stderr, flush=True)
+        elif not marker_path.exists() and any(cache_dir.rglob("*.tex")):
+            marker_path.touch()
 
     return pdf_path, cache_dir
 

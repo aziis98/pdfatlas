@@ -202,16 +202,23 @@ Preferences modal configured with Libadwaita rows.
 ---
 
 ### ArxivDialog (`pdfatlas.ui.arxiv_dialog`)
-Search and paper download modal.
+arXiv URL/ID input and recent papers modal.
 
 ```
 +-------------------------------------------------------------------------------+
-| Adw.HeaderBar [Search Entry: "Query or arXiv ID..."] [Download Button]        |
+| Adw.HeaderBar [Title: "Open from arXiv"]                                      |
 +-------------------------------------------------------------------------------+
-| Gtk.ScrolledWindow                                                            |
-|   └─ Gtk.ListBox (Paper Title, Authors, Abstract snippet, Version tags)       |
+| Gtk.Box                                                                       |
+|   ├─ Gtk.Entry ("arXiv URL or ID (e.g. 2305.12345)")                          |
+|   ├─ Gtk.Label (Status message if invalid)                                    |
+|   ├─ Gtk.Button ("Fetch & Open")                                              |
+|   ├─ Gtk.Separator                                                            |
+|   └─ Gtk.ListBox (Recent arXiv papers)                                        |
 +-------------------------------------------------------------------------------+
 ```
+
+- **Instant Local Open**: Checks local arXiv cache and recent store. If `paper.pdf` exists locally, immediately opens the document in 0ms with zero network requests.
+- **Delegated In-Tab Download**: If uncached, closes the modal immediately and hands off to `DocumentLoader.open_document` to render an in-tab progress bar for the PDF, deferring LaTeX source download and diffing to non-blocking background workers.
 
 ---
 
