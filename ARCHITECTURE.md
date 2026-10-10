@@ -329,7 +329,7 @@ Controllers decouple business logic, state mutations, and external integrations 
 
 ## 4. Core Engine & Models (`pdfatlas.core.*`)
 
-- **`DocumentModel` (`document.py`)**: Thread-safe PyMuPDF (`fitz.Document`) wrapper with mutex protection for multithreaded rasterization. Maintains per-document custom user links (`_custom_links`, `_custom_links_by_page`) and merges them into `get_page_links()` via `coalesce_rects_by_line()` for transparent GL quad rendering and click hit-testing as clean single bounding boxes per line.
+- **`DocumentModel` (`document.py`)**: Thread-safe PyMuPDF (`fitz.Document`) wrapper with mutex protection for multithreaded rasterization. Pre-caches page rectangles and native PDF links on `__init__` in milliseconds, while plain-text arXiv citation links are detected lazily on-demand in a dedicated background worker thread (`_arxiv_link_worker`) to eliminate startup stalls. Maintains per-document custom user links (`_custom_links`, `_custom_links_by_page`) and merges them into `get_page_links()` via `coalesce_rects_by_line()` for transparent GL quad rendering and click hit-testing as clean single bounding boxes per line.
 - **`RenderWorker` & `RenderCache` (`renderer.py`, `cache.py`)**: Background render worker pool and LRU cache storing raw RGB pixel buffers.
 - **`CropAnalyzer` (`crop.py`)**: Background bounding-box analyzer calculating optimal page whitespace crops.
 - **`ArxivDiffMapper` (`arxiv_mapper.py`)**: Downloads arXiv LaTeX source bundles, parses TeX ASTs, and computes word-level sourcemaps between compiled PDF words and original TeX source lines.

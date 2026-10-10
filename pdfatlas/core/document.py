@@ -1,5 +1,12 @@
+import os
+import queue
 import re
+import threading
+import time
+from typing import Callable, Optional
+
 import pymupdf as fitz
+from gi.repository import GLib
 
 ARXIV_TEXT_RE = re.compile(
     r"(?:(?:arXiv|arxiv|ARXIV):\s*|https?://(?:[a-zA-Z0-9\-]+\.)?arxiv\.org/(?:abs|pdf)/|doi:10\.48550/arXiv\.)"
@@ -112,7 +119,7 @@ class DocumentModel:
         self.filepath = filepath
         self.doc = fitz.open(filepath)
         self._page_count = len(self.doc)
-        # Pre-cache page rectangles and links to avoid retrieving them repeatedly during GL render passes
+        # Pre-cache page rectangles and native PDF links to avoid retrieving them repeatedly during GL render passes
         self._page_rects = [self.doc[i].rect for i in range(self._page_count)]
         self._page_links: list[list[dict]] = []
         self._custom_links: list[dict] = []
@@ -122,10 +129,102 @@ class DocumentModel:
                 page = self.doc[i]
                 raw_links = page.get_links()
                 normalized_links = [normalize_link_dict(self.doc, lnk, self._page_count) for lnk in raw_links]
-                auto_links = detect_text_arxiv_links(page, normalized_links)
-                self._page_links.append(normalized_links + auto_links)
+                self._page_links.append(normalized_links)
             except (RuntimeError, ValueError):
                 self._page_links.append([])
+
+        # Lazy background worker state for plain-text arXiv link detection
+        self._auto_links: dict[int, list[dict]] = {}
+        self._scanned_pages: set[int] = set()
+        self._pending_pages: set[int] = set()
+        self._queue: queue.Queue[int | None] = queue.Queue()
+        self._lock = threading.Lock()
+        self._worker_thread: threading.Thread | None = None
+        self._closed = False
+        self.on_links_updated: Optional[Callable[[int], None]] = None
+
+    def _ensure_arxiv_detection_queued(self, index: int) -> None:
+        if self._closed or not (0 <= index < self._page_count):
+            return
+        with self._lock:
+            if index in self._scanned_pages or index in self._pending_pages:
+                return
+            self._pending_pages.add(index)
+            self._queue.put(index)
+            if self._worker_thread is None or not self._worker_thread.is_alive():
+                self._worker_thread = threading.Thread(
+                    target=self._arxiv_link_worker,
+                    daemon=True,
+                    name=f"ArxivLinkWorker-{os.path.basename(self.filepath)}",
+                )
+                self._worker_thread.start()
+
+    def _arxiv_link_worker(self) -> None:
+        try:
+            worker_doc = fitz.open(self.filepath)
+        except Exception as e:
+            print(f"[DocumentModel] Worker failed to open {self.filepath}: {e}", flush=True)
+            return
+
+        try:
+            while not self._closed:
+                try:
+                    page_idx = self._queue.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+
+                if page_idx is None or self._closed:
+                    break
+
+                try:
+                    if 0 <= page_idx < len(worker_doc):
+                        page = worker_doc[page_idx]
+                        existing = self._page_links[page_idx]
+                        detected = detect_text_arxiv_links(page, existing)
+                        with self._lock:
+                            self._scanned_pages.add(page_idx)
+                            self._pending_pages.discard(page_idx)
+                            if detected:
+                                self._auto_links[page_idx] = detected
+
+                        if detected and self.on_links_updated:
+                            cb = self.on_links_updated
+                            def _notify(idx: int) -> bool:
+                                cb(idx)
+                                return False
+                            GLib.idle_add(_notify, page_idx)
+                except Exception as e:
+                    print(f"[DocumentModel] Error detecting arXiv links for page {page_idx}: {e}", flush=True)
+                    with self._lock:
+                        self._scanned_pages.add(page_idx)
+                        self._pending_pages.discard(page_idx)
+                finally:
+                    self._queue.task_done()
+        finally:
+            try:
+                worker_doc.close()
+            except Exception:
+                pass
+
+    def wait_for_arxiv_detection(self, index: Optional[int] = None, timeout: float = 3.0) -> None:
+        """
+        Wait for a page (or all pending pages) to be scanned by the background link worker.
+        Primarily used in headless unit tests and scripts.
+        """
+        if self._closed:
+            return
+        if index is not None:
+            self._ensure_arxiv_detection_queued(index)
+        t_end = time.perf_counter() + timeout
+        while time.perf_counter() < t_end:
+            with self._lock:
+                if index is not None:
+                    if index in self._scanned_pages:
+                        return
+                else:
+                    if not self._pending_pages:
+                        return
+            time.sleep(0.01)
 
     @property
     def page_count(self) -> int:
@@ -159,18 +258,30 @@ class DocumentModel:
     def get_custom_links(self) -> list[dict]:
         return self._custom_links
 
-    def get_page_links(self, index: int) -> list[dict]:
+    def get_page_links(self, index: int, wait: Optional[bool] = None) -> list[dict]:
         """
         Retrieve list of link dictionaries for a page.
         Pre-cached on init to ensure lock-free O(1) access during GL rendering.
-        Includes user-created custom links.
+        Includes native PDF links, user custom links, and lazy background-detected arXiv links.
         """
         if 0 <= index < self._page_count:
+            self._ensure_arxiv_detection_queued(index)
+
+            should_wait = wait if wait is not None else (GLib.main_depth() == 0)
+            if should_wait and index not in self._scanned_pages:
+                self.wait_for_arxiv_detection(index, timeout=3.0)
+
             native = self._page_links[index]
+            with self._lock:
+                auto = self._auto_links.get(index)
             custom = self._custom_links_by_page.get(index)
+
+            res = list(native)
+            if auto:
+                res.extend(auto)
             if custom:
-                return native + custom
-            return native
+                res.extend(custom)
+            return res
         return []
 
     def get_page(self, index: int) -> fitz.Page:
@@ -235,8 +346,10 @@ class DocumentModel:
 
     def close(self):
         """
-        Close the underlying fitz document if not already closed.
+        Close the underlying fitz document and terminate the background link worker thread.
         """
+        self._closed = True
+        self._queue.put(None)
         if self.doc and not self.doc.is_closed:
             self.doc.close()
 

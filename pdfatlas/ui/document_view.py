@@ -229,6 +229,8 @@ class PdfDocumentView(Gtk.Box):
             self.render_worker = render_worker
 
         self.doc_model = doc_model
+        if self.doc_model:
+            self.doc_model.on_links_updated = self._on_auto_links_updated
         self.current_source = source
         self.crop_analyzer = CropAnalyzer(self.doc_model)
 
@@ -287,6 +289,10 @@ class PdfDocumentView(Gtk.Box):
             self.on_page_changed(1, self.doc_model.page_count)
         if self.on_zoom_changed:
             self.on_zoom_changed(self.zoom)
+
+    def _on_auto_links_updated(self, page_idx: int) -> None:
+        if self.canvas:
+            self.canvas.queue_draw_overlays("arxiv-links-updated")
 
     def close(self):
         if self.render_worker and self.doc_model:

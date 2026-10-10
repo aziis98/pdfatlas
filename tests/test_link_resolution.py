@@ -251,5 +251,36 @@ def test_link_preview_hover_string_page_safe():
     # Should not raise TypeError and should fallback gracefully
 
 
+def test_lazy_arxiv_link_worker(tmp_path):
+    pdf_file = tmp_path / "test_lazy.pdf"
+    doc = fitz.open()
+    p0 = doc.new_page(width=600, height=800)
+    p0.insert_text((50, 100), "See reference arXiv:2102.03384 on page 1.")
+    p1 = doc.new_page(width=600, height=800)
+    p1.insert_text((50, 100), "Page 2 plain text.")
+    doc.save(str(pdf_file))
+    doc.close()
+
+    model = DocumentModel(str(pdf_file))
+    # On init, pages should not be scanned yet
+    assert 0 not in model._scanned_pages
+    assert 1 not in model._scanned_pages
+
+    # get_page_links with wait=False returns native links immediately
+    links_immediate = model.get_page_links(0, wait=False)
+    assert isinstance(links_immediate, list)
+
+    # Wait for page 0 to finish background scan
+    model.wait_for_arxiv_detection(0)
+    assert 0 in model._scanned_pages
+    # Page 1 should still be un-scanned (lazy)
+    assert 1 not in model._scanned_pages
+
+    links_p0 = model.get_page_links(0, wait=False)
+    assert any(lnk.get("auto_detected") and "2102.03384" in lnk.get("uri", "") for lnk in links_p0)
+
+    model.close()
+
+
 
 
