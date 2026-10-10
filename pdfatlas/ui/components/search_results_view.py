@@ -24,10 +24,16 @@ class SearchResultsView(Gtk.Box):
         self,
         on_row_clicked: Callable[[dict, set[str]], None] | None = None,
         on_toggle_pin: Callable[[dict, set[str], bool], None] | None = None,
+        use_masonry: bool = False,
+        page_height_getter: Callable[[int], float] | None = None,
+        page_dims_getter: Callable[[int], tuple[float, float]] | None = None,
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.on_row_clicked = on_row_clicked
         self.on_toggle_pin = on_toggle_pin
+        self.use_masonry = use_masonry
+        self.page_height_getter = page_height_getter
+        self.page_dims_getter = page_dims_getter
 
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
         self.pinned: dict[int, dict] = {}
@@ -110,25 +116,44 @@ class SearchResultsView(Gtk.Box):
             self.results_box.append(pinned_label)
 
             if is_grid:
-                pinned_grid = Gtk.FlowBox()
+                if self.use_masonry:
+                    from .masonry_layout import MasonryBox
+
+                    pinned_grid = MasonryBox(column_spacing=14, row_spacing=14, min_column_width=470)
+                else:
+                    pinned_grid = Gtk.FlowBox()
+                    pinned_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+                    pinned_grid.set_column_spacing(12)
+                    pinned_grid.set_row_spacing(12)
                 pinned_grid.set_valign(Gtk.Align.START)
                 pinned_grid.set_halign(Gtk.Align.CENTER)
                 pinned_grid.set_hexpand(True)
-                pinned_grid.set_selection_mode(Gtk.SelectionMode.NONE)
-                pinned_grid.set_column_spacing(8)
-                pinned_grid.set_row_spacing(8)
-                pinned_grid.set_margin_start(12)
-                pinned_grid.set_margin_end(12)
+                pinned_grid.set_margin_start(16)
+                pinned_grid.set_margin_end(16)
                 self.results_box.append(pinned_grid)
 
             for entry in self.pinned.values():
                 pdf_path = entry["result"].get("filepath", active_filepath)
+                p_page = entry["result"].get("page", 1)
+                pw, ph = 600.0, 792.0
+                if self.page_dims_getter:
+                    try:
+                        pw, ph = self.page_dims_getter(p_page)
+                    except Exception:
+                        pass
+                elif self.page_height_getter:
+                    try:
+                        ph = self.page_height_getter(p_page)
+                    except Exception:
+                        pass
                 row = ResultRow(
                     pdf_path,
                     self.executor,
                     entry["result"],
                     entry["query_terms"],
                     pinned=True,
+                    page_w=pw,
+                    page_h=ph,
                     on_toggle_pin=self._handle_toggle_pin,
                     on_row_clicked=self.on_row_clicked,
                 )
@@ -158,32 +183,85 @@ class SearchResultsView(Gtk.Box):
 
         # 2. Live Search Results
         if is_grid and results:
-            live_grid = Gtk.FlowBox()
+            if self.use_masonry:
+                from .masonry_layout import MasonryBox
+                from pdfatlas.core.search_cluster import merge_search_results
+
+                display_results = merge_search_results(
+                    results,
+                    query_terms=query_terms,
+                    page_height_getter=self.page_height_getter,
+                )
+                live_grid = MasonryBox(column_spacing=14, row_spacing=14, min_column_width=470)
+            else:
+                display_results = results
+                live_grid = Gtk.FlowBox()
+                live_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+                live_grid.set_column_spacing(12)
+                live_grid.set_row_spacing(12)
             live_grid.set_valign(Gtk.Align.START)
             live_grid.set_halign(Gtk.Align.CENTER)
             live_grid.set_hexpand(True)
-            live_grid.set_selection_mode(Gtk.SelectionMode.NONE)
-            live_grid.set_column_spacing(8)
-            live_grid.set_row_spacing(8)
-            live_grid.set_margin_start(12)
-            live_grid.set_margin_end(12)
+            live_grid.set_margin_start(16)
+            live_grid.set_margin_end(16)
             self.results_box.append(live_grid)
 
-        for res in results:
-            is_pinned = res["id"] in self.pinned
-            pdf_path = res.get("filepath", active_filepath)
-            row = ResultRow(
-                pdf_path,
-                self.executor,
-                res,
-                query_terms,
-                pinned=is_pinned,
-                on_toggle_pin=self._handle_toggle_pin,
-                on_row_clicked=self.on_row_clicked,
-            )
-            if is_grid and live_grid is not None:
+            for res in display_results:
+                is_pinned = res["id"] in self.pinned or any(
+                    mid in self.pinned for mid in res.get("merged_ids", [])
+                )
+                pdf_path = res.get("filepath", active_filepath)
+                p_page = res.get("page", 1)
+                pw, ph = 600.0, 792.0
+                if self.page_dims_getter:
+                    try:
+                        pw, ph = self.page_dims_getter(p_page)
+                    except Exception:
+                        pass
+                elif self.page_height_getter:
+                    try:
+                        ph = self.page_height_getter(p_page)
+                    except Exception:
+                        pass
+                row = ResultRow(
+                    pdf_path,
+                    self.executor,
+                    res,
+                    query_terms,
+                    pinned=is_pinned,
+                    page_w=pw,
+                    page_h=ph,
+                    on_toggle_pin=self._handle_toggle_pin,
+                    on_row_clicked=self.on_row_clicked,
+                )
                 live_grid.append(row)
-            else:
+        elif results:
+            for res in results:
+                is_pinned = res["id"] in self.pinned
+                pdf_path = res.get("filepath", active_filepath)
+                p_page = res.get("page", 1)
+                pw, ph = 600.0, 792.0
+                if self.page_dims_getter:
+                    try:
+                        pw, ph = self.page_dims_getter(p_page)
+                    except Exception:
+                        pass
+                elif self.page_height_getter:
+                    try:
+                        ph = self.page_height_getter(p_page)
+                    except Exception:
+                        pass
+                row = ResultRow(
+                    pdf_path,
+                    self.executor,
+                    res,
+                    query_terms,
+                    pinned=is_pinned,
+                    page_w=pw,
+                    page_h=ph,
+                    on_toggle_pin=self._handle_toggle_pin,
+                    on_row_clicked=self.on_row_clicked,
+                )
                 self.results_box.append(row)
 
     def _handle_toggle_pin(self, result: dict, query_terms: set[str], pinned: bool):
@@ -191,5 +269,7 @@ class SearchResultsView(Gtk.Box):
             self.pinned[result["id"]] = {"result": result, "query_terms": query_terms}
         else:
             self.pinned.pop(result["id"], None)
+            for mid in result.get("merged_ids", []):
+                self.pinned.pop(mid, None)
         if self.on_toggle_pin:
             self.on_toggle_pin(result, query_terms, pinned)

@@ -65,6 +65,7 @@ class PDFViewerApplication(Adw.Application):
         debug_note_rect: bool = False,
         render_workers: int = 2,
         use_shm: bool = True,
+        experimental_search_masonry: bool = False,
         application_id: str | None = None,
         flags: Gio.ApplicationFlags | None = None,
     ):
@@ -84,6 +85,7 @@ class PDFViewerApplication(Adw.Application):
         self.debug_note_rect = debug_note_rect
         self.render_workers = render_workers
         self.use_shm = use_shm
+        self.experimental_search_masonry = experimental_search_masonry
         self.connect("window-removed", self._on_window_removed)
 
     def _on_window_removed(self, app, win):
@@ -145,6 +147,9 @@ class PDFViewerApplication(Adw.Application):
         raw_args = command_line.get_arguments()[1:]
         cwd = command_line.get_cwd()
 
+        if "--experimental-search-masonry" in raw_args:
+            self.experimental_search_masonry = True
+
         raw_target = None
         skip_next = False
         for a in raw_args:
@@ -188,6 +193,7 @@ class PDFViewerApplication(Adw.Application):
                     debug_note_rect=self.debug_note_rect,
                     render_workers=self.render_workers,
                     use_shm=self.use_shm,
+                    experimental_search_masonry=self.experimental_search_masonry,
                 )
                 target_win.present()
         else:
@@ -204,6 +210,7 @@ class PDFViewerApplication(Adw.Application):
                     debug_note_rect=self.debug_note_rect,
                     render_workers=self.render_workers,
                     use_shm=self.use_shm,
+                    experimental_search_masonry=self.experimental_search_masonry,
                 )
             win.present()
 
@@ -231,6 +238,7 @@ class PDFViewerApplication(Adw.Application):
                 debug_note_rect=self.debug_note_rect,
                 render_workers=self.render_workers,
                 use_shm=self.use_shm,
+                experimental_search_masonry=self.experimental_search_masonry,
             )
             win.present()
         else:
@@ -291,6 +299,11 @@ def main():
         default=None,
         help="Custom D-Bus application ID",
     )
+    parser.add_argument(
+        "--experimental-search-masonry",
+        action="store_true",
+        help="Enable experimental masonry waterfall layout for search results grid",
+    )
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -313,6 +326,7 @@ def main():
         debug_note_rect=args.debug_note_rect,
         render_workers=args.render_workers,
         use_shm=args.use_shm,
+        experimental_search_masonry=args.experimental_search_masonry,
         application_id=args.app_id,
         flags=app_flags,
     )

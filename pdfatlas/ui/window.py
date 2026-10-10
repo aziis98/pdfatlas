@@ -93,6 +93,7 @@ class MainWindow(Adw.ApplicationWindow):
         use_shm=True,
         initial_source: PdfSource | None = None,
         show_welcome: bool = True,
+        experimental_search_masonry: bool = False,
     ):
         super().__init__(application=app)
         self.app = app
@@ -110,6 +111,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.use_shm = use_shm
         self.initial_source = initial_source
         self.show_welcome = show_welcome and (initial_source is None)
+        self.experimental_search_masonry = experimental_search_masonry or getattr(app, "experimental_search_masonry", False)
         self._deferred_state_query: str | None = None
 
         # 2. Core models & persistent configuration
@@ -592,9 +594,23 @@ class MainWindow(Adw.ApplicationWindow):
         # Search View
         from .components.search_results_view import SearchResultsView
 
+        def _get_page_height(page_num: int) -> float:
+            if self.doc_model and 0 <= page_num - 1 < self.doc_model.page_count:
+                return float(self.doc_model.page_rect(page_num - 1).height)
+            return 792.0
+
+        def _get_page_dims(page_num: int) -> tuple[float, float]:
+            if self.doc_model and 0 <= page_num - 1 < self.doc_model.page_count:
+                r = self.doc_model.page_rect(page_num - 1)
+                return float(r.width), float(r.height)
+            return 612.0, 792.0
+
         self.search_results_view = SearchResultsView(
             on_row_clicked=self.search_controller.on_row_clicked,
             on_toggle_pin=self.search_controller.on_toggle_pin,
+            use_masonry=self.experimental_search_masonry,
+            page_height_getter=_get_page_height,
+            page_dims_getter=_get_page_dims,
         )
         self.search_scrolled = self.search_results_view.scrolled
         self.results_box = self.search_results_view.results_box

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import string
 from typing import TYPE_CHECKING, Callable
 
+import fitz
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -132,7 +134,61 @@ class SearchController:
             self.win.pinned.pop(result["id"], None)
         self.run_search(self.win.entry.get_text())
 
-    def on_row_clicked(self, result: dict, _query_terms: list | set):
+    def _extract_search_highlights(
+        self,
+        query: str,
+        terms: list[str] | set[str] | None = None,
+    ) -> dict[int, list[tuple[float, float, float, float]]]:
+        if not self.win.doc_model:
+            return {}
+        doc = self.win.doc_model.doc
+        if doc is None:
+            return {}
+
+        results: dict[int, list[tuple[float, float, float, float]]] = {}
+        clean_query = query.strip().strip("\"'")
+        query_words = [
+            t.strip(string.punctuation)
+            for t in (list(terms) if terms else clean_query.split())
+            if t.strip(string.punctuation)
+        ]
+
+        for page_idx in range(len(doc)):
+            try:
+                page = doc[page_idx]
+                page_rects: list[tuple[float, float, float, float]] = []
+                seen: set[tuple[float, float, float, float]] = set()
+
+                if len(query_words) > 1 and clean_query:
+                    phrase_matches = page.search_for(clean_query, flags=fitz.TEXT_DEHYPHENATE)
+                    if phrase_matches:
+                        for r in phrase_matches:
+                            key = (round(r.x0, 2), round(r.y0, 2), round(r.x1, 2), round(r.y1, 2))
+                            if key not in seen:
+                                seen.add(key)
+                                page_rects.append((float(r.x0), float(r.y0), float(r.x1), float(r.y1)))
+
+                if not page_rects:
+                    for term in query_words:
+                        if not term:
+                            continue
+                        matches = page.search_for(term, flags=fitz.TEXT_DEHYPHENATE)
+                        if not matches:
+                            matches = page.search_for(term)
+                        for r in matches:
+                            key = (round(r.x0, 2), round(r.y0, 2), round(r.x1, 2), round(r.y1, 2))
+                            if key not in seen:
+                                seen.add(key)
+                                page_rects.append((float(r.x0), float(r.y0), float(r.x1), float(r.y1)))
+
+                if page_rects:
+                    results[page_idx] = page_rects
+            except Exception as e:
+                print(f"[SearchController] Error searching occurrences on page {page_idx}: {e}", flush=True)
+
+        return results
+
+    def on_row_clicked(self, result: dict, query_terms: list | set | None = None):
         if not self.win.doc_model:
             return
 
@@ -142,7 +198,9 @@ class SearchController:
         if page_idx < 0 or page_idx >= len(self.win.canvas.page_layout):
             return
 
-        self.win.canvas.set_highlighted_block(page_idx, (result["x0"], result["y0"], result["x1"], result["y1"]))
+        query_str = self.win.entry.get_text() if hasattr(self.win, "entry") else ""
+        highlights = self._extract_search_highlights(query_str, query_terms)
+        self.win.canvas.set_search_highlights(highlights)
         self.win.stack.set_visible_child_name("document-view")
 
         def scroll_to_target():

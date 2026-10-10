@@ -147,6 +147,7 @@ class PDFCanvas(Gtk.Overlay):
         self._last_viewport_w: float | None = None
         self._in_viewport_resize: bool = False
         self.highlighted_block = None
+        self.search_highlights: dict[int, list[tuple[float, float, float, float]]] = {}
         self.containers = []
         self.in_flight = set()
         self.page_layout = []
@@ -894,6 +895,9 @@ class PDFCanvas(Gtk.Overlay):
             if isinstance(root, Gtk.Window):
                 root.set_focus(None)
 
+            if self.has_search_highlights():
+                self.clear_search_highlights()
+
             hit = self._hit_test_link(x, y)
             if hit is not None:
                 page_idx, link = hit
@@ -1065,9 +1069,27 @@ class PDFCanvas(Gtk.Overlay):
                          self.vadjustment.get_upper(), self.vadjustment.get_page_size())
         )
 
-    def set_highlighted_block(self, page_index: int, bbox: tuple | None):
-        self.highlighted_block = (page_index, bbox) if bbox is not None else None
+    def set_search_highlights(
+        self, highlights: dict[int, list[tuple[float, float, float, float]]] | None
+    ):
+        self.search_highlights = highlights or {}
         self.gl_canvas.queue_draw()
+
+    def clear_search_highlights(self):
+        self.search_highlights = {}
+        self.highlighted_block = None
+        self.gl_canvas.queue_draw()
+
+    def has_search_highlights(self) -> bool:
+        return bool(self.search_highlights) or self.highlighted_block is not None
+
+    def set_highlighted_block(self, page_index: int, bbox: tuple | None):
+        if bbox is None:
+            self.clear_search_highlights()
+        else:
+            self.highlighted_block = (page_index, bbox)
+            self.search_highlights = {page_index: [bbox]}
+            self.gl_canvas.queue_draw()
 
     def update_layout(self):
         if not self.doc_model:

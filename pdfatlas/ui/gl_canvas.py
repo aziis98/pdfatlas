@@ -173,18 +173,37 @@ class GLCanvas(Gtk.GLArea):
                 else:
                     r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col, radius=page_radius)
 
-                hl_block = canvas.highlighted_block
-                if hl_block is not None:
-                    h_page_idx, h_bbox = hl_block
+                # Search occurrences highlights (orange outline stroke, no fill)
+                search_rects = canvas.search_highlights.get(i, [])
+                if search_rects:
+                    co_x = crop_rect.x0 if crop_rect is not None else 0.0
+                    co_y = crop_rect.y0 if crop_rect is not None else 0.0
+                    pad = 1.5
+                    screen_rects = [
+                        (
+                            x_offset + (bx0 - pad - co_x) * scale,
+                            page_y0 + (by0 - pad - co_y) * scale,
+                            (bx1 - bx0 + 2.0 * pad) * scale,
+                            (by1 - by0 + 2.0 * pad) * scale,
+                        )
+                        for bx0, by0, bx1, by1 in search_rects
+                    ]
+                    r.stroke_rects(screen_rects, (1.0, 0.55, 0.0, 1.0), line_width=2.0)
+                elif canvas.highlighted_block is not None:
+                    h_page_idx, h_bbox = canvas.highlighted_block
                     if h_page_idx == i:
                         bx0, by0, bx1, by1 = h_bbox
                         co_x = crop_rect.x0 if crop_rect is not None else 0.0
                         co_y = crop_rect.y0 if crop_rect is not None else 0.0
-                        hx = x_offset + (bx0 - co_x) * scale
-                        hy = page_y0 + (by0 - co_y) * scale
-                        hw = (bx1 - bx0) * scale
-                        hh = (by1 - by0) * scale
-                        r.fill_rect(hx, hy, hw, hh, (0.35, 0.2975, 0.0, 0.35))
+                        pad = 1.5
+                        r.stroke_rect(
+                            x_offset + (bx0 - pad - co_x) * scale,
+                            page_y0 + (by0 - pad - co_y) * scale,
+                            (bx1 - bx0 + 2.0 * pad) * scale,
+                            (by1 - by0 + 2.0 * pad) * scale,
+                            (1.0, 0.55, 0.0, 1.0),
+                            line_width=2.0,
+                        )
 
                 if canvas.highlights:
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0

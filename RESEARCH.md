@@ -533,8 +533,52 @@ This document records durable technical findings, architectural decisions, mathe
 - **Content-Preserving Recalibration (`recalc_embedded_notes`):**
   - When users re-run note extraction via the Settings > Debug panel, existing notes are matched to PDF metadata annotations by normalized markdown text content (`markdown.strip()`).
   - Matched notes have their `(page, x, y)` coordinates updated in SQLite.
-  - Newly added PDF annotations are inserted.
-  - Existing user-created notes (notes created within PDF Atlas whose text does not exist in the PDF annotation metadata) are strictly preserved and untouched.
+### 1.43. Precise Word-Level Search Highlights & Multi-Page Orange Stroke Outlines
+- **Word-Level vs Paragraph Bounding Boxes:**
+  - SQLite FTS5 stores paragraph-level text blocks (`blocks.x0, y0, x1, y1`). Previously, clicking a search result row highlighted the entire paragraph bounding box with a solid semi-transparent yellow fill `(0.35, 0.2975, 0.0, 0.35)`. This covered large swaths of text and lacked distinction from normal user highlights.
+  - To achieve precise word-level highlights, `SearchController._extract_search_highlights()` queries PyMuPDF (`page.search_for(clean_query, flags=fitz.TEXT_DEHYPHENATE)`) across all document pages. For multi-word queries, it matches contiguous phrase boxes first, falling back to individual token boxes if words appear non-contiguously.
+- **Unfilled Orange Stroke Rendering in OpenGL:**
+  - `QuadRenderer.stroke_rects(rects, color, line_width=2.0)` generates 4 non-overlapping border quads (top, bottom, left, right) per match bounding box, avoiding alpha double-blending at corners and rendering all outlines in a single `fill_rects` batch call.
+  - Distinctive orange outline stroke `(1.0, 0.55, 0.0, 1.0)` with no fill clearly differentiates active search matches from yellow user highlights without obscuring any background page content.
+- **Whole-Document Occurrence Tracking & Click-to-Dismiss:**
+  - `PDFCanvas.set_search_highlights(highlights_by_page)` tracks all occurrences throughout the document across pages.
+  - Single clicking anywhere on the document canvas calls `PDFCanvas.clear_search_highlights()`, immediately clearing search highlights and triggering an OpenGL redraw.
+
+### 1.44. Document-Order Search Result Sorting (Page & Vertical Y-Coordinate)
+- **Problem with FTS5 Relevance Ranking:**
+  - SQLite FTS5 orders search queries by `rank` (BM25 term-frequency score) by default. In a reading document or academic paper, relevance scoring causes results to jump back and forth randomly between later pages, earlier pages, and bottom/top paragraphs.
+- **Natural Reading Order:**
+  - Readers navigate documents sequentially from the beginning to the end.
+  - Sorting search queries with `ORDER BY b.page, b.y0, b.x0` in `index.py` aligns search portal results strictly with the document's top-to-bottom reading flow: page 1 matches appear top-to-bottom, followed by page 2, etc.
+  - Added composite index `idx_blocks_page_y` on `blocks(page, y0)` to optimize `ORDER BY b.page, b.y0, b.x0` execution.
+
+### 1.45. GTK4 Custom Masonry Layout Manager & Waterfall Column Allocation
+- **GTK4 Standard Layout Containers vs Masonry:**
+  - Standard GTK4 containers (`Gtk.Grid`, `Gtk.FlowBox`) organize children into row-aligned slots. If one item in a row has a taller height (e.g. multi-line LaTeX equations or expanded context snippets in `ResultRow` portal cards), all subsequent items in that row are forced downwards, leaving large awkward blank vertical gaps under shorter neighbors.
+  - GTK4 provides no built-in Pinterest/waterfall-style masonry layout manager.
+- **Custom `Gtk.LayoutManager` Implementation:**
+  - Implemented `MasonryLayoutManager` (`pdfatlas.ui.components.masonry_layout`) subclassing `Gtk.LayoutManager`.
+  - Override `do_get_request_mode()` returning `Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH`.
+  - In `do_measure(widget, orientation, for_size)`:
+    - For `HORIZONTAL`: returns `min_column_width` as minimum, and `min_column_width * 2 + column_spacing` as natural width.
+    - For `VERTICAL`: computes column count $K = \max\left(1, \left\lfloor\frac{W + \text{gap}}{W_{\min} + \text{gap}}\right\rfloor\right)$ using passed available width `for_size`, measures each child height via `child.measure(Gtk.Orientation.VERTICAL, col_w)`, and simulates waterfall height accumulation into `col_heights`.
+  - In `do_allocate(widget, width, height, baseline)`:
+    - Maintains running column heights `col_heights = [0] * cols`.
+    - Iterates over children (`widget.get_first_child() ... child.get_next_sibling()`), measuring vertical height at `col_w`.
+    - Selects the column with the current minimum accumulated height: `col_idx = col_heights.index(min(col_heights))`.
+    - Translates child origin using `Gsk.Transform().translate(Graphene.Point(x, y))` and invokes `child.allocate(col_w, nat_h, -1, transform)`.
+  - Subclassed `Gtk.Box` (`MasonryBox`) as the hosting container to inherit clean standard child lifecycle management (`append`, `remove`) without GTK widget finalizer warnings.
+  - Placed behind CLI flag `--experimental-search-masonry`, allowing users to test waterfall layouts while preserving standard `Gtk.FlowBox` behavior by default.
+
+### 1.46. Continuous Masonry Search Grid & Shadow Geometry
+- **Search Card Shadow Bleed & Clipping Issues:**
+  - `ResultRow` portal cards have a base size of 450×140 px plus 6px lateral margins (462px total). Setting `min_column_width=420` caused the masonry manager to compute 2 columns on windows as narrow as 860px (column width 426px < 462px card), causing adjacent cards to physically collide and overlap.
+  - The default floating preview shadow (`0px 4px 16px rgba(0, 0, 0, 0.12)`) had a 16px blur radius, spreading up to 12px upward and 20px downward. With narrow 8px gaps, subsequent cards in the DOM tree painted on top of preceding cards' bottom shadows while their own top shadows bled upward onto neighboring cards.
+- **Durable Solution:**
+  - Increased `min_column_width` to `470px` (exceeding 450px card + 12px margins) and column/row spacing to `14px`, guaranteeing cards never collide.
+  - Refined `.link-portal-card` CSS shadow to a modern, tight dual-layer shadow: `0px 2px 8px rgba(0, 0, 0, 0.09), 0px 1px 2px rgba(0, 0, 0, 0.06)`, eliminating inter-card shadow bleed while preserving soft depth.
+  - Implemented content-adaptive dynamic card heights via `compute_portal_card_height(y0, y1)` (90px–260px), scaling card height to the matched text block bounding box so short snippets remain compact while multi-line paragraphs/equations expand naturally.
+  - Rendered all search matches together in a continuous `MasonryBox` without artificial page cluster headers, creating true multi-column waterfall packing.
 
 ---
 
@@ -542,6 +586,10 @@ This document records durable technical findings, architectural decisions, mathe
 
 | Approach | Why It Failed / Was Rejected | Replacement |
 | :--- | :--- | :--- |
+| **Fixed 140px card height in masonry search layout** | All cards having identical heights eliminated the vertical height variation necessary for a waterfall masonry layout, functioning identically to a rigid row-aligned grid. | Content-adaptive dynamic card heights via `compute_portal_card_height(y0, y1)` (90px to 260px) creating true multi-column waterfall packing. |
+| **Row-aligned `Gtk.FlowBox` for variable-height portal cards** | Items with taller preview snippets force adjacent cards in the same row downwards, leaving distracting vertical empty gaps in the search grid. | Custom `MasonryLayoutManager` (`--experimental-search-masonry`) implementing greedy waterfall height packing (`argmin(col_heights)`). |
+| **`ORDER BY rank` for document text search results** | FTS5 relevance ranking scatters matching cards randomly across the document based on term frequency, causing results on later pages or bottom sections to precede earlier matches. | `ORDER BY b.page, b.y0, b.x0` with composite index `idx_blocks_page_y` ensuring search results follow vertical reading order page-by-page. |
+| **Solid paragraph fill for search result matches** | Drawing a solid semi-transparent yellow box over the entire paragraph bbox (`result[x0..y1]`) obscured surrounding sentences and looked indistinguishable from user-created highlights. | Word-level `page.search_for` geometry with hollow orange outline strokes (`QuadRenderer.stroke_rects`) and whole-document occurrence rendering. |
 | **Placing highlight note anchors directly on the text without margin offset** | Placing the note icon at `x = rect.x1` without offset causes the 24px icon to partially overlap the ending words of the highlighted sentence or boundary glyphs. | Compute the whole bbox of the highlight and offset `+12.0 pt` to the right of the mid-right border point (`bbox_x1 + 12.0`, `(bbox_y0 + bbox_y1) / 2.0`). |
 | **1-indexed page storage for imported PDF annotations** | PDF Atlas's SQLite database, layout list, and container widgets are 0-indexed; 1-indexed pages displaced all annotations by +1 page and caused index errors on the document's last page. | Store 0-indexed `page_idx` consistently across database, notes layer, and canvas overlays. |
 | **Wiping notes table on embedded note re-import** | Deleting all existing notes on reload permanently destroys notes and comments added manually by the user within PDF Atlas. | Content-based matching by normalized markdown text (`recalc_embedded_notes`), updating coordinates for matched PDF annotations while preserving all user-created notes. |
@@ -589,6 +637,8 @@ This document records durable technical findings, architectural decisions, mathe
 | **Parsing arbitrary HTTP URL path segments for arXiv IDs** | `arxiv_id_from_path` scanned path segments with regex `\d{4}\.\d{4,5}`, falsely treating general web URLs containing date or paper-like numbers (e.g. `example.com/2023/1234.5678.pdf`) as arXiv sources. | URLs starting with `http://` or `https://` are only treated as arXiv if they explicitly match `arxiv.org` domains or arXiv DOIs. All other web URLs route to the URL download pipeline. |
 | **Trusting HTTP 200 OK Content-Type for remote PDFs without magic byte inspection** | Academic portals and paywalls frequently return HTTP 200 OK with HTML landing pages or Cloudflare bot challenges, corrupting the local cache and crashing PyMuPDF parser. | Validate `b"%PDF-" in chunk[:1024]` on the first streaming chunk before writing to disk; raise `ValueError` to trigger graceful fallback to DOI in the user's browser. |
 | **Using `vadjustment.get_page_size()` for `scroll_page`** | In GTK, `Adjustment.get_page_size()` is the viewport window height, completely unrelated to PDF page height. It skipped multiple pages when zoomed out and moved fractional page distances when zoomed in. | Compute exact `1 page height + gap` delta using `canvas.page_layout` and `canvas.page_gap`, stepping by the current page's $dh_i + G$ forward and preceding page's $dh_{i-1} + G$ backward. |
+| **Separate ResultRow per FTS match on the same page** | When a keyword occurs multiple times in the same paragraph or nearby lines, FTS5 produces a row for each match. Centered around $(y_0 + y_1) / 2$, multiple cards render near-identical rasterized snippets showing duplicate paragraphs with no distinction. Furthermore, counting FTS block rows reported wrong match counts (e.g. 2 instead of 19 occurrences). | In `--experimental-search-masonry`, `merge_search_results` groups consecutive matches on the same page with gap $< 30\%$ page height and span $\le 50\%$ into a single card covering $[y_{\min}, y_{\max}]$. The card viewport height is strictly capped to $\le 50\%$ page height via `compute_portal_card_height` and `render_strip_surface`. The pill badge displays `Page X • N matches` counting the exact visual query occurrences highlighted in that card viewport. |
+
 
 
 

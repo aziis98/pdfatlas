@@ -178,7 +178,12 @@ def render_strip_surface(
     zoom_x = (target_w * scale_factor) / page.rect.width if page.rect.width > 0 else 1.0
     zoom_y = zoom_x  # Enforce uniform 1:1 aspect ratio scaling
 
+    # Enforce maximum portal viewport height to 50% page height
+    max_window_pt = page.rect.height * 0.5
     window_height_pt = (target_h * scale_factor) / zoom_x if zoom_x > 0 else 180.0
+    if window_height_pt > max_window_pt:
+        window_height_pt = max_window_pt
+
     mid_y = (y0 + y1) / 2.0
 
     clip_y0 = mid_y - (window_height_pt / 2.0)
@@ -210,9 +215,11 @@ def render_strip_surface(
     ctx = cairo.Context(surface)
     ctx.set_source_rgba(*HIGHLIGHT_RGBA)
 
+    match_count = 0
     if query_terms:
         # Get precise character-level matched ranges
         match_rects = get_query_match_rects(pdf_path, page_no, page, query_terms, clip_y0, clip_y1)
+        match_count = len(match_rects)
         for ux0, uy0, ux1, uy1 in match_rects:
             px0 = (ux0 - clip.x0) * (zoom_x / scale_factor)
             py0 = (uy0 - clip.y0) * (zoom_y / scale_factor)
@@ -224,7 +231,37 @@ def render_strip_surface(
     # 4. Bake rounded corners transparency clip and border stroke into surface
     apply_card_decorations(surface, scale_factor)
 
-    return surface
+    return surface, match_count
+
+
+def compute_portal_card_height(
+    y0: float,
+    y1: float,
+    target_w: int = 450,
+    page_w: float = 600.0,
+    page_h: float = 792.0,
+    min_h: int = 90,
+    max_h: int | None = None,
+) -> int:
+    """
+    Computes content-adaptive portal card pixel height based on matched text block bounds.
+    Taller paragraphs and multi-line equations receive larger card heights, while short
+    one-line matches produce compact cards. Max card portal viewport height is capped at
+    50% of page height.
+    """
+    block_h = max(10.0, float(y1) - float(y0))
+    context_pad = max(24.0, min(50.0, 70.0 - block_h * 0.25))
+    span_h = block_h + 2.0 * context_pad
+
+    max_span_pt = page_h * 0.5
+    span_h = min(span_h, max_span_pt)
+
+    zoom = target_w / page_w if page_w > 0 else 0.75
+    card_h = int(round(span_h * zoom))
+
+    max_card_h = int(round(max_span_pt * zoom))
+    limit_max_h = min(max_h, max_card_h) if max_h is not None else max_card_h
+    return max(min_h, min(limit_max_h, card_h))
 
 
 class ResultRow(Gtk.Overlay):
@@ -240,6 +277,10 @@ class ResultRow(Gtk.Overlay):
         result,
         query_terms,
         pinned=False,
+        target_w=450,
+        target_h=None,
+        page_w=600.0,
+        page_h=792.0,
         on_toggle_pin=None,
         on_render_done=None,
         on_row_clicked=None,
@@ -261,9 +302,21 @@ class ResultRow(Gtk.Overlay):
         page = result["page"]
         x0, y0, x1, y1 = result["x0"], result["y0"], result["x1"], result["y1"]
 
+        self.target_w = int(target_w)
+        if target_h is None:
+            self.card_h = compute_portal_card_height(
+                y0,
+                y1,
+                target_w=self.target_w,
+                page_w=page_w,
+                page_h=page_h,
+            )
+        else:
+            self.card_h = int(target_h)
+
         # Main Child: Uniform LinkPortalPreviewCard widget
         self.portal_card = LinkPortalPreviewCard()
-        self.portal_card.set_portal_size(450, 140)
+        self.portal_card.set_portal_size(self.target_w, self.card_h)
         self.portal_card.set_loading()
         self.portal_card.set_hexpand(False)
         self.portal_card.set_halign(Gtk.Align.CENTER)
@@ -286,7 +339,9 @@ class ResultRow(Gtk.Overlay):
         self.add_overlay(self.pin_button)
 
         # Bottom-Left Overlay: Floating Page Info Pill (opacity 0.5 by default, 1.0 on hover)
-        self.page_label = Gtk.Label(label=f"Page {page}")
+        match_count = int(result.get("match_count", 1))
+        pill_text = f"Page {page} • {match_count} matches" if match_count > 1 else f"Page {page}"
+        self.page_label = Gtk.Label(label=pill_text)
         self.page_label.add_css_class("caption")
         self.page_label.add_css_class("portal-overlay-pill")
         self.page_label.set_margin_bottom(8)
@@ -308,7 +363,18 @@ class ResultRow(Gtk.Overlay):
         self.add_controller(click)
         self.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
-        executor.submit(self._render_worker, pdf_path, page, x0, y0, x1, y1, query_terms)
+        executor.submit(
+            self._render_worker,
+            pdf_path,
+            page,
+            x0,
+            y0,
+            x1,
+            y1,
+            query_terms,
+            self.target_w,
+            self.card_h,
+        )
 
     def _on_hover_changed(self, is_hovered: bool):
         if self.pin_button.get_active():
@@ -327,10 +393,10 @@ class ResultRow(Gtk.Overlay):
         if self.on_row_clicked:
             self.on_row_clicked(self.result, self.query_terms)
 
-    def _render_worker(self, pdf_path, page_no, x0, y0, x1, y1, query_terms):
+    def _render_worker(self, pdf_path, page_no, x0, y0, x1, y1, query_terms, target_w, target_h):
         try:
             scale_factor = float(self.get_scale_factor() or 2.0)
-            surface = render_strip_surface(
+            surface, match_count = render_strip_surface(
                 pdf_path,
                 page_no,
                 x0,
@@ -338,19 +404,27 @@ class ResultRow(Gtk.Overlay):
                 x1,
                 y1,
                 query_terms,
-                target_w=450,
-                target_h=140,
+                target_w=target_w,
+                target_h=target_h,
                 scale_factor=scale_factor,
             )
         except Exception as e:
             print(f"Error rendering portal strip surface: {e}")
             surface = None
-        GLib.idle_add(self._apply_render, surface)
+            match_count = 0
+        GLib.idle_add(self._apply_render, surface, match_count)
 
-    def _apply_render(self, surface):
+    def _apply_render(self, surface, match_count: int = 0):
         if surface is not None:
             self._cached_surface = surface
             self.portal_card.set_surface(surface)
+            page = self.result["page"]
+            effective_matches = match_count if match_count > 0 else int(self.result.get("match_count", 1))
+            if effective_matches > 1:
+                self.page_label.set_label(f"Page {page} • {effective_matches} matches")
+            else:
+                self.page_label.set_label(f"Page {page}")
+            self.result["match_count"] = effective_matches
         if self.on_render_done:
             self.on_render_done()
         return False

@@ -55,6 +55,7 @@ def build_schema(conn: sqlite3.Connection):
         text        TEXT NOT NULL
     );
     CREATE INDEX idx_blocks_page ON blocks(page);
+    CREATE INDEX idx_blocks_page_y ON blocks(page, y0);
 
     DROP TABLE IF EXISTS blocks_fts;
     CREATE VIRTUAL TABLE blocks_fts USING fts5(
@@ -250,7 +251,7 @@ def get_db_for_pdf(pdf_path: str) -> sqlite3.Connection:
 
 
 def search(conn: sqlite3.Connection, query: str, limit: int = 25) -> list[dict]:
-    """Perform fuzzy FTS5 search on the document blocks. Returns ranked results."""
+    """Perform fuzzy FTS5 search on the document blocks. Returns results ordered by page and vertical y position."""
     if not query.strip():
         return []
 
@@ -264,7 +265,7 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 25) -> list[dict]:
         FROM blocks_fts f
         JOIN blocks b ON b.id = f.rowid
         WHERE blocks_fts MATCH ?
-        ORDER BY rank
+        ORDER BY b.page, b.y0, b.x0
         LIMIT ?
         """,
         (safe_query, limit),

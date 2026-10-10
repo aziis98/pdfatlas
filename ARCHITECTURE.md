@@ -18,7 +18,7 @@ This document provides an up-to-date outline of every component in **PDF Atlas**
    - [ArxivDialog (`pdfatlas.ui.arxiv_dialog`)](#arxivdialog-pdfatlasuiarxiv_dialog)
    - [LinkSearchDialog (`pdfatlas.ui.components.link_search_dialog`)](#linksearchdialog-pdfatlasuicomponentslink_search_dialog)
    - [UrlInputDialog (`pdfatlas.ui.components.url_dialog`)](#urlinputdialog-pdfatlasuiurl_dialog)
-   - [SearchResultsView & Previews (`pdfatlas.ui.components.search_results_view`, `pdfatlas.ui.portal`, `link_preview`)](#search-results-view--previews-pdfatlasuicomponentssearch_results_view-pdfatlasuiportal-link_preview)
+   - [SearchResultsView & Previews (`pdfatlas.ui.components.search_results_view`, `pdfatlas.ui.portal`, `link_preview`, `masonry_layout`)](#search-results-view--previews-pdfatlasuicomponentssearch_results_view-pdfatlasuiportal-link_preview-masonry_layout)
 3. [Feature Controllers (`pdfatlas.controllers.*`)](#3-feature-controllers-pdfatlascontrollers)
 4. [Core Engine & Models (`pdfatlas.core.*`)](#4-core-engine--models-pdfatlascore)
 5. [Build & Packaging Pipeline (`hatch_build.py`, `pdfatlas._version`)](#5-build--packaging-pipeline-hatch_buildpy-pdfatlas_version)
@@ -141,8 +141,8 @@ Official Libadwaita desktop context menu anchored to right-click coordinates (`_
 ### GLCanvas & OpenGL Pipeline (`pdfatlas.ui.gl_canvas`, `gl_renderer`)
 Hardware-accelerated viewport renderer.
 
-- **`GLCanvas` (`Gtk.GLArea`)**: Configures OpenGL 3.3 core profile. Re-renders visible page quads from `RenderCache` on every scroll or zoom event.
-- **`QuadRenderer` (`pdfatlas.ui.gl_renderer`)**: Compiles `assets/shaders/quad.vert` and `assets/shaders/quad.frag`. Discards pixels outside rounded corners (`u_radius`), applies night-mode matrix inversion, and blends page textures with search highlights.
+- **`GLCanvas` (`Gtk.GLArea`)**: Configures OpenGL 3.3 core profile. Re-renders visible page quads from `RenderCache` on every scroll or zoom event, and renders search occurrence highlights across visible pages as orange stroke outlines.
+- **`QuadRenderer` (`pdfatlas.ui.gl_renderer`)**: Compiles `assets/shaders/quad.vert` and `assets/shaders/quad.frag`. Discards pixels outside rounded corners (`u_radius`), applies night-mode matrix inversion, blends page textures, and renders batch quads (`fill_rects`) as well as hollow border outlines (`stroke_rect`, `stroke_rects`).
 - **`CompositingLayer`**: Offscreen FBOs for multi-pass text selection and search highlight rendering.
 
 ---
@@ -256,7 +256,7 @@ Modal dialog for entering a web URL or DOI to attach to selected text.
 
 ---
 
-### SearchResultsView & Previews (`pdfatlas.ui.components.search_results_view`, `pdfatlas.ui.portal`, `link_preview`)
+### SearchResultsView & Previews (`pdfatlas.ui.components.search_results_view`, `pdfatlas.ui.portal`, `link_preview`, `masonry_layout`)
 Search results container view and overlay cards for search matches and link destinations.
 
 #### SearchResultsView (`pdfatlas.ui.components.search_results_view`)
@@ -282,6 +282,24 @@ Full-screen search results view activated when searching across document text. S
 ```
 
 - **Empty State Display**: When a search query yields no matches and no cards are pinned, `SearchResultsView` switches `Gtk.Stack` to `"empty"`, rendering an `Adw.StatusPage` with `system-search-symbolic`, "No Results Found", and the search query. If pinned cards exist but no live matches are found, the view stays on `"results"` to keep pinned items accessible while showing the empty status page notice below the pinned list separator.
+- **Masonry Layout (`MasonryLayoutManager`, `MasonryBox`)**: When experimental search masonry is enabled (`--experimental-search-masonry`), `SearchResultsView` replaces the flat `Gtk.FlowBox` with a unified continuous `MasonryBox` displaying all matching cards together:
+  - **Deduplicating Vertical Clustering**: Nearby matches on the same page (vertical gap $< 30\%$ page height, total span $\le 50\%$) are merged via `merge_search_results` into a single card covering their combined vertical span $[y_{\min}, y_{\max}]$. A floating pill badge indicates `Page X • N matches` (or `Page X` if single), counting exact visual occurrences of the query term within the card viewport.
+  - **Dynamic Content-Adaptive Heights**: Instead of rigid fixed-height cards, `ResultRow` computes dynamic snippet card heights via `compute_portal_card_height(y0, y1, target_w=450, page_w, page_h)` strictly capped at 50% of page height (clamped between 90px and $\le 0.5 \times \text{page\_height}$ based on matched text block height + context padding). Single-line snippets produce compact ~95px cards while multi-line paragraphs and merged clusters produce tall ~220–290px cards without exceeding the 50% page height ceiling.
+  - **Waterfall Masonry Packing**: Backed by `MasonryLayoutManager` implementing `HEIGHT_FOR_WIDTH` request mode and greedy `argmin(col_heights)` waterfall packing (`column_spacing=14`, `row_spacing=14`, `min_column_width=470`).
+  - **Shadow & Margin Clearance**: With `min_column_width=470` (exceeding card 450px width + 12px margin) and dual-layer box-shadow (`0px 2px 8px rgba(0, 0, 0, 0.09), 0px 1px 2px rgba(0, 0, 0, 0.06)`), cards never collide or bleed shadows across adjacent items or container boundaries.
+
+```
++-------------------------------------------------------------------------------+
+| MasonryBox (Gtk.Box backed by MasonryLayoutManager)                           |
+| Column 0 (x=0)               Column 1 (x=col_w + gap)        Column K-1       |
+| +-------------------------+  +-------------------------+     ...              |
+| | ResultRow (h=140px)     |  | ResultRow (h=220px)     |                      |
+| +-------------------------+  |                         |                      |
+| | ResultRow (h=180px)     |  +-------------------------+                      |
+| |                         |  | ResultRow (h=120px)     |                      |
+| +-------------------------+  +-------------------------+                      |
++-------------------------------------------------------------------------------+
+```
 
 - **`ResultRow` (`pdfatlas.ui.portal`)**: Search result card embedding a 1:1 physical pixel Cairo rasterized snippet of the search match context.
 - **`LinkPreviewManager` (`pdfatlas.ui.link_preview`)**: Hover popover rendering destination snippets when lingering over citations or internal cross-references.
@@ -294,7 +312,7 @@ Controllers decouple business logic, state mutations, and external integrations 
 
 - **`PrintController` (`printing.py`)**: Native printing integration using `Gtk.PrintDialog.print_file()` to hand PDF files directly to the OS print spooler/portal.
 - **`DocumentLoader` (`document_loader.py`)**: Asynchronous document opening pipeline for local files, remote web PDF URLs (`source_type="url"`), and arXiv papers (`source_type="arxiv"`). Checks local URL disk cache (`~/.cache/pdfatlas/urls/<hash>/<name>.pdf`), displays in-tab loading screen with progress bar during downloads, validates `%PDF-` magic header bytes, and falls back to opening the fallback DOI / landing page in the default web browser if direct PDF downloading fails.
-- **`SearchController` (`search.py`)**: Manages debounced text search, SQLite FTS queries, search portal card navigation, and match cycling (Enter / Shift+Enter).
+- **`SearchController` (`search.py`)**: Manages debounced text search, SQLite FTS queries, search portal card navigation, extracting precise word occurrence bounding boxes across all document pages via `page.search_for(query, flags=fitz.TEXT_DEHYPHENATE)`, dispatching orange outline stroke highlights to `PDFCanvas.set_search_highlights()`, and match cycling (Enter / Shift+Enter).
 - **`NavigationController` (`navigation.py`)**: Document navigation, viewport scroll synchronization, zoom anchoring, continuous step scrolling (80 px), and page-height-aware navigation (`Left`/`Right` arrow keys and vim `h`/`l` keys scrolling by `1 page height + gap` using `canvas.page_layout` and `canvas.page_gap`).
 - **`TabController` (`tabs.py`)**: Multi-tab lifecycle, tab reordering, cross-window tab dragging, and tab state synchronization (restores viewport scroll position and reactively synchronizes `win.crop-mode` and `win.gapless-mode` GTK action states with the activated document's isolated `CropSettings`).
 - **`AnnotationsController` (`annotations.py`)**: Text highlights, color palette swatches, note popover CRUD, and custom user link creation (`Adw.SplitButton` remembering most recent action among `Link Paper`, `Link File`, and `Link URL`; compact popover menu; unlinking; annotations list integration). Owns the unified selection toolbar attached to `MainWindow.content_overlay` with action order: `[Highlight, Remove, Copy, Copy Source TeX, Link, Unlink]`.
@@ -308,12 +326,13 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`RenderWorker` & `RenderCache` (`renderer.py`, `cache.py`)**: Background render worker pool and LRU cache storing raw RGB pixel buffers.
 - **`CropAnalyzer` (`crop.py`)**: Background bounding-box analyzer calculating optimal page whitespace crops.
 - **`ArxivDiffMapper` (`arxiv_mapper.py`)**: Downloads arXiv LaTeX source bundles, parses TeX ASTs, and computes word-level sourcemaps between compiled PDF words and original TeX source lines.
-- **`SearchIndex` & `DatabaseService` (`index.py`)**: In-memory / on-disk SQLite FTS5 index for fast full-text querying across hundreds of pages. Manages the `doc_state` SQLite table for persistent per-document reading state (`zoom`, `scroll_x`, `scroll_y`, `crop_enabled`, `page_gaps`), and the `custom_links` table for storing user-attached links.
+- **`SearchIndex` & `DatabaseService` (`index.py`)**: In-memory / on-disk SQLite FTS5 index for fast full-text querying across hundreds of pages. Sorts search results by document reading order (`b.page, b.y0, b.x0`) instead of FTS relevance rank so results flow top-to-bottom page-by-page. Manages the `doc_state` SQLite table for persistent per-document reading state (`zoom`, `scroll_x`, `scroll_y`, `crop_enabled`, `page_gaps`), and the `custom_links` table for storing user-attached links.
 - **`PdfSource` (`pdf_source.py`)**: Uniform data model for local files, remote web PDF URLs (`source_type="url"`), and arXiv identifiers (`source_type="arxiv"`), supporting `fallback_uri` for publisher DOI resolution and `RecentFilesManager` (unlimited history persistence).
 - **`CropSettings` (`settings.py`)**: Dataclass model managing appearance, night-mode, crop, shadow, and last-opened file chooser directory configurations serialized to `~/.config/pdfatlas/settings.json`. Serves as the global defaults template for newly opened documents, while per-document reading state overrides `enabled` and `page_gaps` per tab.
 - **`TextSelection` (`text_selection.py`)**: Character-accurate spatial text selection state across multiple continuous pages. Provides `get_selection_line_rects()` to coalesce per-character bounding boxes into continuous, word/line-level rectangles.
 - **`HTMLToMarkdown` (`html_to_markdown.py`)**: Lightweight, dependency-free HTML/XHTML to Markdown parser converting rich annotation text (Acrobat `/RC` XML fragments, inline styles, formatting, and links) into clean Markdown.
 - **`PdfNotesImporter` (`pdf_notes_import.py`)**: Embedded PDF annotation scanner extracting comments from highlights and sticky notes, converting markup to Markdown, and positioning imported notes at 0-indexed page coordinates (centered on icon for sticky notes, and placed 12 pt to the right of the whole highlight bounding box mid-right border point). Provides `recalc_embedded_notes` in `index.py` to recalibrate note anchors by matching markdown content while preserving user-created notes.
+- **`SearchCluster`, `cluster_search_results` & `merge_search_results` (`search_cluster.py`)**: Per-page vertical linear clustering and deduplication algorithm for search results. Groups matches linearly by reading order with a 30% page height split gap and 50% maximum vertical span, providing cluster headers, region detection (`Top`, `Middle`, `Bottom`), and percentage span metrics. In masonry mode (`merge_search_results`), consecutive nearby matches on the same page are deduplicated into a single unified card covering their combined vertical span $[y_{\min}, y_{\max}]$, showing a pill badge (`Page X • N matches`) and highlighting all occurrences within the snippet.
 
 
 ---

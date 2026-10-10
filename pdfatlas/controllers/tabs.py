@@ -76,6 +76,7 @@ class TabController:
             render_workers=self.win.render_workers,
             use_shm=self.win.use_shm,
             show_welcome=False,
+            experimental_search_masonry=getattr(self.win, "experimental_search_masonry", False),
         )
         new_win.settings.color_scheme = self.win.settings.color_scheme
         new_win.settings.night_mode_invert = self.win.settings.night_mode_invert

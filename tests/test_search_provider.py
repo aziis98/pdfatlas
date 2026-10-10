@@ -208,3 +208,43 @@ def test_focus_search_without_selection():
     win.run_search.assert_not_called()
 
 
+def test_search_results_ordering_by_page_and_y():
+    import sqlite3
+    from pdfatlas.core.index import build_schema, search
+
+    conn = sqlite3.connect(":memory:")
+    build_schema(conn)
+
+    # Insert blocks out of reading order, with varying term counts to affect FTS rank
+    # Page 2 top
+    conn.execute(
+        "INSERT INTO blocks (page, block_no, x0, y0, x1, y1, width, height, text) "
+        "VALUES (2, 0, 10.0, 50.0, 100.0, 70.0, 90.0, 20.0, 'second page top keyword')"
+    )
+    # Page 1 bottom - high term frequency (would rank higher in BM25/rank)
+    conn.execute(
+        "INSERT INTO blocks (page, block_no, x0, y0, x1, y1, width, height, text) "
+        "VALUES (1, 1, 10.0, 200.0, 100.0, 220.0, 90.0, 20.0, 'first page bottom keyword keyword keyword')"
+    )
+    # Page 1 top - single term frequency
+    conn.execute(
+        "INSERT INTO blocks (page, block_no, x0, y0, x1, y1, width, height, text) "
+        "VALUES (1, 0, 10.0, 50.0, 100.0, 70.0, 90.0, 20.0, 'first page top keyword')"
+    )
+    conn.commit()
+
+    results = search(conn, "keyword")
+    assert len(results) == 3
+    # Check that results are sorted by (page, y0):
+    # 1. Page 1, y0=50.0
+    assert results[0]["page"] == 1
+    assert results[0]["y0"] == 50.0
+    # 2. Page 1, y0=200.0
+    assert results[1]["page"] == 1
+    assert results[1]["y0"] == 200.0
+    # 3. Page 2, y0=50.0
+    assert results[2]["page"] == 2
+    assert results[2]["y0"] == 50.0
+
+
+

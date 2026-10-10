@@ -182,6 +182,34 @@ class QuadRenderer:
             gl.glUniform2f(self.u_page_size, float(w), float(h))
             gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
 
+    def stroke_rect(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        color: tuple[float, float, float, float],
+        line_width: float = 2.0,
+    ):
+        self.stroke_rects([(x, y, w, h)], color, line_width=line_width)
+
+    def stroke_rects(
+        self,
+        rects: list[tuple[float, float, float, float]],
+        color: tuple[float, float, float, float],
+        line_width: float = 2.0,
+    ):
+        if not rects:
+            return
+        lw = float(line_width)
+        quads: list[tuple[float, float, float, float]] = []
+        for x, y, w, h in rects:
+            quads.append((x, y, w, lw))
+            quads.append((x, y + h - lw, w, lw))
+            quads.append((x, y + lw, lw, max(0.0, h - 2.0 * lw)))
+            quads.append((x + w - lw, y + lw, lw, max(0.0, h - 2.0 * lw)))
+        self.fill_rects(quads, color)
+
     def fill_round_rect(self, x: float, y: float, w: float, h: float,
                         color: tuple[float, float, float, float], radius: float):
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)

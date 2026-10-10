@@ -355,8 +355,8 @@ class PdfDocumentView(Gtk.Box):
 
     def _on_canvas_clicked(self, gesture, n_press, x, y):
         self.canvas.grab_focus()
-        if self.canvas.highlighted_block is not None:
-            self.canvas.set_highlighted_block(0, None)
+        if self.canvas.has_search_highlights():
+            self.canvas.clear_search_highlights()
             self.canvas.queue_draw_overlays("clear-highlight")
 
     def _on_canvas_motion(self, controller, x, y):
@@ -479,6 +479,14 @@ class PdfDocumentView(Gtk.Box):
 
     def scroll_page(self, forward: bool = True):
         self.nav_controller.scroll_page(forward=forward)
+
+    def set_search_highlights(
+        self, highlights: dict[int, list[tuple[float, float, float, float]]] | None
+    ):
+        self.canvas.set_search_highlights(highlights)
+
+    def clear_search_highlights(self):
+        self.canvas.clear_search_highlights()
 
     def set_highlighted_block(self, page_idx: int, bbox: tuple[float, float, float, float] | None):
         self.canvas.set_highlighted_block(page_idx, bbox)
