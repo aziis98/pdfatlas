@@ -13,6 +13,19 @@ class SettingsWindow(Adw.PreferencesDialog):
     It reads/writes settings to a CropSettings instance.
     """
 
+    adj_l: Gtk.Adjustment
+    adj_r: Gtk.Adjustment
+    adj_t: Gtk.Adjustment
+    adj_b: Gtk.Adjustment
+    spin_l: Gtk.SpinButton
+    spin_r: Gtk.SpinButton
+    spin_t: Gtk.SpinButton
+    spin_b: Gtk.SpinButton
+    check_l: Gtk.CheckButton
+    check_r: Gtk.CheckButton
+    check_t: Gtk.CheckButton
+    check_b: Gtk.CheckButton
+
     def __init__(self, parent_window, settings: CropSettings, on_changed, on_reanalyze):
         super().__init__()
         self.parent_window = parent_window
@@ -93,46 +106,47 @@ class SettingsWindow(Adw.PreferencesDialog):
     def _build_crop_page(self):
         page = Adw.PreferencesPage(title="Crop", icon_name="object-select-symbolic")
 
-        # Padding (points)
-        self.adj_l = Gtk.Adjustment(
-            value=self.settings.min_padding_left,
-            lower=0.0,
-            upper=100.0,
-            step_increment=0.5,
-            page_increment=5.0,
-        )
-        self.adj_r = Gtk.Adjustment(
-            value=self.settings.min_padding_right,
-            lower=0.0,
-            upper=100.0,
-            step_increment=0.5,
-            page_increment=5.0,
-        )
-        self.adj_t = Gtk.Adjustment(
-            value=self.settings.min_padding_top,
-            lower=0.0,
-            upper=100.0,
-            step_increment=0.5,
-            page_increment=5.0,
-        )
-        self.adj_b = Gtk.Adjustment(
-            value=self.settings.min_padding_bottom,
-            lower=0.0,
-            upper=100.0,
-            step_increment=0.5,
-            page_increment=5.0,
-        )
-        self.spin_l = Adw.SpinRow(adjustment=self.adj_l, title="Left")
-        self.spin_r = Adw.SpinRow(adjustment=self.adj_r, title="Right")
-        self.spin_t = Adw.SpinRow(adjustment=self.adj_t, title="Top")
-        self.spin_b = Adw.SpinRow(adjustment=self.adj_b, title="Bottom")
-        for spin in (self.spin_l, self.spin_r, self.spin_t, self.spin_b):
-            spin.set_digits(1)
-        self.adj_l.connect("value-changed", self._on_padding_changed, "min_padding_left")
-        self.adj_r.connect("value-changed", self._on_padding_changed, "min_padding_right")
-        self.adj_t.connect("value-changed", self._on_padding_changed, "min_padding_top")
-        self.adj_b.connect("value-changed", self._on_padding_changed, "min_padding_bottom")
-        self._add_group(page, "Padding (points)", [self.spin_l, self.spin_r, self.spin_t, self.spin_b])
+        # Padding (points) with directional crop enable/disable checkboxes
+        padding_configs = [
+            ("min_padding_left", "Left", 16.0, "adj_l", "spin_l", "check_l"),
+            ("min_padding_right", "Right", 16.0, "adj_r", "spin_r", "check_r"),
+            ("min_padding_top", "Top", 8.0, "adj_t", "spin_t", "check_t"),
+            ("min_padding_bottom", "Bottom", 8.0, "adj_b", "spin_b", "check_b"),
+        ]
+        padding_rows = []
+        for attr, title, default_val, adj_name, spin_name, check_name in padding_configs:
+            raw_val = getattr(self.settings, attr)
+            is_enabled = raw_val != "original"
+            val = float(raw_val) if isinstance(raw_val, (int, float)) else default_val
+
+            adj = Gtk.Adjustment(
+                value=val,
+                lower=0.0,
+                upper=100.0,
+                step_increment=0.5,
+                page_increment=5.0,
+            )
+            spin = Gtk.SpinButton(adjustment=adj, digits=1, valign=Gtk.Align.CENTER)
+            spin.set_sensitive(is_enabled)
+
+            row = Adw.ActionRow(title=title)
+            check = Gtk.CheckButton()
+            check.set_valign(Gtk.Align.CENTER)
+            check.set_tooltip_text(f"Crop {title.lower()} edge (uncheck to keep original margin)")
+            check.set_active(is_enabled)
+            row.add_prefix(check)
+            row.add_suffix(spin)
+            row.set_activatable_widget(check)
+
+            check.connect("toggled", self._on_padding_check_toggled, attr, adj, spin)
+            adj.connect("value-changed", self._on_padding_changed, attr, check)
+
+            setattr(self, adj_name, adj)
+            setattr(self, spin_name, spin)
+            setattr(self, check_name, check)
+            padding_rows.append(row)
+
+        self._add_group(page, "Padding (points)", padding_rows)
 
         # Crop Mode
         self.mode_combo = Adw.ComboRow(title="Crop mode")
@@ -342,10 +356,16 @@ class SettingsWindow(Adw.PreferencesDialog):
                 active.settings.page_gaps = val
         self.on_changed()
 
-    def _on_padding_changed(self, adjustment, attr_name):
-        val = adjustment.get_value()
-        setattr(self.settings, attr_name, val)
+    def _on_padding_check_toggled(self, check, attr_name, adj, spin):
+        is_active = check.get_active()
+        spin.set_sensitive(is_active)
+        setattr(self.settings, attr_name, adj.get_value() if is_active else "original")
         self.on_changed()
+
+    def _on_padding_changed(self, adjustment, attr_name, check):
+        if check.get_active():
+            setattr(self.settings, attr_name, adjustment.get_value())
+            self.on_changed()
 
     def _on_mode_changed(self, row, pspec):
         selected = row.get_selected()

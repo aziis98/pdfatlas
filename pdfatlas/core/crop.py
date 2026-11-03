@@ -78,11 +78,27 @@ class CropAnalyzer:
                 is_sparse_list[i] = True
                 continue
 
-            # Apply margins/padding
-            left = max(0.0, raw_box.x0 - settings.min_padding_left)
-            right = min(page_rect.x1, raw_box.x1 + settings.min_padding_right)
-            top = max(0.0, raw_box.y0 - settings.min_padding_top)
-            bottom = min(page_rect.y1, raw_box.y1 + settings.min_padding_bottom)
+            # Apply margins/padding (keeping original margin bounds if "original")
+            left = (
+                max(page_rect.x0, raw_box.x0 - settings.min_padding_left)
+                if isinstance(settings.min_padding_left, (int, float))
+                else page_rect.x0
+            )
+            right = (
+                min(page_rect.x1, raw_box.x1 + settings.min_padding_right)
+                if isinstance(settings.min_padding_right, (int, float))
+                else page_rect.x1
+            )
+            top = (
+                max(page_rect.y0, raw_box.y0 - settings.min_padding_top)
+                if isinstance(settings.min_padding_top, (int, float))
+                else page_rect.y0
+            )
+            bottom = (
+                min(page_rect.y1, raw_box.y1 + settings.min_padding_bottom)
+                if isinstance(settings.min_padding_bottom, (int, float))
+                else page_rect.y1
+            )
 
             if right > left and bottom > top:
                 per_page_rect = fitz.Rect(left, top, right, bottom)
