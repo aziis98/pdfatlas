@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
+import itertools
 import os
 import sqlite3
 import time
@@ -55,6 +56,7 @@ from .welcome import WelcomeView
 
 DEBOUNCE_MS = 150  # search-as-you-type debounce delay
 _simplify_md_preview = simplify_md_preview
+_window_ids = itertools.count(1)
 
 __all__ = [
     "MainWindow",
@@ -94,10 +96,13 @@ class MainWindow(Adw.ApplicationWindow):
         initial_source: PdfSource | None = None,
         show_welcome: bool = True,
         experimental_search_masonry: bool = False,
+        cwd: str | None = None,
     ):
         super().__init__(application=app)
         self.app = app
         self.debug_mode = debug_mode
+        self.window_uid = str(next(_window_ids))
+        self.cwd = os.path.abspath(os.path.expanduser(cwd)) if cwd else os.getcwd()
         self.window_group = Gtk.WindowGroup.new()
         self.window_group.add_window(self)
         self.set_title("PDF Viewer")
@@ -403,15 +408,32 @@ class MainWindow(Adw.ApplicationWindow):
             ("print-file", lambda act, param: self.print_file()),
             ("new-tab", lambda act, param: self.new_tab()),
             ("new-window", lambda act, param: self.new_window()),
+            ("close-tab", lambda act, param: self.tab_controller.close_context_tab()),
+            ("close-other-tabs", lambda act, param: self.tab_controller.close_other_tabs()),
         ]
         for name, callback in actions:
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", callback)
             self.add_action(action)
 
+        move_tab_action = Gio.SimpleAction.new(
+            "move-tab-to-window", GLib.VariantType.new("s")
+        )
+        move_tab_action.connect(
+            "activate",
+            lambda act, param: self.tab_controller.move_page_to_window_by_uid(
+                param.get_string()
+            ),
+        )
+        self.add_action(move_tab_action)
+
         open_recent_action = Gio.SimpleAction.new("open-recent", GLib.VariantType.new("s"))
         open_recent_action.connect("activate", self._on_open_recent)
         self.add_action(open_recent_action)
+
+    def _on_menu_button_active_changed(self, button: Gtk.MenuButton, pspec) -> None:
+        if button.get_active():
+            self.tab_controller.refresh_header_move_submenu()
 
     def _is_entry_focused(self) -> bool:
         focus = self.get_focus()
@@ -498,6 +520,11 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("Night Mode", "win.night-mode")
         menu.append("Gap-less Mode", "win.gapless-mode")
         menu.append("Auto-crop Mode", "win.crop-mode")
+        move_section = Gio.Menu.new()
+        move_item = Gio.MenuItem.new("Move to Window…", None)
+        move_item.set_submenu(self.tab_controller.header_move_menu)
+        move_section.append_item(move_item)
+        menu.append_section(None, move_section)
         section = Gio.Menu.new()
         section.append("Open Settings", "win.open-settings")
         section.append("About PDF Atlas", "win.about")
@@ -510,6 +537,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.menu_button.set_icon_name("view-more-symbolic")
         self.menu_button.set_tooltip_text("Options")
         self.menu_button.set_menu_model(menu)
+        self.menu_button.connect("notify::active", self._on_menu_button_active_changed)
         self.menu_button_overlay = Gtk.Overlay()
         self.menu_button_overlay.set_child(self.menu_button)
 

@@ -1,15 +1,49 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib
+from gi.repository import Adw, Gio, GLib
 
 if TYPE_CHECKING:
     from ..ui.document_view import PdfDocumentView
     from ..ui.window import MainWindow
+
+
+MOVE_TAB_ACTION = "win.move-tab-to-window"
+MAX_CWD_CHARS = 46
+MAX_FILE_CHARS = 28
+
+
+def _shorten_home(path: str) -> str:
+    """Replace a leading home directory with ``~`` for compact display."""
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
+def _truncate_path(path: str, limit: int) -> str:
+    """Middle-truncate long paths, keeping the meaningful tail."""
+    if len(path) <= limit:
+        return path
+    return "…" + path[-(limit - 1):]
+
+
+def _truncate_end(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _escape_label(text: str) -> str:
+    """Escape Pango markup and neutralize mnemonics (single underscores)."""
+    return GLib.markup_escape_text(text).replace("_", "__")
 
 
 class TabController:
@@ -24,12 +58,18 @@ class TabController:
         self.tab_bar: Adw.TabBar = Adw.TabBar(view=self.tab_view)
         self.tab_bar.set_autohide(True)
         self._active_doc_view_ref: PdfDocumentView | None = None
+        self._context_page: Adw.TabPage | None = None
+        self._tab_menu = Gio.Menu()
+        self.tab_view.set_menu_model(self._tab_menu)
+        # Submenu shared by the header-bar options menu (refreshed when it opens).
+        self.header_move_menu = Gio.Menu()
 
         self.tab_view.connect("create-window", self.on_create_window)
         self.tab_view.connect("page-attached", self.on_page_attached)
         self.tab_view.connect("page-detached", self.on_page_detached)
         self.tab_view.connect("close-page", self.on_close_page)
         self.tab_view.connect("notify::selected-page", self.on_selected_tab_changed)
+        self.tab_view.connect("setup-menu", self.on_setup_menu)
 
     def create_doc_view(self) -> PdfDocumentView:
         from ..ui.document_view import PdfDocumentView
@@ -68,6 +108,176 @@ class TabController:
                 return child
         return None
 
+    # --- Tab context menu ---
+
+    def _app_windows(self) -> list[MainWindow]:
+        from ..ui.window import MainWindow
+
+        app = self.win.app
+        if app is not None:
+            windows = [w for w in app.get_windows() if isinstance(w, MainWindow)]
+            if windows:
+                return windows
+        return [self.win]
+
+    def on_setup_menu(self, view: Adw.TabView, page: Adw.TabPage | None) -> None:
+        """Build the tab context menu for the right-clicked page.
+
+        The menu model is mutated in place: libadwaita captures the model
+        pointer before this signal fires, so replacing the model would not
+        affect the popover that is about to be shown.
+        """
+        if page is None:
+            self._context_page = None
+            return
+        self._context_page = page
+        self._rebuild_tab_menu()
+
+    def _rebuild_tab_menu(self) -> None:
+        menu = self._tab_menu
+        menu.remove_all()
+
+        tab_section = Gio.Menu()
+        tab_section.append("New Tab", "win.new-tab")
+        tab_section.append("New Window", "win.new-window")
+        menu.append_section(None, tab_section)
+
+        menu.append_section(None, self._build_move_section())
+
+        close_section = Gio.Menu()
+        close_section.append("Close Tab", "win.close-tab")
+        if self.tab_view.get_n_pages() > 1:
+            close_section.append("Close Other Tabs", "win.close-other-tabs")
+        menu.append_section(None, close_section)
+
+    def _build_move_section(self) -> Gio.Menu:
+        section = Gio.Menu()
+        move_item = Gio.MenuItem.new("Move to Window…", None)
+        move_item.set_submenu(self._build_move_submenu())
+        section.append_item(move_item)
+        return section
+
+    def _build_move_submenu(self) -> Gio.Menu:
+        submenu = Gio.Menu()
+        self._populate_move_submenu(submenu)
+        return submenu
+
+    def _populate_move_submenu(self, submenu: Gio.Menu) -> None:
+        submenu.remove_all()
+        others = [w for w in self._app_windows() if w is not self.win]
+
+        if not others:
+            empty = Gio.MenuItem.new("No other windows", None)
+            empty.set_icon(Gio.ThemedIcon.new("dialog-information-symbolic"))
+            submenu.append_item(empty)
+            return
+
+        other_section = Gio.Menu()
+        for win in others:
+            other_section.append_item(self._build_window_item(win, current=False))
+        submenu.append_section(None, other_section)
+
+        current_section = Gio.Menu()
+        current_section.append_item(self._build_window_item(self.win, current=True))
+        submenu.append_section(None, current_section)
+
+    def refresh_header_move_submenu(self) -> None:
+        """Refresh the header-bar Move to Window… submenu just before it opens."""
+        self._context_page = None
+        self._populate_move_submenu(self.header_move_menu)
+
+    def _build_window_item(self, win: MainWindow, current: bool) -> Gio.MenuItem:
+        item = Gio.MenuItem.new(None, None)
+        item.set_label(self._window_label(win, current))
+        # GtkMenuTrackerItem reads the "use-markup" attribute as a string.
+        item.set_attribute_value("use-markup", GLib.Variant.new_string("true"))
+        item.set_icon(
+            Gio.ThemedIcon.new(
+                "object-select-symbolic" if current else "folder-open-symbolic"
+            )
+        )
+        if not current:
+            item.set_action_and_target_value(
+                MOVE_TAB_ACTION, GLib.Variant.new_string(str(win.window_uid))
+            )
+        return item
+
+    def _window_label(self, win: MainWindow, current: bool) -> str:
+        index = getattr(win, "window_uid", "?")
+        cwd = _truncate_path(_shorten_home(win.cwd), MAX_CWD_CHARS)
+        files = self._window_files_summary(win)
+        marker = "  (this window)" if current else ""
+        return (
+            f"<b>Window {index} · {_escape_label(cwd)}</b>\n"
+            f'<span alpha="55%">{_escape_label(files)}{marker}</span>'
+        )
+
+    def _window_files_summary(self, win: MainWindow) -> str:
+        titles: list[str] = []
+        for i in range(win.tab_view.get_n_pages()):
+            page = win.tab_view.get_nth_page(i)
+            if page is None:
+                continue
+            title = (page.get_title() or "").strip()
+            if title:
+                titles.append(_truncate_end(title, MAX_FILE_CHARS))
+
+        if not titles:
+            return "(no open documents)"
+
+        summary = ", ".join(titles[:2])
+        if len(titles) > 2:
+            summary += f", +{len(titles) - 2} more"
+        return summary
+
+    def _find_window_by_uid(self, uid: str) -> MainWindow | None:
+        for win in self._app_windows():
+            if str(getattr(win, "window_uid", "")) == uid:
+                return win
+        return None
+
+    def _target_page(self) -> Adw.TabPage | None:
+        """Page acted on by the context menu or the header options menu."""
+        return self._context_page or self.tab_view.get_selected_page()
+
+    def move_page_to_window_by_uid(self, uid: str) -> None:
+        page = self._target_page()
+        target = self._find_window_by_uid(uid)
+        if page is None or target is None:
+            return
+        self.move_page_to_window(page, target)
+
+    def move_page_to_window(self, page: Adw.TabPage, target_win: MainWindow) -> None:
+        """Move *page* into *target_win*, reusing the live tab contents."""
+        if target_win is self.win:
+            return
+
+        target_view = target_win.tab_view
+        target_win.stack.set_visible_child_name("document-view")
+        self.tab_view.transfer_page(page, target_view, target_view.get_n_pages())
+        target_view.set_selected_page(page)
+        target_win.present()
+        self._context_page = None
+
+    def close_context_tab(self) -> None:
+        page = self._target_page()
+        if page is None:
+            return
+        self._context_page = None
+        self.tab_view.close_page(page)
+
+    def close_other_tabs(self) -> None:
+        page = self._target_page()
+        if page is None:
+            return
+        pages = [
+            self.tab_view.get_nth_page(i)
+            for i in range(self.tab_view.get_n_pages())
+        ]
+        for other in pages:
+            if other is not None and other is not page:
+                self.tab_view.close_page(other)
+
     def on_create_window(self, view: Adw.TabView) -> Adw.TabView:
         from ..ui.window import MainWindow
 
@@ -77,6 +287,7 @@ class TabController:
             use_shm=self.win.use_shm,
             show_welcome=False,
             experimental_search_masonry=getattr(self.win, "experimental_search_masonry", False),
+            cwd=self.win.cwd,
         )
         new_win.settings.color_scheme = self.win.settings.color_scheme
         new_win.settings.night_mode_invert = self.win.settings.night_mode_invert
@@ -99,6 +310,8 @@ class TabController:
         self.on_selected_tab_changed(view, None)
 
     def on_page_detached(self, view: Adw.TabView, page: Adw.TabPage, position: int) -> None:
+        if page is self._context_page:
+            self._context_page = None
         if view.get_n_pages() == 0:
             self.win.doc_model = None
             self.win.current_source = None
@@ -112,6 +325,8 @@ class TabController:
     def on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
         from ..ui.document_view import PdfDocumentView
 
+        if page is self._context_page:
+            self._context_page = None
         child = page.get_child()
         if isinstance(child, PdfDocumentView):
             child.close()
@@ -276,6 +491,7 @@ class TabController:
             self.win.app,
             render_workers=self.win.render_workers,
             use_shm=self.win.use_shm,
+            cwd=self.win.cwd,
         )
         win.present()
         return win

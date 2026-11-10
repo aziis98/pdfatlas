@@ -194,6 +194,7 @@ class PDFViewerApplication(Adw.Application):
                     render_workers=self.render_workers,
                     use_shm=self.use_shm,
                     experimental_search_masonry=self.experimental_search_masonry,
+                    cwd=cwd,
                 )
                 target_win.present()
         else:
@@ -211,6 +212,7 @@ class PDFViewerApplication(Adw.Application):
                     render_workers=self.render_workers,
                     use_shm=self.use_shm,
                     experimental_search_masonry=self.experimental_search_masonry,
+                    cwd=cwd,
                 )
             win.present()
 
@@ -239,6 +241,7 @@ class PDFViewerApplication(Adw.Application):
                 render_workers=self.render_workers,
                 use_shm=self.use_shm,
                 experimental_search_masonry=self.experimental_search_masonry,
+                cwd=os.getcwd(),
             )
             win.present()
         else:
