@@ -247,6 +247,11 @@ popover.menu:not(.canvas-context-menu) {
     min-width: 200px;
 }
 
+popover.menu modelbutton {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
 .annotation-link-icon {
     color: #8b5cf6;
 }

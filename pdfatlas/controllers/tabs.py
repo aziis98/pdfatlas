@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 import gi
 
@@ -14,25 +14,8 @@ if TYPE_CHECKING:
 
 
 MOVE_TAB_ACTION = "win.move-tab-to-window"
-MAX_CWD_CHARS = 46
+MAX_DIRNAME_CHARS = 32
 MAX_FILE_CHARS = 28
-
-
-def _shorten_home(path: str) -> str:
-    """Replace a leading home directory with ``~`` for compact display."""
-    home = os.path.expanduser("~")
-    if path == home:
-        return "~"
-    if path.startswith(home + os.sep):
-        return "~" + path[len(home):]
-    return path
-
-
-def _truncate_path(path: str, limit: int) -> str:
-    """Middle-truncate long paths, keeping the meaningful tail."""
-    if len(path) <= limit:
-        return path
-    return "…" + path[-(limit - 1):]
 
 
 def _truncate_end(text: str, limit: int) -> str:
@@ -44,6 +27,27 @@ def _truncate_end(text: str, limit: int) -> str:
 def _escape_label(text: str) -> str:
     """Escape Pango markup and neutralize mnemonics (single underscores)."""
     return GLib.markup_escape_text(text).replace("_", "__")
+
+
+def _source_dirname(source: object) -> str | None:
+    source_type = getattr(source, "source_type", None)
+    if source_type == "file":
+        uri = getattr(source, "uri", "")
+        if uri:
+            return _path_dirname(str(uri))
+    elif source_type == "arxiv" or getattr(source, "is_arxiv", False):
+        return "arXiv"
+    elif source_type == "url" or getattr(source, "is_url", False):
+        return "Web"
+    return None
+
+
+def _path_dirname(path_str: str) -> str | None:
+    try:
+        p = Path(path_str)
+        return p.parent.name or str(p.parent)
+    except Exception:
+        return None
 
 
 class TabController:
@@ -202,14 +206,60 @@ class TabController:
             )
         return item
 
+    def _window_dirname(self, win: MainWindow) -> str | None:
+        from ..ui.document_view import PdfDocumentView
+
+        pages: list[Adw.TabPage] = []
+        selected = win.tab_view.get_selected_page()
+        if selected is not None:
+            pages.append(selected)
+        for i in range(win.tab_view.get_n_pages()):
+            page = win.tab_view.get_nth_page(i)
+            if page is not None and page not in pages:
+                pages.append(page)
+
+        for page in pages:
+            child = page.get_child()
+            if isinstance(child, PdfDocumentView):
+                if child.current_source is not None:
+                    name = _source_dirname(child.current_source)
+                    if name:
+                        return name
+                if child.doc_model and child.doc_model.filepath:
+                    name = _path_dirname(child.doc_model.filepath)
+                    if name:
+                        return name
+
+            # Attributes on page or child (mocked in tests or attached directly)
+            src = getattr(page, "source", None) or getattr(child, "source", None)
+            if src is not None:
+                name = _source_dirname(src) if hasattr(src, "source_type") else _path_dirname(str(src))
+                if name:
+                    return name
+
+            uri = getattr(page, "uri", None) or getattr(child, "uri", None)
+            if uri:
+                name = _path_dirname(str(uri))
+                if name:
+                    return name
+
+        if getattr(win, "current_source", None):
+            name = _source_dirname(win.current_source)
+            if name:
+                return name
+
+        return None
+
     def _window_label(self, win: MainWindow, current: bool) -> str:
         index = getattr(win, "window_uid", "?")
-        cwd = _truncate_path(_shorten_home(win.cwd), MAX_CWD_CHARS)
+        raw_dirname = self._window_dirname(win)
+        dirname = _truncate_end(raw_dirname, MAX_DIRNAME_CHARS) if raw_dirname else None
         files = self._window_files_summary(win)
-        marker = "  (this window)" if current else ""
+        marker = "  <i>(this window)</i>" if current else ""
+        header = f"Window {index} · {_escape_label(dirname)}" if dirname else f"Window {index}"
         return (
-            f"<b>Window {index} · {_escape_label(cwd)}</b>\n"
-            f'<span alpha="55%">{_escape_label(files)}{marker}</span>'
+            f'<span line_height="1.35"><b>{header}</b>\n'
+            f'<span size="smaller" alpha="60%">{_escape_label(files)}{marker}</span></span>'
         )
 
     def _window_files_summary(self, win: MainWindow) -> str:
@@ -287,7 +337,6 @@ class TabController:
             use_shm=self.win.use_shm,
             show_welcome=False,
             experimental_search_masonry=getattr(self.win, "experimental_search_masonry", False),
-            cwd=self.win.cwd,
         )
         new_win.settings.color_scheme = self.win.settings.color_scheme
         new_win.settings.night_mode_invert = self.win.settings.night_mode_invert
@@ -491,7 +540,6 @@ class TabController:
             self.win.app,
             render_workers=self.win.render_workers,
             use_shm=self.win.use_shm,
-            cwd=self.win.cwd,
         )
         win.present()
         return win

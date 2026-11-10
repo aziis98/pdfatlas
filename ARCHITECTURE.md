@@ -57,16 +57,16 @@ Primary application window. Manages the top header bar, tabs, window-level `Gio.
 ```
 
 - **Direct View Activation**: When created with an `initial_source`, `MainWindow` directly activates `"document-view"`, bypassing the welcome screen and avoiding startup flashing. `Gtk.Stack` transition is initialized to `NONE` during window construction and enabled (`CROSSFADE`) only after window realization (`_on_window_realized`).
-- **Tab Context Menu**: `TabController` installs a persistent `Gio.Menu` on the `Adw.TabView`; libadwaita opens it on tab right-click and emits `::setup-menu(page)` so the menu is rebuilt in place for that tab. The same *Move to Window…* submenu is embedded in the header-bar options menu (`MenuBtn`, refreshed on `notify::active`), so it remains reachable when the tab bar is hidden because only one tab is open. Each window carries a stable `window_uid` and a launch `cwd`, used by the submenu:
+- **Tab Context Menu**: `TabController` installs a persistent `Gio.Menu` on the `Adw.TabView`; libadwaita opens it on tab right-click and emits `::setup-menu(page)` so the menu is rebuilt in place for that tab. The same *Move to Window…* submenu is embedded in the header-bar options menu (`MenuBtn`, refreshed on `notify::active`), so it remains reachable when the tab bar is hidden because only one tab is open. Each window carries a stable `window_uid` and resolves its folder dirname dynamically from its open document tabs:
 
 ```
 Right-click tab
    ├─ New Tab / New Window
    ├─ Move to Window… ▸ ┌────────────────────────────────────────────────┐
-   │                    │ ⊞ Window 2 · ~/Downloads/papers                │
+   │                    │ ⊞ Window 2 · papers                            │
    │                    │     diffusion.pdf, survey.pdf, +2 more         │
    │                    ├────────────────────────────────────────────────┤
-   │                    │ ✓ Window 1 · ~/Projects/pdfatlas               │
+   │                    │ ✓ Window 1 · pdfatlas                          │
    │                    │     attention.pdf, notes.pdf  (this window)    │
    │                    └────────────────────────────────────────────────┘
    └─ Close Tab / Close Other Tabs
@@ -337,7 +337,7 @@ Controllers decouple business logic, state mutations, and external integrations 
 - **`DocumentLoader` (`document_loader.py`)**: Asynchronous document opening pipeline for local files, remote web PDF URLs (`source_type="url"`), and arXiv papers (`source_type="arxiv"`). Checks local URL disk cache (`~/.cache/pdfatlas/urls/<hash>/<name>.pdf`), displays in-tab loading screen with progress bar during downloads, validates `%PDF-` magic header bytes, and falls back to opening the fallback DOI / landing page in the default web browser if direct PDF downloading fails.
 - **`SearchController` (`search.py`)**: Manages debounced text search, SQLite FTS queries, search portal card navigation, extracting precise word occurrence bounding boxes across all document pages via `page.search_for(query, flags=fitz.TEXT_DEHYPHENATE)`, dispatching orange outline stroke highlights to `PDFCanvas.set_search_highlights()`, and match cycling (Enter / Shift+Enter).
 - **`NavigationController` (`navigation.py`)**: Document navigation, viewport scroll synchronization, zoom anchoring, continuous step scrolling (80 px), and page-height-aware navigation (`Left`/`Right` arrow keys and vim `h`/`l` keys scrolling by `1 page height + gap` using `canvas.page_layout` and `canvas.page_gap`).
-- **`TabController` (`tabs.py`)**: Multi-tab lifecycle, tab reordering, cross-window tab dragging, the per-tab right-click context menu (New Tab / New Window, *Move to Window…* submenu listing every window's launch cwd and open tab titles, Close Tab / Close Other Tabs), and tab state synchronization (restores viewport scroll position and reactively synchronizes `win.crop-mode` and `win.gapless-mode` GTK action states with the activated document's isolated `CropSettings`).
+- **`TabController` (`tabs.py`)**: Multi-tab lifecycle, tab reordering, cross-window tab dragging, the per-tab right-click context menu (New Tab / New Window, *Move to Window…* submenu listing every window's document directory name and open tab titles, Close Tab / Close Other Tabs), and tab state synchronization (restores viewport scroll position and reactively synchronizes `win.crop-mode` and `win.gapless-mode` GTK action states with the activated document's isolated `CropSettings`).
 - **`AnnotationsController` (`annotations.py`)**: Text highlights, color palette swatches, note popover CRUD, and custom user link creation (`Adw.SplitButton` remembering most recent action among `Link Paper`, `Link File`, and `Link URL`; compact popover menu; unlinking; annotations list integration). Owns the unified selection toolbar attached to `MainWindow.content_overlay` with action order: `[Highlight, Remove, Copy, Copy Source TeX, Link, Unlink]`.
 - **`ClipboardController` (`clipboard.py`)**: Text selection copying, citation formatting, and LaTeX source extraction.
 

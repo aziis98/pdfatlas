@@ -20,9 +20,14 @@ def _make_app() -> Adw.Application:
     return app
 
 
-def _add_page(win: MainWindow, title: str) -> None:
-    page = win.tab_view.append(Gtk.Label(label=title))
+def _add_page(win: MainWindow, title: str, uri: str | None = None) -> None:
+    label = Gtk.Label(label=title)
+    if uri is not None:
+        setattr(label, "uri", uri)
+    page = win.tab_view.append(label)
     page.props.title = title
+    if uri is not None:
+        setattr(page, "uri", uri)
 
 
 def _sections(menu: Gio.MenuModel) -> list[Gio.MenuModel]:
@@ -54,16 +59,16 @@ def _all_items(menu: Gio.MenuModel) -> list[tuple[Gio.MenuModel, int]]:
     return entries
 
 
-def test_setup_menu_lists_windows_with_cwd_and_titles():
+def test_setup_menu_lists_windows_with_dirname_and_titles():
     app = _make_app()
-    win1 = MainWindow(app, cwd="/home/tester/projects/pdfatlas")
-    win2 = MainWindow(app, cwd="/home/tester/downloads/papers")
+    win1 = MainWindow(app)
+    win2 = MainWindow(app)
 
-    _add_page(win1, "attention.pdf")
-    _add_page(win1, "notes.pdf")
-    _add_page(win2, "diffusion.pdf")
-    _add_page(win2, "survey.pdf")
-    _add_page(win2, "extra.pdf")
+    _add_page(win1, "attention.pdf", "/home/tester/projects/pdfatlas/attention.pdf")
+    _add_page(win1, "notes.pdf", "/home/tester/projects/pdfatlas/notes.pdf")
+    _add_page(win2, "diffusion.pdf", "/home/tester/downloads/papers/diffusion.pdf")
+    _add_page(win2, "survey.pdf", "/home/tester/downloads/papers/survey.pdf")
+    _add_page(win2, "extra.pdf", "/home/tester/downloads/papers/extra.pdf")
 
     page = win1.tab_view.get_nth_page(0)
     win1.tab_view.emit("setup-menu", page)
@@ -85,7 +90,8 @@ def test_setup_menu_lists_windows_with_cwd_and_titles():
     assert others.get_n_items() == 1
     other_label = _labels(others)[0]
     assert f"Window {win2.window_uid}" in other_label
-    assert "downloads/papers" in other_label
+    assert "papers" in other_label
+    assert "downloads/papers" not in other_label
     assert "diffusion.pdf, survey.pdf" in other_label
     assert "+1 more" in other_label
     assert other_label.count("\n") == 1
@@ -103,7 +109,8 @@ def test_setup_menu_lists_windows_with_cwd_and_titles():
     current = submenu_sections[1]
     current_label = _labels(current)[0]
     assert f"Window {win1.window_uid}" in current_label
-    assert "projects/pdfatlas" in current_label
+    assert "pdfatlas" in current_label
+    assert "projects/pdfatlas" not in current_label
     assert "attention.pdf, notes.pdf" in current_label
     assert "(this window)" in current_label
     assert current.get_item_attribute_value(0, "action", None) is None
