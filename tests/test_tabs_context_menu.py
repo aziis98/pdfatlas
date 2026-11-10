@@ -122,19 +122,28 @@ def test_setup_menu_lists_windows_with_dirname_and_titles():
     win2.close()
 
 
-def test_setup_menu_reports_no_other_windows():
+def test_setup_menu_omits_move_when_single_window():
     app = _make_app()
     win = MainWindow(app, cwd="/home/tester/documents")
     _add_page(win, "paper.pdf")
 
     win.tab_view.emit("setup-menu", win.tab_view.get_nth_page(0))
-    submenu = _sections(win.tab_controller._tab_menu)[1].get_item_link(
-        0, Gio.MENU_LINK_SUBMENU
-    )
-    assert submenu is not None
-    assert submenu.get_n_items() == 1
-    assert _labels(submenu) == ["No other windows"]
-    assert submenu.get_item_attribute_value(0, "action", None) is None
+    menu = win.tab_controller._tab_menu
+    sections = _sections(menu)
+    assert len(sections) == 2
+    assert _labels(sections[0]) == ["New Tab", "New Window"]
+    assert _labels(sections[1]) == ["Close Tab"]
+
+    # Also verify the header options menu omits "Move to Window…" when single window
+    win.tab_controller.refresh_header_move_submenu()
+    model = win.menu_button.get_menu_model()
+    assert model is not None
+    entries = _all_items(model)
+    labels: list[str] = []
+    for item_model, item_index in entries:
+        value = item_model.get_item_attribute_value(item_index, "label", None)
+        labels.append(value.get_string() if value is not None else "")
+    assert "Move to Window…" not in labels
 
     win.close()
 
@@ -148,6 +157,8 @@ def test_header_menu_exposes_move_to_window_submenu():
 
     model = win1.menu_button.get_menu_model()
     assert model is not None
+
+    win1.tab_controller.refresh_header_move_submenu()
     entries = _all_items(model)
     labels: list[str] = []
     for item_model, item_index in entries:
@@ -160,7 +171,6 @@ def test_header_menu_exposes_move_to_window_submenu():
     assert submenu is not None
     assert submenu is win1.tab_controller.header_move_menu
 
-    win1.tab_controller.refresh_header_move_submenu()
     other_labels = [
         label for section in _sections(submenu) for label in _labels(section)
     ]
@@ -172,8 +182,18 @@ def test_header_menu_exposes_move_to_window_submenu():
     refreshed = [label for section in _sections(submenu) for label in _labels(section)]
     assert any("b.pdf, c.pdf" in label for label in refreshed)
 
+    # When the second window is destroyed, refreshing removes "Move to Window…"
+    win2.destroy()
+    win1.tab_controller.refresh_header_move_submenu()
+    entries_after = _all_items(model)
+    labels_after: list[str] = []
+    for item_model, item_index in entries_after:
+        value = item_model.get_item_attribute_value(item_index, "label", None)
+        if value is not None:
+            labels_after.append(value.get_string())
+    assert "Move to Window…" not in labels_after
+
     win1.close()
-    win2.close()
 
 
 def test_move_selected_tab_without_context_page():

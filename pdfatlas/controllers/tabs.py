@@ -65,7 +65,8 @@ class TabController:
         self._context_page: Adw.TabPage | None = None
         self._tab_menu = Gio.Menu()
         self.tab_view.set_menu_model(self._tab_menu)
-        # Submenu shared by the header-bar options menu (refreshed when it opens).
+        # Header-bar options menu dynamic section and submenu.
+        self.header_move_section = Gio.Menu()
         self.header_move_menu = Gio.Menu()
 
         self.tab_view.connect("create-window", self.on_create_window)
@@ -146,7 +147,9 @@ class TabController:
         tab_section.append("New Window", "win.new-window")
         menu.append_section(None, tab_section)
 
-        menu.append_section(None, self._build_move_section())
+        others = [w for w in self._app_windows() if w is not self.win]
+        if others:
+            menu.append_section(None, self._build_move_section(others))
 
         close_section = Gio.Menu()
         close_section.append("Close Tab", "win.close-tab")
@@ -154,26 +157,26 @@ class TabController:
             close_section.append("Close Other Tabs", "win.close-other-tabs")
         menu.append_section(None, close_section)
 
-    def _build_move_section(self) -> Gio.Menu:
+    def _build_move_section(self, others: list[MainWindow] | None = None) -> Gio.Menu:
         section = Gio.Menu()
         move_item = Gio.MenuItem.new("Move to Window…", None)
-        move_item.set_submenu(self._build_move_submenu())
+        move_item.set_submenu(self._build_move_submenu(others))
         section.append_item(move_item)
         return section
 
-    def _build_move_submenu(self) -> Gio.Menu:
+    def _build_move_submenu(self, others: list[MainWindow] | None = None) -> Gio.Menu:
         submenu = Gio.Menu()
-        self._populate_move_submenu(submenu)
+        self._populate_move_submenu(submenu, others=others)
         return submenu
 
-    def _populate_move_submenu(self, submenu: Gio.Menu) -> None:
+    def _populate_move_submenu(
+        self, submenu: Gio.Menu, others: list[MainWindow] | None = None
+    ) -> None:
         submenu.remove_all()
-        others = [w for w in self._app_windows() if w is not self.win]
+        if others is None:
+            others = [w for w in self._app_windows() if w is not self.win]
 
         if not others:
-            empty = Gio.MenuItem.new("No other windows", None)
-            empty.set_icon(Gio.ThemedIcon.new("dialog-information-symbolic"))
-            submenu.append_item(empty)
             return
 
         other_section = Gio.Menu()
@@ -188,7 +191,15 @@ class TabController:
     def refresh_header_move_submenu(self) -> None:
         """Refresh the header-bar Move to Window… submenu just before it opens."""
         self._context_page = None
-        self._populate_move_submenu(self.header_move_menu)
+        others = [w for w in self._app_windows() if w is not self.win]
+        self.header_move_section.remove_all()
+        if others:
+            self._populate_move_submenu(self.header_move_menu, others=others)
+            move_item = Gio.MenuItem.new("Move to Window…", None)
+            move_item.set_submenu(self.header_move_menu)
+            self.header_move_section.append_item(move_item)
+        else:
+            self.header_move_menu.remove_all()
 
     def _build_window_item(self, win: MainWindow, current: bool) -> Gio.MenuItem:
         item = Gio.MenuItem.new(None, None)

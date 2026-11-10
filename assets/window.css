@@ -247,7 +247,8 @@ popover.menu:not(.canvas-context-menu) {
     min-width: 200px;
 }
 
-popover.menu modelbutton {
+/* Vertical padding exclusively for items inside the Move to Window picker submenu */
+popover.menu modelbutton.title ~ box modelbutton {
     padding-top: 6px;
     padding-bottom: 6px;
 }

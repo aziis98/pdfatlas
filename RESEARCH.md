@@ -652,6 +652,9 @@ This document records durable technical findings, architectural decisions, mathe
 | **Replacing the `Adw.TabView` menu model inside `::setup-menu`** | libadwaita captures the `GMenuModel` pointer before emitting the signal, so the popover keeps showing the previously installed model. | Mutate the installed `Gio.Menu` in place with `remove_all()` + re-append; the captured model pointer stays valid. |
 | **Boolean `use-markup` attribute on menu items** | `GtkMenuTrackerItem` reads `use-markup` as a string (`g_menu_item_get_attribute(..., "&s", ...)`); a boolean variant is ignored and raw `<b>`/`<span>` markup renders literally. | Set `GLib.Variant.new_string("true")` for the `use-markup` attribute. |
 | **Custom `Gtk.Popover` for two-line tab context menu rows** | `Adw.TabBar` exposes no per-tab widget, so a custom popover cannot be anchored to the right-clicked tab without reverse-engineering internal hit-testing. | Use the supported `Gio.Menu` model installed on `Adw.TabView` with `\n` + `use-markup` labels; `GtkModelButton` renders newlines natively. |
+| **Always showing "Move to Window…" when only a single window is open** | Showing "Move to Window…" with a disabled or empty "No other windows" submenu clutters the options menu and tab context menu for typical single-window workflows. | Omit the *Move to Window…* section dynamically in `TabController._rebuild_tab_menu()` and `MainWindow`'s `header_move_section` whenever `len(others) == 0`. GtkPopoverMenu completely hides 0-item sections with no empty divider lines. |
+| **Global `popover.menu modelbutton` padding overrides** | Applying vertical padding to all `modelbutton` elements inside `popover.menu` increased row height across every options menu and context menu in the app. | Scope submenu row padding using CSS selector `popover.menu modelbutton.title ~ box modelbutton` so that only pages navigated into (having a `modelbutton.title` back bar) receive the vertical padding. |
+
 
 
 
