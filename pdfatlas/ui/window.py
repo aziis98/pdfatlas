@@ -93,6 +93,7 @@ class MainWindow(Adw.ApplicationWindow):
         debug_note_rect=False,
         render_workers=2,
         use_shm=True,
+        render_worker: RenderWorker | None = None,
         initial_source: PdfSource | None = None,
         show_welcome: bool = True,
         experimental_search_masonry: bool = False,
@@ -118,6 +119,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.show_welcome = show_welcome and (initial_source is None)
         self.experimental_search_masonry = experimental_search_masonry or getattr(app, "experimental_search_masonry", False)
         self._deferred_state_query: str | None = None
+        # (source, new_tab) waiting to be opened by ``open_document_when_mapped``.
+        self._pending_open: tuple[PdfSource, bool] | None = None
 
         # 2. Core models & persistent configuration
         self.doc_model: DocumentModel | None = None
@@ -130,13 +133,24 @@ class MainWindow(Adw.ApplicationWindow):
         # 3. LRU Caches and background rendering worker
         self.render_cache = RenderCache(20)
         self.minimap_cache = MiniMapCache(1000)
-        self.render_worker = RenderWorker(
+        # Prefer the application-wide worker (one per process) so opening more
+        # windows does not spawn more child processes / 256 MB shared-memory
+        # pools. Apps without a worker factory (tests, embedders) get a private
+        # worker that this window owns and shuts down on close.
+        if render_worker is None:
+            get_shared_worker = getattr(app, "get_render_worker", None)
+            if callable(get_shared_worker):
+                shared_worker = get_shared_worker()
+                if isinstance(shared_worker, RenderWorker):
+                    render_worker = shared_worker
+        self._owns_render_worker = render_worker is None
+        self.render_worker = render_worker or RenderWorker(
             num_workers=render_workers, use_shm=use_shm
         )
-
-        print(f"[PDFAtlas] render workers: {render_workers}", flush=True)
-        if use_shm:
-            print("[PDFAtlas] Zero-copy SHM IPC enabled", flush=True)
+        if self._owns_render_worker:
+            print(f"[PDFAtlas] render workers: {render_workers}", flush=True)
+            if use_shm:
+                print("[PDFAtlas] Zero-copy SHM IPC enabled", flush=True)
 
         # 4. Search indexing & database persistence
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-portal")
@@ -182,6 +196,8 @@ class MainWindow(Adw.ApplicationWindow):
         # 9. Keyboard shortcuts and window event listeners
         self.shortcuts_controller = ShortcutsController(self)
         self.connect("realize", self._on_window_realized)
+        self._is_closing = False
+        self.connect("close-request", self._on_close_request)
 
         # Apply saved color scheme and synchronize night mode on launch
         self._apply_color_scheme()
@@ -785,6 +801,96 @@ class MainWindow(Adw.ApplicationWindow):
 
     def open_document(self, source: PdfSource, new_tab: bool = False):
         self.document_loader.open_document(source, new_tab=new_tab)
+
+    def open_document_when_mapped(self, source: PdfSource, new_tab: bool = False) -> None:
+        """Open *source* after the window has been presented.
+
+        Showing the window (and an explicit "Opening Paper…" state) before the
+        comparatively expensive PDF parse, link extraction and layout work keeps
+        the app feeling responsive: the caller must ``present()`` the window
+        first. The actual open runs on an idle callback, which GDK dispatches
+        after its redraw/frame-clock sources.
+        """
+        if self._is_closing:
+            return
+        self._pending_open = (source, new_tab)
+        self.loading_title.set_label("Opening Paper\u2026")
+        self.loading_subtitle.set_label("Preparing document\u2026")
+        self.stack.set_visible_child_name("loading-view")
+        GLib.idle_add(self._open_document_deferred)
+
+    def _open_document_deferred(self) -> bool:
+        pending = self._pending_open
+        self._pending_open = None
+        if pending is None or self._is_closing:
+            return False
+        source, new_tab = pending
+        self.open_document(source, new_tab=new_tab)
+        return False
+
+    def _on_close_request(self, *_args) -> bool:
+        """Release per-window background resources when the window closes.
+
+        Without this every closed window used to leak its render worker (two
+        child processes + a 256 MB SHM pool), its executors and threads, its
+        SQLite writer thread and its PyMuPDF document handles.
+        """
+        if self._is_closing:
+            return False
+        self._is_closing = True
+        self._pending_open = None
+
+        # Persist the last scroll/zoom position before the DB thread goes away.
+        try:
+            if self.doc_model is not None and self.current_source is not None:
+                self._save_current_doc_state()
+        except Exception:
+            pass
+
+        # Stop pending GLib timers.
+        try:
+            timer_id = getattr(self.document_loader, "_state_save_timer_id", None)
+            if timer_id is not None:
+                GLib.source_remove(timer_id)
+                self.document_loader._state_save_timer_id = None
+        except Exception:
+            pass
+        try:
+            self.search_controller.cancel_pending()
+        except Exception:
+            pass
+
+        # Release document handles and render jobs for every open tab.
+        try:
+            tab_view = self.tab_view
+            for i in range(tab_view.get_n_pages()):
+                page = tab_view.get_nth_page(i)
+                child = page.get_child() if page is not None else None
+                if isinstance(child, PdfDocumentView):
+                    child.close()
+        except Exception:
+            pass
+
+        # Tear down background executors/threads.
+        try:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        try:
+            self.db_service.close()
+        except Exception:
+            pass
+
+        # Shared workers are owned by the application; private fallback workers
+        # belong to this window.
+        if self._owns_render_worker and self.render_worker is not None:
+            try:
+                self.render_worker.shutdown()
+            except Exception:
+                pass
+            self.render_worker = None
+
+        return False
 
     def _index_worker(self, filepath):
         self.document_loader._index_worker(filepath)

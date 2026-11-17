@@ -1,7 +1,14 @@
+from __future__ import annotations
+
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from .core.process_utils import init_child_process_prelude, is_dev_mode
+
+if TYPE_CHECKING:
+    from .core.renderer import RenderWorker
+    from .ui.window import MainWindow
 
 # Early initialization for multiprocessing spawn workers before GTK/WebKit imports
 init_child_process_prelude()
@@ -45,7 +52,11 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio
 
 from .core.pdf_source import PdfSource
-from .ui.window import MainWindow
+
+# NOTE: ``.ui.window`` is imported lazily inside ``do_command_line`` /
+# ``do_activate``. A secondary invocation that only forwards its URI to the
+# running primary instance never needs the GTK widget stack, PyMuPDF, NumPy or
+# the OpenGL canvas, and importing them used to cost ~0.25-0.35 s per launch.
 
 
 
@@ -86,7 +97,34 @@ class PDFViewerApplication(Adw.Application):
         self.render_workers = render_workers
         self.use_shm = use_shm
         self.experimental_search_masonry = experimental_search_masonry
+        self._render_worker: RenderWorker | None = None
         self.connect("window-removed", self._on_window_removed)
+
+    def get_render_worker(self) -> RenderWorker:
+        """Return the process-wide render worker, creating it on first use.
+
+        One worker per process means opening a new window costs zero child
+        processes and zero extra shared-memory pools (previously each window
+        spawned two children and a 256 MB ``/dev/shm`` segment that was never
+        released when the window closed).
+        """
+        if self._render_worker is None:
+            from .core.renderer import RenderWorker
+
+            self._render_worker = RenderWorker(
+                num_workers=self.render_workers, use_shm=self.use_shm
+            )
+            print(f"[PDFAtlas] render workers: {self.render_workers}", flush=True)
+            if self.use_shm:
+                print("[PDFAtlas] Zero-copy SHM IPC enabled", flush=True)
+        return self._render_worker
+
+    def do_shutdown(self):
+        worker = self._render_worker
+        self._render_worker = None
+        if worker is not None:
+            worker.shutdown()
+        Adw.Application.do_shutdown(self)
 
     def _on_window_removed(self, app, win):
         if not app.get_windows():
@@ -144,6 +182,8 @@ class PDFViewerApplication(Adw.Application):
             )
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
+        from .ui.window import MainWindow
+
         raw_args = command_line.get_arguments()[1:]
         cwd = command_line.get_cwd()
 
@@ -176,8 +216,9 @@ class PDFViewerApplication(Adw.Application):
             if win and win.doc_model is None:
                 target_win = win
                 source = self._resolve_source(target_win, target_to_open.strip(), cwd=cwd)
-                target_win.open_document(source, new_tab=False)
+                # The window is already visible: load in place (no deferral).
                 target_win.present()
+                target_win.open_document(source, new_tab=False)
             else:
                 from .core.installation import get_installation_mode_info
                 mode, reason = get_installation_mode_info()
@@ -186,7 +227,6 @@ class PDFViewerApplication(Adw.Application):
                 source = self._resolve_source(None, target_to_open.strip(), cwd=cwd)
                 target_win = MainWindow(
                     self,
-                    initial_source=source,
                     state=self.state,
                     follow_link=self.follow_link,
                     debug_mode=self.debug,
@@ -195,8 +235,10 @@ class PDFViewerApplication(Adw.Application):
                     use_shm=self.use_shm,
                     experimental_search_masonry=self.experimental_search_masonry,
                     cwd=cwd,
+                    show_welcome=False,
                 )
                 target_win.present()
+                target_win.open_document_when_mapped(source)
         else:
             if not win:
                 from .core.installation import get_installation_mode_info
@@ -219,6 +261,8 @@ class PDFViewerApplication(Adw.Application):
         return 0
 
     def do_activate(self):
+        from .ui.window import MainWindow
+
         windows = [w for w in self.get_windows() if isinstance(w, MainWindow)]
         if windows and not self.filepath_to_open:
             windows[0].present()
@@ -233,7 +277,6 @@ class PDFViewerApplication(Adw.Application):
             source = self._resolve_source(None, self.filepath_to_open.strip()) if self.filepath_to_open else None
             win = MainWindow(
                 self,
-                initial_source=source,
                 state=self.state,
                 follow_link=self.follow_link,
                 debug_mode=self.debug,
@@ -242,13 +285,16 @@ class PDFViewerApplication(Adw.Application):
                 use_shm=self.use_shm,
                 experimental_search_masonry=self.experimental_search_masonry,
                 cwd=os.getcwd(),
+                show_welcome=source is None,
             )
             win.present()
+            if source is not None:
+                win.open_document_when_mapped(source)
         else:
+            win.present()
             if self.filepath_to_open:
                 source = self._resolve_source(win, self.filepath_to_open.strip())
                 win.open_document(source, new_tab=False)
-            win.present()
 
     def do_startup(self):
         Adw.Application.do_startup(self)

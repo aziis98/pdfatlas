@@ -968,6 +968,25 @@ class PDFCanvas(Gtk.Overlay):
         self.update_layout()
         self.seed_initial_previews()
 
+    def set_render_worker(self, render_worker) -> None:
+        """Point this canvas at a different background render worker.
+
+        Used when a tab is transferred to another window: the moved tab must
+        use its new window's (possibly shared) worker, and jobs still queued on
+        the old one must be dropped so their results cannot land in this
+        canvas' caches.
+        """
+        old = self.render_worker
+        if render_worker is old:
+            return
+        self.render_worker = render_worker
+        self.in_flight.clear()
+        self._render_started.clear()
+        if old is not None and self.doc_model is not None:
+            old.clear_canvas_render_jobs(self.doc_model.filepath)
+        self._update_visibility()
+        self.gl_canvas.queue_draw()
+
     def seed_initial_previews(self, max_pages: int = 1):
         """Quickly pre-seed low-resolution preview textures for the initial page(s)
         directly into the render cache. This ensures the canvas has content to

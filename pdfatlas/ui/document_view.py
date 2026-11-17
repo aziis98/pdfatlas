@@ -294,6 +294,14 @@ class PdfDocumentView(Gtk.Box):
         if self.canvas:
             self.canvas.queue_draw_overlays("arxiv-links-updated")
 
+    def set_render_worker(self, render_worker) -> None:
+        """Swap the render worker used by this document view and its canvas."""
+        if render_worker is self.render_worker:
+            return
+        self.render_worker = render_worker
+        if self.canvas is not None:
+            self.canvas.set_render_worker(render_worker)
+
     def close(self):
         if self.render_worker and self.doc_model:
             self.render_worker.clear_canvas_render_jobs(self.doc_model.filepath)

@@ -6,6 +6,41 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gtk
 
 
+# Discovered once per process: the filesystem walk over /usr/share/icons is
+# comparatively expensive (~50 ms) and the result never changes at runtime.
+_ICON_SEARCH_PATHS: list[str] | None = None
+
+
+def _discover_icon_search_paths() -> list[str]:
+    """Return icon theme directories containing the app's custom symbolic icons."""
+    global _ICON_SEARCH_PATHS
+    if _ICON_SEARCH_PATHS is not None:
+        return _ICON_SEARCH_PATHS
+
+    icon_roots = [
+        "/usr/share/icons",
+        "/usr/local/share/icons",
+        os.path.expanduser("~/.local/share/icons"),
+        os.path.expanduser("~/.icons"),
+    ]
+    target_icons = {"map-symbolic.svg", "image-crop-symbolic.svg", "crop-symbolic.svg"}
+
+    paths: list[str] = []
+    seen: set[str] = set()
+    for root in icon_roots:
+        if not os.path.exists(root):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(root):
+            if dirpath in seen:
+                continue
+            if any(filename in target_icons for filename in filenames):
+                paths.append(dirpath)
+                seen.add(dirpath)
+
+    _ICON_SEARCH_PATHS = paths
+    return paths
+
+
 class IconThemeManager:
     """
     Manages GTK icon theme path registration and custom icon discovery.
@@ -43,21 +78,5 @@ class IconThemeManager:
         Gtk.Window.set_default_icon_name(icon_name)
         window.set_icon_name(icon_name)
 
-        icon_roots = [
-            "/usr/share/icons",
-            "/usr/local/share/icons",
-            os.path.expanduser("~/.local/share/icons"),
-            os.path.expanduser("~/.icons"),
-        ]
-
-        added_paths = set()
-        target_icons = {"map-symbolic.svg", "image-crop-symbolic.svg", "crop-symbolic.svg"}
-
-        for root in icon_roots:
-            if not os.path.exists(root):
-                continue
-            for dirpath, _dirnames, filenames in os.walk(root):
-                for filename in filenames:
-                    if filename in target_icons and dirpath not in added_paths:
-                        theme.add_search_path(dirpath)
-                        added_paths.add(dirpath)
+        for dirpath in _discover_icon_search_paths():
+            theme.add_search_path(dirpath)

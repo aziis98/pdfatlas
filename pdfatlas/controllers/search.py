@@ -3,7 +3,7 @@ from __future__ import annotations
 import string
 from typing import TYPE_CHECKING, Callable
 
-import fitz
+import pymupdf as fitz
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -122,6 +122,14 @@ class SearchController:
             GLib.source_remove(self._debounce_source_id)
             self._debounce_source_id = None
         self.run_search(entry.get_text())
+
+    def cancel_pending(self) -> None:
+        """Cancel debounced timers and invalidate in-flight search results."""
+        if self._debounce_source_id is not None:
+            GLib.source_remove(self._debounce_source_id)
+            self._debounce_source_id = None
+        # Bump the search id so any queued DB result callback is dropped.
+        self._current_search_id += 1
 
     def clear_results_box(self):
         if self.win.search_results_view is not None:

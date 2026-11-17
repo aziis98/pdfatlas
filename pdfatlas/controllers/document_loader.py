@@ -493,11 +493,24 @@ class DocumentLoader:
             if source.is_arxiv:
                 aid = arxiv_id_from_path(filepath)
                 if aid:
-                    self.win._show_progress("arxiv_diff", "Analyzing arXiv TeX sources...", 0.0)
-                    arxiv_thread = threading.Thread(
-                        target=self._arxiv_diff_worker, args=(aid, filepath), daemon=True
-                    )
-                    arxiv_thread.start()
+                    def _deferred_arxiv_diff() -> bool:
+                        # The TeX diff is ~1 s of GIL-bound work (PDF text
+                        # extraction + word diff). Starting it immediately
+                        # starves the first page renders, so wait until the
+                        # window has painted a few frames.
+                        if getattr(self.win, "_is_closing", False):
+                            return False
+                        if not (self.win.doc_model and self.win.doc_model.filepath == filepath):
+                            return False
+                        if not (self.win.current_source and self.win.current_source.uri == source.uri):
+                            return False
+                        self.win._show_progress("arxiv_diff", "Analyzing arXiv TeX sources...", 0.0)
+                        threading.Thread(
+                            target=self._arxiv_diff_worker, args=(aid, filepath), daemon=True
+                        ).start()
+                        return False
+
+                    GLib.timeout_add(1200, _deferred_arxiv_diff)
 
             # Start crop analysis
             self.win._start_crop_analysis()
@@ -709,15 +722,21 @@ class DocumentLoader:
             GLib.idle_add(self._on_arxiv_diff_complete, None)
 
     def _on_arxiv_diff_progress(self, fraction: float):
+        if getattr(self.win, "_is_closing", False):
+            return
         self.win._show_progress("arxiv_diff", "Analyzing arXiv TeX sources...", fraction)
 
     def _on_arxiv_diff_complete(self, mapper: ArxivDiffMapper | None):
+        if getattr(self.win, "_is_closing", False):
+            return
         self.win.arxiv_mapper = mapper
         self.win._hide_progress("arxiv_diff")
         if self.win.selection_toolbar and self.win.selection_toolbar.get_visible():
             self.win._update_selection_toolbar(True)
 
     def _on_indexing_complete(self, conn: sqlite3.Connection | None):
+        if getattr(self.win, "_is_closing", False):
+            return
         self.win._hide_progress("indexing")
         self.win.index_conn = conn
         self.win.entry.set_sensitive(True)

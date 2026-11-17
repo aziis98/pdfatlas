@@ -282,6 +282,13 @@ class RenderWorker:
         if self._stop.is_set():
             return
         self._stop.set()
+        # Drop the atexit hook so a shut-down worker can be garbage collected.
+        # Keeping it registered pins the worker (and every cache/callback it
+        # references) alive until interpreter exit.
+        try:
+            atexit.unregister(self.shutdown)
+        except Exception:
+            pass
         for _ in range(self.num_workers):
             try:
                 self._jobs_q.put("shutdown", timeout=1.0)

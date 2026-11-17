@@ -362,6 +362,9 @@ class TabController:
         self.win.stack.set_visible_child_name("document-view")
         child = page.get_child()
         if isinstance(child, PdfDocumentView):
+            # A page transferred from another window must use this window's
+            # render worker, not the one it was created with.
+            child.set_render_worker(self.win.render_worker)
             child.canvas.set_night_mode(
                 self.win.is_effective_dark(),
                 invert_amount=self.win.settings.night_mode_invert,

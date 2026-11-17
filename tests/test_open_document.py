@@ -236,6 +236,15 @@ def test_cli_command_line_opens_in_new_window(tmp_path):
 
     with patch.object(MainWindow, "open_document") as mock_open_win:
         app.do_command_line(cmd2)
+        # New windows are presented first; the document open is queued as a
+        # pending open and run from an idle callback so the window can be
+        # painted first. Run it directly instead of pumping the default
+        # GLib context (other tests may leave it owned by another thread).
+        windows = [w for w in app.get_windows() if isinstance(w, MainWindow)]
+        new_win = next(w for w in windows if w is not win)
+        assert new_win.stack.get_visible_child_name() == "loading-view"
+        assert new_win._pending_open is not None
+        new_win._open_document_deferred()
         assert mock_open_win.call_count == 1
         source2 = mock_open_win.call_args[0][0]
         assert source2.uri == str(pdf2)
