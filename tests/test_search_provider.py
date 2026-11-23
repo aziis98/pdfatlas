@@ -157,10 +157,12 @@ def test_focus_search_with_selected_text():
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
     from gi.repository import Gtk
+    from pdfatlas.controllers.search import SearchController
     from pdfatlas.ui.window import MainWindow
 
     win = MagicMock(spec=MainWindow)
     win.entry = Gtk.SearchEntry()
+    win.search_controller = SearchController(win)
     win.run_search = MagicMock()
     win.get_active_doc_view = MagicMock()
 
@@ -185,10 +187,12 @@ def test_focus_search_without_selection():
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
     from gi.repository import Gtk
+    from pdfatlas.controllers.search import SearchController
     from pdfatlas.ui.window import MainWindow
 
     win = MagicMock(spec=MainWindow)
     win.entry = Gtk.SearchEntry()
+    win.search_controller = SearchController(win)
     win.entry.set_text("existing query")
     win.run_search = MagicMock()
     win.get_active_doc_view = MagicMock()

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import string
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Callable
 
 import pymupdf as fitz
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib
+from gi.repository import GLib, Gtk
 
 from ..core.search_provider import SearchProvider, SearchResult
 from ..ui.components.search_header_entry import SearchHeaderEntry
@@ -98,16 +99,122 @@ class SearchCoordinator:
         provider.search(query, limit=30, search_id=search_id, on_results=_on_results)
 
 
+class SearchState(Enum):
+    """Explicit state machine states for the window search bar."""
+
+    IDLE = auto()
+    EDITING = auto()
+    SEARCH_VIEW = auto()
+    RESULT_ACTIVE = auto()
+
+
 class SearchController:
-    """Backwards-compatible controller bridging MainWindow to search operations."""
+    """Controller managing the search bar state machine and search operations."""
 
     def __init__(self, main_window: MainWindow):
         self.win = main_window
+        self.state: SearchState = SearchState.IDLE
         self._debounce_source_id: int | None = None
         self._last_query = ""
         self._current_search_id = 0
+        self._suppress_changed = False
+
+    @property
+    def last_query(self) -> str:
+        return self._last_query
+
+    def attach_entry_signals(self, entry: Gtk.SearchEntry) -> None:
+        """Wire focus, clear-button, and stop-search signals on the header SearchEntry."""
+        entry.connect("search-changed", self.on_search_changed_debounced)
+        entry.connect("activate", self.on_activate_immediate)
+        entry.connect("stop-search", lambda _e: self.on_escape())
+
+        focus_ctrl = Gtk.EventControllerFocus.new()
+        focus_ctrl.connect("enter", self._on_entry_focus_enter)
+        focus_ctrl.connect("leave", self._on_entry_focus_leave)
+        entry.add_controller(focus_ctrl)
+
+        # Gtk.SearchEntry's trailing Gtk.Image is its clear ("×") button.
+        # Listen on release so clicking Clear immediately exits search and unfocuses.
+        clear_icon = self._find_clear_icon(entry)
+        if clear_icon is not None:
+            click = Gtk.GestureClick.new()
+            click.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
+            click.connect("released", lambda _g, _n, _x, _y: self.on_clear_clicked())
+            clear_icon.add_controller(click)
+
+    @staticmethod
+    def _find_clear_icon(entry: Gtk.SearchEntry) -> Gtk.Widget | None:
+        images: list[Gtk.Widget] = []
+        child = entry.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Image):
+                images.append(child)
+            child = child.get_next_sibling()
+        return images[-1] if len(images) >= 2 else None
+
+    def _on_entry_focus_enter(self, _ctrl) -> None:
+        if self.state in (SearchState.IDLE, SearchState.RESULT_ACTIVE):
+            self.state = SearchState.EDITING
+
+    def _on_entry_focus_leave(self, _ctrl) -> None:
+        if self.state == SearchState.EDITING:
+            self.state = SearchState.IDLE
+
+    def is_entry_focused(self) -> bool:
+        """Return True when the search entry or its internal Gtk.Text holds focus."""
+        entry = getattr(self.win, "entry", None)
+        if entry is None:
+            return False
+        if entry.has_focus():
+            return True
+        focus = self.win.get_focus()
+        w: Gtk.Widget | None = focus
+        while w is not None:
+            if w is entry:
+                return True
+            w = w.get_parent()
+        return False
+
+    def unfocus_to_canvas(self) -> None:
+        """Move keyboard focus off the search entry onto the active canvas."""
+        canvas = getattr(self.win, "canvas", None)
+        if canvas is not None and canvas.grab_focus():
+            return
+        if self.is_entry_focused():
+            self.win.set_focus(None)
+
+    def set_query_silently(self, text: str) -> None:
+        """Update the search entry text without triggering debounced search-changed."""
+        entry = getattr(self.win, "entry", None)
+        if entry is None or entry.get_text() == text:
+            return
+        self._suppress_changed = True
+        try:
+            entry.set_text(text)
+        finally:
+            self._suppress_changed = False
+
+    def focus_search(self) -> None:
+        """Focus the search entry, auto-searching any active canvas text selection."""
+        doc_view = self.win.get_active_doc_view()
+        canvas = doc_view.canvas if (doc_view and hasattr(doc_view, "canvas")) else getattr(self.win, "canvas", None)
+        sel = canvas.text_selection if (canvas and hasattr(canvas, "text_selection")) else None
+
+        if sel is not None and sel.has_selection():
+            selected_text = " ".join(sel.get_selected_text().split())
+            if selected_text:
+                self.set_query_silently(selected_text)
+                self.win.run_search(selected_text)
+        elif self.state in (SearchState.IDLE, SearchState.RESULT_ACTIVE):
+            self.state = SearchState.EDITING
+
+        self.win.entry.grab_focus()
+        self.win.entry.select_region(0, -1)
 
     def on_search_changed_debounced(self, _entry):
+        if self._suppress_changed:
+            return
         if self._debounce_source_id is not None:
             GLib.source_remove(self._debounce_source_id)
         self._debounce_source_id = GLib.timeout_add(150, self._debounced_fire)
@@ -134,6 +241,41 @@ class SearchController:
     def clear_results_box(self):
         if self.win.search_results_view is not None:
             self.win.search_results_view.clear()
+
+    def _clear_canvas_highlights(self) -> None:
+        canvas = getattr(self.win, "canvas", None)
+        if canvas is not None:
+            canvas.set_search_highlights({})
+
+    def on_clear_clicked(self) -> None:
+        """Explicitly clear search (Clear button or Escape): return to document view and unfocus."""
+        self.exit_to_document(clear_query=True, clear_highlights=True)
+
+    def on_escape(self) -> bool:
+        """Handle Escape when in search-view or while search entry is focused."""
+        if self.win.stack.get_visible_child_name() == "search-view" or self.is_entry_focused():
+            self.exit_to_document(clear_query=True, clear_highlights=True)
+            return True
+        return False
+
+    def exit_to_document(
+        self,
+        *,
+        clear_query: bool = False,
+        clear_highlights: bool = False,
+    ) -> None:
+        """Return to document-view, cancel pending work, and unfocus the search entry."""
+        self.cancel_pending()
+        if clear_query:
+            self._last_query = ""
+            self.set_query_silently("")
+            self.clear_results_box()
+        if clear_highlights:
+            self._clear_canvas_highlights()
+        if self.win.stack.get_visible_child_name() == "search-view":
+            self.win.stack.set_visible_child_name("document-view")
+        self.unfocus_to_canvas()
+        self.state = SearchState.IDLE
 
     def on_toggle_pin(self, result: dict, query_terms: list | set, pinned: bool):
         if pinned:
@@ -210,6 +352,8 @@ class SearchController:
         highlights = self._extract_search_highlights(query_str, query_terms)
         self.win.canvas.set_search_highlights(highlights)
         self.win.stack.set_visible_child_name("document-view")
+        self.unfocus_to_canvas()
+        self.state = SearchState.RESULT_ACTIVE
 
         def scroll_to_target():
             if not self.win.doc_model or page_idx >= len(self.win.canvas.page_layout):
@@ -232,7 +376,7 @@ class SearchController:
             max_y = max(lower, upper - viewport_h)
             target_y = clamp(lower, block_absolute_y - (viewport_h / 2.0), max_y)
 
-            self.win.canvas.grab_focus()
+            self.unfocus_to_canvas()
             self.win.vadjustment.set_value(target_y)
             self.win._on_scroll_page_changed(self.win.vadjustment)
             self.win._queue_canvas_redraw()
@@ -243,8 +387,13 @@ class SearchController:
     def run_search(self, query: str):
         query = query.strip()
         if not query:
+            self.cancel_pending()
+            self._last_query = ""
             self.clear_results_box()
-            self.win.stack.set_visible_child_name("document-view")
+            self._clear_canvas_highlights()
+            if self.win.stack.get_visible_child_name() == "search-view":
+                self.win.stack.set_visible_child_name("document-view")
+            self.state = SearchState.EDITING if self.is_entry_focused() else SearchState.IDLE
             return
 
         if not self.win.db_service:
@@ -255,12 +404,14 @@ class SearchController:
                     query=query,
                     active_filepath=self.win.doc_model.filepath if self.win.doc_model else "",
                     is_grid=self.win.settings.search_layout == "grid",
+                    autotrim=self.win.settings.search_autotrim,
                 )
             return
 
         self._current_search_id += 1
         search_id = self._current_search_id
         self._last_query = query
+        self.state = SearchState.SEARCH_VIEW
 
         if self.win.search_results_view is not None:
             self.win.search_results_view.reset_executor()
@@ -292,4 +443,5 @@ class SearchController:
                 query=self._last_query,
                 active_filepath=active_filepath,
                 is_grid=is_grid,
+                autotrim=self.win.settings.search_autotrim,
             )

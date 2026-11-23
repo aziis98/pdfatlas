@@ -419,6 +419,7 @@ class TabController:
         self._active_doc_view_ref = doc_view if isinstance(doc_view, PdfDocumentView) else None
 
         if isinstance(doc_view, WelcomeView):
+            self.win.search_controller.exit_to_document(clear_query=True)
             self.win.stack.set_visible_child_name("document-view")
             if hasattr(self.win, "recent_files") and hasattr(self.win.recent_files, "reload"):
                 self.win.recent_files.reload()
@@ -426,7 +427,6 @@ class TabController:
             self.win.filename_label.set_label("PDF Atlas")
             self.win.set_title("PDF Atlas")
             self.win.entry.set_sensitive(False)
-            self.win.entry.set_text("")
             self.win.entry.set_placeholder_text("No document loaded")
             self.win.page_input.set_text("")
             self.win.page_total_label.set_label("")
@@ -491,6 +491,7 @@ class TabController:
                 doc_view.canvas._update_visibility()
                 doc_view.canvas.gl_canvas.queue_draw()
                 doc_view.canvas.queue_draw_overlays("tab-selected")
+                self.win.search_controller.exit_to_document(clear_query=False)
             else:
                 # Tab is downloading/loading
                 self.win.doc_model = None
@@ -502,8 +503,8 @@ class TabController:
                 )
                 self.win.set_title(f"PDF Viewer — {title}")
                 self.win.filename_label.set_label(title)
+                self.win.search_controller.exit_to_document(clear_query=True)
                 self.win.entry.set_sensitive(False)
-                self.win.entry.set_text("")
                 self.win.entry.set_placeholder_text("Downloading document...")
                 self.win.page_input.set_text("")
                 self.win.page_total_label.set_label("")

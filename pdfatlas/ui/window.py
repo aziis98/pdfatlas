@@ -157,8 +157,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.db_service = DatabaseService()
         self.index_conn: sqlite3.Connection | None = None
         self.pinned = {}  # id -> {"result": ..., "query_terms": ...}
-        self._debounce_source_id = None
-        self._last_query = ""
 
         # 5. UI, viewport, annotations & interaction state
         self.zoom = 1.0
@@ -452,10 +450,12 @@ class MainWindow(Adw.ApplicationWindow):
             self.tab_controller.refresh_header_move_submenu()
 
     def _is_entry_focused(self) -> bool:
+        if self.search_controller.is_entry_focused():
+            return True
+        if self.page_input and self.page_input.has_focus():
+            return True
         focus = self.get_focus()
         if focus is not None and isinstance(focus, (Gtk.Editable, Gtk.Entry, Gtk.SearchEntry)):
-            return True
-        if self.entry.has_focus() or (self.page_input and self.page_input.has_focus()):
             return True
         return False
 
@@ -496,8 +496,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Center: Search Entry
         self.entry = search_entry(placeholder="No document loaded", sensitive=False)
-        self.entry.connect("search-changed", self.search_controller.on_search_changed_debounced)
-        self.entry.connect("activate", self.search_controller.on_activate_immediate)
+        self.search_controller.attach_entry_signals(self.entry)
         header.set_title_widget(self.entry)
 
         # Right: Page Navigation Entry + Total Pages Label, Menu Button
@@ -649,7 +648,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_results_view = SearchResultsView(
             on_row_clicked=self.search_controller.on_row_clicked,
             on_toggle_pin=self.search_controller.on_toggle_pin,
-            use_masonry=self.experimental_search_masonry,
+            use_masonry=True,
             page_height_getter=_get_page_height,
             page_dims_getter=_get_page_dims,
         )
@@ -1195,18 +1194,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def focus_search(self) -> None:
         """Focus the search entry. If text is currently selected in the active document, search for it."""
-        doc_view = self.get_active_doc_view()
-        canvas = doc_view.canvas if (doc_view and hasattr(doc_view, "canvas")) else getattr(self, "canvas", None)
-        sel = canvas.text_selection if (canvas and hasattr(canvas, "text_selection")) else None
-
-        if sel is not None and sel.has_selection():
-            selected_text = " ".join(sel.get_selected_text().split())
-            if selected_text:
-                self.entry.set_text(selected_text)
-                self.run_search(selected_text)
-
-        self.entry.grab_focus()
-        self.entry.select_region(0, -1)
+        self.search_controller.focus_search()
 
     def run_search(self, query: str):
         self.search_controller.run_search(query)
@@ -1226,11 +1214,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self.canvas.grab_focus()
             return True
 
-        if self.stack.get_visible_child_name() == "search-view" or self.entry.has_focus():
-            self.entry.set_text("")
-            self.stack.set_visible_child_name("document-view")
-            if self.canvas:
-                self.canvas.grab_focus()
+        if self.search_controller.on_escape():
             return True
 
         # Clear text selection on Escape
@@ -1536,8 +1520,8 @@ class MainWindow(Adw.ApplicationWindow):
         max_zoom = self.settings.max_zoom
         if self.zoom < min_zoom or self.zoom > max_zoom:
             self.set_zoom_level(self.zoom)
-        if self._last_query:
-            self.run_search(self._last_query)
+        if self.search_controller.last_query and self.stack.get_visible_child_name() == "search-view":
+            self.run_search(self.search_controller.last_query)
 
     def _on_crop_settings_updated(self):
         active = self.get_active_doc_view()

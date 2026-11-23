@@ -390,7 +390,7 @@ class AnnotationsController:
         if self.win._deferred_state_query:
             query = self.win._deferred_state_query
             self.win._deferred_state_query = None
-            self.win.entry.set_text(query)
+            self.win.search_controller.set_query_silently(query)
             self.win.run_search(query)
 
     def on_notes_loaded(self, notes: list[dict]):

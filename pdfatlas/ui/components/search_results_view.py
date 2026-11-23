@@ -24,7 +24,7 @@ class SearchResultsView(Gtk.Box):
         self,
         on_row_clicked: Callable[[dict, set[str]], None] | None = None,
         on_toggle_pin: Callable[[dict, set[str], bool], None] | None = None,
-        use_masonry: bool = False,
+        use_masonry: bool = True,
         page_height_getter: Callable[[int], float] | None = None,
         page_dims_getter: Callable[[int], tuple[float, float]] | None = None,
     ):
@@ -45,6 +45,7 @@ class SearchResultsView(Gtk.Box):
         self.stack.set_hexpand(True)
 
         self.scrolled = scrolled_window()
+        self.scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.results_box = box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=12,
@@ -86,6 +87,7 @@ class SearchResultsView(Gtk.Box):
         query: str,
         active_filepath: str,
         is_grid: bool = False,
+        autotrim: bool = True,
     ):
         self.clear()
         query_terms = {t.strip(string.punctuation).lower() for t in query.strip().split() if t}
@@ -119,14 +121,15 @@ class SearchResultsView(Gtk.Box):
                 if self.use_masonry:
                     from .masonry_layout import MasonryBox
 
-                    pinned_grid = MasonryBox(column_spacing=14, row_spacing=14, min_column_width=470)
+                    pinned_grid = MasonryBox(column_spacing=12, row_spacing=12, min_column_width=320)
+                    pinned_grid.set_halign(Gtk.Align.FILL)
                 else:
                     pinned_grid = Gtk.FlowBox()
                     pinned_grid.set_selection_mode(Gtk.SelectionMode.NONE)
                     pinned_grid.set_column_spacing(12)
                     pinned_grid.set_row_spacing(12)
+                    pinned_grid.set_halign(Gtk.Align.CENTER)
                 pinned_grid.set_valign(Gtk.Align.START)
-                pinned_grid.set_halign(Gtk.Align.CENTER)
                 pinned_grid.set_hexpand(True)
                 pinned_grid.set_margin_start(16)
                 pinned_grid.set_margin_end(16)
@@ -154,12 +157,15 @@ class SearchResultsView(Gtk.Box):
                     pinned=True,
                     page_w=pw,
                     page_h=ph,
+                    autotrim=autotrim,
                     on_toggle_pin=self._handle_toggle_pin,
                     on_row_clicked=self.on_row_clicked,
                 )
                 if is_grid and pinned_grid is not None:
                     pinned_grid.append(row)
                 else:
+                    row.set_halign(Gtk.Align.CENTER)
+                    row.set_hexpand(False)
                     self.results_box.append(row)
 
             # Separator between pinned and live results (or pinned and empty notice)
@@ -192,15 +198,16 @@ class SearchResultsView(Gtk.Box):
                     query_terms=query_terms,
                     page_height_getter=self.page_height_getter,
                 )
-                live_grid = MasonryBox(column_spacing=14, row_spacing=14, min_column_width=470)
+                live_grid = MasonryBox(column_spacing=12, row_spacing=12, min_column_width=320)
+                live_grid.set_halign(Gtk.Align.FILL)
             else:
                 display_results = results
                 live_grid = Gtk.FlowBox()
                 live_grid.set_selection_mode(Gtk.SelectionMode.NONE)
                 live_grid.set_column_spacing(12)
                 live_grid.set_row_spacing(12)
+                live_grid.set_halign(Gtk.Align.CENTER)
             live_grid.set_valign(Gtk.Align.START)
-            live_grid.set_halign(Gtk.Align.CENTER)
             live_grid.set_hexpand(True)
             live_grid.set_margin_start(16)
             live_grid.set_margin_end(16)
@@ -231,6 +238,7 @@ class SearchResultsView(Gtk.Box):
                     pinned=is_pinned,
                     page_w=pw,
                     page_h=ph,
+                    autotrim=autotrim,
                     on_toggle_pin=self._handle_toggle_pin,
                     on_row_clicked=self.on_row_clicked,
                 )
@@ -259,9 +267,12 @@ class SearchResultsView(Gtk.Box):
                     pinned=is_pinned,
                     page_w=pw,
                     page_h=ph,
+                    autotrim=autotrim,
                     on_toggle_pin=self._handle_toggle_pin,
                     on_row_clicked=self.on_row_clicked,
                 )
+                row.set_halign(Gtk.Align.CENTER)
+                row.set_hexpand(False)
                 self.results_box.append(row)
 
     def _handle_toggle_pin(self, result: dict, query_terms: set[str], pinned: bool):

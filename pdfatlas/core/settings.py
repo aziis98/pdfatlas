@@ -22,6 +22,7 @@ class CropSettings:
     page_gaps: bool = True
     page_shadow: bool = True
     search_layout: str = "grid"  # "list" or "grid"
+    search_autotrim: bool = True
     max_texture_zoom: float | None = 2.5  # None = Infinity (no texture-zoom cap)
     min_zoom: float = 0.25
     max_zoom: float = 50.0

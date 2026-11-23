@@ -516,7 +516,7 @@ class DocumentLoader:
             self.win._start_crop_analysis()
 
             # Trigger background indexing
-            self.win.entry.set_text("")
+            self.win.search_controller.exit_to_document(clear_query=True, clear_highlights=True)
             self.win.entry.set_placeholder_text("Indexing text index...")
             self.win.entry.set_sensitive(False)
             self.win.stack.set_visible_child_name("document-view")
@@ -581,7 +581,7 @@ class DocumentLoader:
                     self.win.vadjustment.set_value(state.scroll_y)
                 if state.query:
                     if self.win.index_conn:
-                        self.win.entry.set_text(state.query)
+                        self.win.search_controller.set_query_silently(state.query)
                         self.win.run_search(state.query)
                     else:
                         self.win._deferred_state_query = state.query
@@ -749,7 +749,7 @@ class DocumentLoader:
         if self.win._deferred_state_query:
             query = self.win._deferred_state_query
             self.win._deferred_state_query = None
-            self.win.entry.set_text(query)
+            self.win.search_controller.set_query_silently(query)
             self.win.run_search(query)
 
         # Restore saved zoom & scroll_x/scroll_y & crop/page_gaps state from .db if no CLI state was specified

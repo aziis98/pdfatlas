@@ -195,7 +195,15 @@ class SettingsWindow(Adw.PreferencesDialog):
         else:
             self.layout_combo.set_selected(1)
         self.layout_combo.connect("notify::selected", self._on_layout_changed)
-        self._add_group(page, "Search", [self.layout_combo])
+
+        self.search_autotrim_row = Adw.SwitchRow(
+            title="Auto-trim white margins",
+            subtitle="Crop outer page margins in search cards to enlarge text",
+        )
+        self.search_autotrim_row.set_active(bool(self.settings.search_autotrim))
+        self.search_autotrim_row.connect("notify::active", self._on_search_autotrim_toggled)
+
+        self._add_group(page, "Search", [self.layout_combo, self.search_autotrim_row])
 
         self.add(page)
 
@@ -385,6 +393,10 @@ class SettingsWindow(Adw.PreferencesDialog):
     def _on_layout_changed(self, row, pspec):
         selected = row.get_selected()
         self.settings.search_layout = "list" if selected == 0 else "grid"
+        self.on_changed()
+
+    def _on_search_autotrim_toggled(self, row, pspec):
+        self.settings.search_autotrim = bool(row.get_active())
         self.on_changed()
 
     def _on_texture_zoom_changed(self, entry):

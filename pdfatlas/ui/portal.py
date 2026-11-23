@@ -10,6 +10,8 @@ import pymupdf as fitz
 import numpy as np
 from gi.repository import Gdk, GLib, Gtk
 
+from ..core.crop import CropAnalyzer
+
 # Render settings for portals
 STRIP_PAD_PT = 8  # padding (in PDF points) above/below the matched block
 STRIP_ZOOM = 2.0  # render zoom factor for thumbnail strips
@@ -151,6 +153,57 @@ def apply_card_decorations(surface: cairo.ImageSurface, scale_factor: float, r_d
     ctx.restore()
 
 
+_page_trim_cache: dict[tuple[str, int], tuple[float, float]] = {}
+_page_trim_lock = threading.Lock()
+
+
+def get_page_horizontal_trim(
+    pdf_path: str,
+    page_no: int,
+    page: fitz.Page,
+    pad_pt: float = WHITESPACE_TRIM_PAD_PT,
+    min_width_ratio: float = 0.60,
+) -> tuple[float, float]:
+    """
+    Detect page-level horizontal content bounds [x0, x1] in PDF points.
+    Applies a sparse-page floor (min_width_ratio * page_width) so cards retain
+    consistent font scaling across normal and sparse pages.
+    """
+    page_w = float(page.rect.width)
+    if page_w <= 0.0:
+        return 0.0, page_w
+
+    key = (pdf_path, int(page_no))
+    with _page_trim_lock:
+        cached = _page_trim_cache.get(key)
+        if cached is not None:
+            return cached
+
+    scale = CropAnalyzer.ANALYSIS_SCALE
+    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+    bbox = CropAnalyzer.analyze_pixmap(pix.width, pix.height, pix.n, pix.samples, scale=scale)
+
+    if bbox is None:
+        bounds = (0.0, page_w)
+    else:
+        x0 = max(0.0, float(bbox.x0) - pad_pt)
+        x1 = min(page_w, float(bbox.x1) + pad_pt)
+        min_w = page_w * min_width_ratio
+        if x1 - x0 < min_w:
+            mid = (x0 + x1) * 0.5
+            x0 = max(0.0, mid - min_w * 0.5)
+            x1 = min(page_w, x0 + min_w)
+            if x1 - x0 < min_w:
+                x0 = max(0.0, x1 - min_w)
+        bounds = (x0, x1)
+
+    with _page_trim_lock:
+        if len(_page_trim_cache) > 200:
+            _page_trim_cache.clear()
+        _page_trim_cache[key] = bounds
+    return bounds
+
+
 def render_strip_surface(
     pdf_path,
     page_no,
@@ -162,6 +215,7 @@ def render_strip_surface(
     target_w: int = 450,
     target_h: int = 140,
     scale_factor: float = 2.0,
+    autotrim: bool = True,
 ):
     """
     Renders one search result page-strip pre-scaled to target card pixel dimensions
@@ -170,12 +224,16 @@ def render_strip_surface(
     doc = _thread_doc(pdf_path)
     page = doc[page_no - 1]
 
-    # 1. Full page width bounds
-    clip_x0 = 0.0
-    clip_x1 = page.rect.width
+    # 1. Horizontal bounds: page-level trimmed width (with sparse floor) or full page width
+    if autotrim:
+        clip_x0, clip_x1 = get_page_horizontal_trim(pdf_path, page_no, page)
+    else:
+        clip_x0 = 0.0
+        clip_x1 = float(page.rect.width)
+    clip_w = max(1.0, clip_x1 - clip_x0)
 
     # 2. Fixed height vertical window scaled proportionally to avoid distortion
-    zoom_x = (target_w * scale_factor) / page.rect.width if page.rect.width > 0 else 1.0
+    zoom_x = (target_w * scale_factor) / clip_w
     zoom_y = zoom_x  # Enforce uniform 1:1 aspect ratio scaling
 
     # Enforce maximum portal viewport height to 50% page height
@@ -237,26 +295,26 @@ def render_strip_surface(
 def compute_portal_card_height(
     y0: float,
     y1: float,
-    target_w: int = 450,
+    target_w: int = 360,
     page_w: float = 600.0,
     page_h: float = 792.0,
-    min_h: int = 90,
+    min_h: int = 60,
     max_h: int | None = None,
 ) -> int:
     """
     Computes content-adaptive portal card pixel height based on matched text block bounds.
-    Taller paragraphs and multi-line equations receive larger card heights, while short
+    Taller paragraphs and multi-line clusters receive larger card heights, while short
     one-line matches produce compact cards. Max card portal viewport height is capped at
     50% of page height.
     """
-    block_h = max(10.0, float(y1) - float(y0))
-    context_pad = max(24.0, min(50.0, 70.0 - block_h * 0.25))
+    block_h = max(12.0, float(y1) - float(y0))
+    context_pad = max(14.0, min(26.0, 12.0 + block_h * 0.12))
     span_h = block_h + 2.0 * context_pad
 
     max_span_pt = page_h * 0.5
     span_h = min(span_h, max_span_pt)
 
-    zoom = target_w / page_w if page_w > 0 else 0.75
+    zoom = target_w / page_w if page_w > 0 else 0.6
     card_h = int(round(span_h * zoom))
 
     max_card_h = int(round(max_span_pt * zoom))
@@ -277,30 +335,34 @@ class ResultRow(Gtk.Overlay):
         result,
         query_terms,
         pinned=False,
-        target_w=450,
+        target_w=360,
         target_h=None,
         page_w=600.0,
         page_h=792.0,
+        autotrim=True,
         on_toggle_pin=None,
         on_render_done=None,
         on_row_clicked=None,
     ):
         super().__init__()
-        self.set_margin_top(4)
-        self.set_margin_bottom(4)
-        self.set_margin_start(6)
-        self.set_margin_end(6)
-        self.set_hexpand(False)
-        self.set_halign(Gtk.Align.CENTER)
+        self.set_hexpand(True)
+        self.set_halign(Gtk.Align.FILL)
 
         self.result = result
         self.query_terms = query_terms
+        self.autotrim = bool(autotrim)
         self.on_toggle_pin = on_toggle_pin
         self.on_render_done = on_render_done
         self.on_row_clicked = on_row_clicked
 
         page = result["page"]
         x0, y0, x1, y1 = result["x0"], result["y0"], result["x1"], result["y1"]
+        self._y0 = float(y0)
+        self._y1 = float(y1)
+        effective_page_w = float(page_w) * 0.78 if self.autotrim else float(page_w)
+        self._page_w = effective_page_w
+        self._page_h = float(page_h)
+        self._fixed_h = int(target_h) if target_h is not None else None
 
         self.target_w = int(target_w)
         if target_h is None:
@@ -308,7 +370,7 @@ class ResultRow(Gtk.Overlay):
                 y0,
                 y1,
                 target_w=self.target_w,
-                page_w=page_w,
+                page_w=self._page_w,
                 page_h=page_h,
             )
         else:
@@ -316,10 +378,24 @@ class ResultRow(Gtk.Overlay):
 
         # Main Child: Uniform LinkPortalPreviewCard widget
         self.portal_card = LinkPortalPreviewCard()
-        self.portal_card.set_portal_size(self.target_w, self.card_h)
+        fixed_h = int(target_h) if target_h is not None else None
+
+        def height_fn(w: int) -> int:
+            if fixed_h is not None:
+                return fixed_h
+            return compute_portal_card_height(
+                self._y0,
+                self._y1,
+                target_w=w,
+                page_w=self._page_w,
+                page_h=self._page_h,
+            )
+        self.portal_card.set_portal_size(
+            self.target_w, self.card_h, flexible=True, height_fn=height_fn
+        )
         self.portal_card.set_loading()
-        self.portal_card.set_hexpand(False)
-        self.portal_card.set_halign(Gtk.Align.CENTER)
+        self.portal_card.set_hexpand(True)
+        self.portal_card.set_halign(Gtk.Align.FILL)
         self.set_child(self.portal_card)
 
         # Top-Right Overlay: Floating Pin Button (view-pin-symbolic icon, visible on hover or if pinned)
@@ -407,6 +483,7 @@ class ResultRow(Gtk.Overlay):
                 target_w=target_w,
                 target_h=target_h,
                 scale_factor=scale_factor,
+                autotrim=self.autotrim,
             )
         except Exception as e:
             print(f"Error rendering portal strip surface: {e}")
