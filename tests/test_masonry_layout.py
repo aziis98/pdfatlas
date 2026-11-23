@@ -56,10 +56,12 @@ def test_search_results_view_masonry_flag():
         {"id": 2, "page": 1, "text": "Result 2", "x0": 10.0, "y0": 600.0, "x1": 100.0, "y1": 650.0, "rects": []},
     ]
     view_default.render_results(results, query="test", active_filepath="/tmp/fake.pdf", is_grid=True)
-    # Check that live_grid is a MasonryBox filling horizontally
+    # Check that live_grid is a MasonryBox filling horizontally with 450px min width and max 3 columns
     live_grid = view_default.results_box.get_first_child()
     assert isinstance(live_grid, MasonryBox)
     assert live_grid.get_halign() == Gtk.Align.FILL
+    assert live_grid.layout_mgr.min_column_width == 450
+    assert live_grid.layout_mgr.max_columns == 3
 
 
 def test_cli_argument_experimental_search_masonry():

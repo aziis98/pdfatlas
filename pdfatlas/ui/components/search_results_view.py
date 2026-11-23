@@ -121,7 +121,12 @@ class SearchResultsView(Gtk.Box):
                 if self.use_masonry:
                     from .masonry_layout import MasonryBox
 
-                    pinned_grid = MasonryBox(column_spacing=12, row_spacing=12, min_column_width=320)
+                    pinned_grid = MasonryBox(
+                        column_spacing=12,
+                        row_spacing=12,
+                        min_column_width=450,
+                        max_columns=3,
+                    )
                     pinned_grid.set_halign(Gtk.Align.FILL)
                 else:
                     pinned_grid = Gtk.FlowBox()
@@ -198,7 +203,12 @@ class SearchResultsView(Gtk.Box):
                     query_terms=query_terms,
                     page_height_getter=self.page_height_getter,
                 )
-                live_grid = MasonryBox(column_spacing=12, row_spacing=12, min_column_width=320)
+                live_grid = MasonryBox(
+                    column_spacing=12,
+                    row_spacing=12,
+                    min_column_width=450,
+                    max_columns=3,
+                )
                 live_grid.set_halign(Gtk.Align.FILL)
             else:
                 display_results = results

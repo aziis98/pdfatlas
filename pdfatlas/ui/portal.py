@@ -295,7 +295,7 @@ def render_strip_surface(
 def compute_portal_card_height(
     y0: float,
     y1: float,
-    target_w: int = 360,
+    target_w: int = 450,
     page_w: float = 600.0,
     page_h: float = 792.0,
     min_h: int = 60,
@@ -335,7 +335,7 @@ class ResultRow(Gtk.Overlay):
         result,
         query_terms,
         pinned=False,
-        target_w=360,
+        target_w=450,
         target_h=None,
         page_w=600.0,
         page_h=792.0,
