@@ -39,6 +39,7 @@ class TextSelection:
         self.focus_page: int | None = None
         self.focus_char_idx: int | None = None
         self.is_selecting: bool = False
+        self._word_anchor: tuple[int, int, int] | None = None
 
     def get_page_index(self, page_index: int) -> PageCharIndex:
         """Lazily build and return the character/word index for a page."""
@@ -140,14 +141,43 @@ class TextSelection:
         """Select the entire word containing char_idx."""
         w_start = self.get_word_start_char_idx(page_index, char_idx)
         w_end = self.get_word_end_char_idx(page_index, char_idx)
+        self._word_anchor = (page_index, w_start, w_end)
         self.anchor_page = page_index
         self.anchor_char_idx = w_start
         self.focus_page = page_index
         self.focus_char_idx = w_end
         self.is_selecting = False
 
+    def start_word_selection(self, page_index: int, char_idx: int) -> None:
+        """Begin a word-granularity drag selection anchored on the word containing char_idx."""
+        w_start = self.get_word_start_char_idx(page_index, char_idx)
+        w_end = self.get_word_end_char_idx(page_index, char_idx)
+        self._word_anchor = (page_index, w_start, w_end)
+        self.anchor_page = page_index
+        self.anchor_char_idx = w_start
+        self.focus_page = page_index
+        self.focus_char_idx = w_end
+        self.is_selecting = True
+
+    def update_word_focus(self, page_index: int, char_idx: int) -> None:
+        """Extend an active word-granularity selection forward or backward by whole words."""
+        if not self.is_selecting or self._word_anchor is None:
+            return
+        anc_page, anc_start, anc_end = self._word_anchor
+        if (page_index > anc_page) or (page_index == anc_page and char_idx >= anc_start):
+            self.anchor_page = anc_page
+            self.anchor_char_idx = anc_start
+            snapped_focus = self.get_word_end_char_idx(page_index, char_idx)
+        else:
+            self.anchor_page = anc_page
+            self.anchor_char_idx = anc_end
+            snapped_focus = self.get_word_start_char_idx(page_index, char_idx)
+        self.focus_page = page_index
+        self.focus_char_idx = snapped_focus
+
     def start_selection(self, page_index: int, char_idx: int) -> None:
         """Begin a new selection at the given element."""
+        self._word_anchor = None
         self.anchor_page = page_index
         self.anchor_char_idx = char_idx
         self.focus_page = page_index
@@ -163,6 +193,7 @@ class TextSelection:
     def end_selection(self) -> None:
         """Finalize the selection."""
         self.is_selecting = False
+        self._word_anchor = None
 
     def clear_selection(self) -> None:
         """Clear all selection state."""
@@ -171,6 +202,7 @@ class TextSelection:
         self.focus_page = None
         self.focus_char_idx = None
         self.is_selecting = False
+        self._word_anchor = None
 
     def has_selection(self) -> bool:
         """Check if there is an active selection."""

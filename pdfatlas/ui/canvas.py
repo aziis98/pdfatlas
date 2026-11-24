@@ -679,13 +679,7 @@ class PDFCanvas(Gtk.Overlay):
         if self._pending_drag_start is not None and not self.text_selection.is_selecting:
             p_idx, c_idx = self._pending_drag_start
             if self._is_word_drag_mode:
-                w_start = self.text_selection.get_word_start_char_idx(p_idx, c_idx)
-                w_end = self.text_selection.get_word_end_char_idx(p_idx, c_idx)
-                self.text_selection.anchor_page = p_idx
-                self.text_selection.anchor_char_idx = w_start
-                self.text_selection.focus_page = p_idx
-                self.text_selection.focus_char_idx = w_end
-                self.text_selection.is_selecting = True
+                self.text_selection.start_word_selection(p_idx, c_idx)
             else:
                 self.text_selection.start_selection(p_idx, c_idx)
             self._pending_drag_start = None
@@ -713,13 +707,7 @@ class PDFCanvas(Gtk.Overlay):
             return
 
         if self._is_word_drag_mode:
-            anc_page = self.text_selection.anchor_page or page_idx
-            anc_idx = self.text_selection.anchor_char_idx or char_idx
-            if (page_idx > anc_page) or (page_idx == anc_page and char_idx >= anc_idx):
-                snapped_focus = self.text_selection.get_word_end_char_idx(page_idx, char_idx)
-            else:
-                snapped_focus = self.text_selection.get_word_start_char_idx(page_idx, char_idx)
-            self.text_selection.update_focus(page_idx, snapped_focus)
+            self.text_selection.update_word_focus(page_idx, char_idx)
         else:
             self.text_selection.update_focus(page_idx, char_idx)
 
@@ -739,8 +727,13 @@ class PDFCanvas(Gtk.Overlay):
     def on_drag_end(self, gesture, offset_x, offset_y):
         """Handle drag end - finalize selection or clear if drag didn't start."""
         self._pending_drag_start = None
+        self._is_word_drag_mode = False
         if self._suppress_drag_clear:
             self._suppress_drag_clear = False
+            if self.text_selection is not None and self.text_selection.is_selecting:
+                self.text_selection.end_selection()
+                if self.on_selection_changed:
+                    self.on_selection_changed(self.text_selection.has_selection())
             return
         if self.text_selection is not None:
             if abs(offset_x) < 3 and abs(offset_y) < 3:
