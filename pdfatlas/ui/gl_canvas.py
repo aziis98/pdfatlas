@@ -188,7 +188,7 @@ class GLCanvas(Gtk.GLArea):
                         )
                         for bx0, by0, bx1, by1 in search_rects
                     ]
-                    r.fill_rects(screen_rects, (1.0, 0.55, 0.0, 0.20))
+                    r.fill_rects(screen_rects, (1.0, 0.92, 0.35, 0.20))
                     r.stroke_rects(screen_rects, (1.0, 0.55, 0.0, 1.0), line_width=2.0)
                 elif canvas.highlighted_block is not None:
                     h_page_idx, h_bbox = canvas.highlighted_block
@@ -201,7 +201,7 @@ class GLCanvas(Gtk.GLArea):
                         ry = page_y0 + (by0 - pad - co_y) * scale
                         rw = (bx1 - bx0 + 2.0 * pad) * scale
                         rh = (by1 - by0 + 2.0 * pad) * scale
-                        r.fill_rect(rx, ry, rw, rh, (1.0, 0.55, 0.0, 0.20))
+                        r.fill_rect(rx, ry, rw, rh, (1.0, 0.92, 0.35, 0.20))
                         r.stroke_rect(rx, ry, rw, rh, (1.0, 0.55, 0.0, 1.0), line_width=2.0)
 
                 if canvas.highlights:
