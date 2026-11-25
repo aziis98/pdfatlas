@@ -173,7 +173,7 @@ class GLCanvas(Gtk.GLArea):
                 else:
                     r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col, radius=page_radius)
 
-                # Search occurrences highlights (orange 20% fill + outline stroke)
+                # Search occurrences highlights (light portal-yellow fill + orange outline stroke)
                 search_rects = canvas.search_highlights.get(i, [])
                 if search_rects:
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
@@ -188,7 +188,12 @@ class GLCanvas(Gtk.GLArea):
                         )
                         for bx0, by0, bx1, by1 in search_rects
                     ]
-                    r.fill_rects(screen_rects, (1.0, 0.92, 0.35, 0.20))
+                    if self.night_mode:
+                        r.fill_rects(screen_rects, (0.25, 0.2125, 0.0, 0.25))
+                    else:
+                        gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
+                        r.fill_rects(screen_rects, (1.0, 0.96, 0.72, 1.0))
+                        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
                     r.stroke_rects(screen_rects, (1.0, 0.55, 0.0, 1.0), line_width=2.0)
                 elif canvas.highlighted_block is not None:
                     h_page_idx, h_bbox = canvas.highlighted_block
@@ -201,7 +206,12 @@ class GLCanvas(Gtk.GLArea):
                         ry = page_y0 + (by0 - pad - co_y) * scale
                         rw = (bx1 - bx0 + 2.0 * pad) * scale
                         rh = (by1 - by0 + 2.0 * pad) * scale
-                        r.fill_rect(rx, ry, rw, rh, (1.0, 0.92, 0.35, 0.20))
+                        if self.night_mode:
+                            r.fill_rect(rx, ry, rw, rh, (0.25, 0.2125, 0.0, 0.25))
+                        else:
+                            gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
+                            r.fill_rect(rx, ry, rw, rh, (1.0, 0.96, 0.72, 1.0))
+                            gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
                         r.stroke_rect(rx, ry, rw, rh, (1.0, 0.55, 0.0, 1.0), line_width=2.0)
 
                 if canvas.highlights:
