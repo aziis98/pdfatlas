@@ -173,7 +173,7 @@ class GLCanvas(Gtk.GLArea):
                 else:
                     r.fill_rect(x_offset, page_y0, dw, dh, placeholder_col, radius=page_radius)
 
-                # Search occurrences highlights (light portal-yellow fill + orange outline stroke)
+                # Search occurrences highlights (light portal-yellow fill, no stroke)
                 search_rects = canvas.search_highlights.get(i, [])
                 if search_rects:
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
@@ -194,7 +194,6 @@ class GLCanvas(Gtk.GLArea):
                         gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
                         r.fill_rects(screen_rects, (1.0, 0.96, 0.72, 1.0))
                         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
-                    r.stroke_rects(screen_rects, (1.0, 0.55, 0.0, 1.0), line_width=2.0)
                 elif canvas.highlighted_block is not None:
                     h_page_idx, h_bbox = canvas.highlighted_block
                     if h_page_idx == i:
@@ -212,7 +211,6 @@ class GLCanvas(Gtk.GLArea):
                             gl.glBlendFunc(gl.GL_DST_COLOR, gl.GL_ZERO)
                             r.fill_rect(rx, ry, rw, rh, (1.0, 0.96, 0.72, 1.0))
                             gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE_MINUS_SRC_ALPHA)
-                        r.stroke_rect(rx, ry, rw, rh, (1.0, 0.55, 0.0, 1.0), line_width=2.0)
 
                 if canvas.highlights:
                     co_x = crop_rect.x0 if crop_rect is not None else 0.0
