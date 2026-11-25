@@ -17,12 +17,12 @@ A PDF reader built with Python, GTK4, Libadwaita, PyMuPDF, and OpenGL. Features 
 
 ### Full-Text Search ("Portals")
 
-Entering text in the headerbar switches the application from Document View to Search View:
+Entering text in the headerbar (`Ctrl+F`) switches the application from Document View to a responsive **Masonry Search Portal** view:
 
-- Excerpt results are presented as cropped image strips ("portals") displaying exact visual context.
-- Search term matches are highlighted across search portals and the continuous canvas.
-- Excerpt pinning allows bookmarking key context snippets.
-- Clicking a search portal card returns to Reader Mode and scrolls directly to the match.
+- **Masonry Waterfall Layout:** Results are arranged in a responsive multi-column masonry grid (up to 3 columns, or a single-column list via Settings) where card heights scale dynamically to fit short hits, multi-line paragraphs, and equations.
+- **Deduplicated Match Clustering:** Nearby matches on the same page are grouped into a single visual excerpt strip ("portal") with a match-count badge (`Page X • N matches`) to eliminate duplicate context cards.
+- **Auto-Trimmed Margins:** Outer page whitespace is automatically trimmed (configurable under *Settings → Search*) using page-level bounds so portal text appears larger while keeping font sizing consistent across cards.
+- **Synced Highlights & Pinning:** Matches are highlighted in both the portal cards and the continuous reader canvas (synced live with the search bar), snippets can be pinned for quick reference, and clicking any portal card jumps straight to that position.
 
 <br clear="all" />
 
