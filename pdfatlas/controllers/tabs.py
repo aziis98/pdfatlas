@@ -492,6 +492,7 @@ class TabController:
                 doc_view.canvas.gl_canvas.queue_draw()
                 doc_view.canvas.queue_draw_overlays("tab-selected")
                 self.win.search_controller.exit_to_document(clear_query=False)
+                self.win.search_controller.sync_highlights()
             else:
                 # Tab is downloading/loading
                 self.win.doc_model = None

@@ -338,6 +338,25 @@ class SearchController:
 
         return results
 
+    def sync_highlights(
+        self,
+        query: str | None = None,
+        query_terms: list[str] | set[str] | None = None,
+    ) -> None:
+        """Sync canvas word highlights with the current search field text."""
+        canvas = getattr(self.win, "canvas", None)
+        if canvas is None:
+            return
+        if query is None:
+            entry = getattr(self.win, "entry", None)
+            query = entry.get_text() if entry is not None else ""
+        clean = (query or "").strip()
+        if not clean:
+            self._clear_canvas_highlights()
+            return
+        highlights = self._extract_search_highlights(clean, query_terms)
+        canvas.set_search_highlights(highlights)
+
     def on_row_clicked(self, result: dict, query_terms: list | set | None = None):
         if not self.win.doc_model:
             return
@@ -349,8 +368,7 @@ class SearchController:
             return
 
         query_str = self.win.entry.get_text() if hasattr(self.win, "entry") else ""
-        highlights = self._extract_search_highlights(query_str, query_terms)
-        self.win.canvas.set_search_highlights(highlights)
+        self.sync_highlights(query_str, query_terms)
         self.win.stack.set_visible_child_name("document-view")
         self.unfocus_to_canvas()
         self.state = SearchState.RESULT_ACTIVE
@@ -395,6 +413,8 @@ class SearchController:
                 self.win.stack.set_visible_child_name("document-view")
             self.state = SearchState.EDITING if self.is_entry_focused() else SearchState.IDLE
             return
+
+        self.sync_highlights(query)
 
         if not self.win.db_service:
             print("[Search] Warning: DatabaseService not available", flush=True)

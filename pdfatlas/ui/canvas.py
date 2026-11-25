@@ -888,9 +888,6 @@ class PDFCanvas(Gtk.Overlay):
             if isinstance(root, Gtk.Window):
                 root.set_focus(None)
 
-            if self.has_search_highlights():
-                self.clear_search_highlights()
-
             hit = self._hit_test_link(x, y)
             if hit is not None:
                 page_idx, link = hit

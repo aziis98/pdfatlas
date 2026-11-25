@@ -126,3 +126,54 @@ def test_canvas_search_highlights_state():
     assert canvas.has_search_highlights() is False
     assert canvas.search_highlights == {}
 
+
+def test_canvas_click_does_not_clear_search_highlights():
+    from pdfatlas.ui.canvas import PDFCanvas
+
+    canvas = MagicMock(spec=PDFCanvas)
+    canvas.search_highlights = {0: [(10.0, 20.0, 30.0, 40.0)]}
+    canvas.highlighted_block = None
+    canvas.get_root.return_value = None
+    canvas._hit_test_link.return_value = None
+    canvas.has_search_highlights = PDFCanvas.has_search_highlights.__get__(canvas, PDFCanvas)
+    canvas.clear_search_highlights = MagicMock()
+
+    PDFCanvas._on_click(canvas, MagicMock(), 1, 50.0, 50.0)
+    canvas.clear_search_highlights.assert_not_called()
+    canvas.clear_selection.assert_called_once()
+
+
+def test_run_search_syncs_highlights_with_query():
+    import pymupdf as fitz
+    from pdfatlas.controllers.search import SearchController
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "attention mechanism")
+
+    win = MagicMock()
+    win.doc_model.doc = doc
+    win.doc_model.filepath = "/tmp/test.pdf"
+    win.canvas = MagicMock()
+    win.entry = MagicMock()
+    win.entry.get_text.return_value = "attention"
+    win.stack = MagicMock()
+    win.stack.get_visible_child_name.return_value = "document-view"
+    win.search_results_view = None
+    win.executor = None
+    win.db_service = MagicMock()
+    win.settings.search_layout = "grid"
+    win.settings.search_autotrim = True
+
+    sc = SearchController(win)
+    sc.run_search("attention")
+    win.canvas.set_search_highlights.assert_called_once()
+    highlights = win.canvas.set_search_highlights.call_args[0][0]
+    assert 0 in highlights and len(highlights[0]) == 1
+
+    # Clearing query clears highlights
+    win.canvas.set_search_highlights.reset_mock()
+    sc.run_search("")
+    win.canvas.set_search_highlights.assert_called_once_with({})
+    doc.close()
+

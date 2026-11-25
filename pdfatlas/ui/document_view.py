@@ -369,9 +369,6 @@ class PdfDocumentView(Gtk.Box):
 
     def _on_canvas_clicked(self, gesture, n_press, x, y):
         self.canvas.grab_focus()
-        if self.canvas.has_search_highlights():
-            self.canvas.clear_search_highlights()
-            self.canvas.queue_draw_overlays("clear-highlight")
 
     def _on_canvas_motion(self, controller, x, y):
         self.pointer_x = x
