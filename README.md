@@ -5,7 +5,7 @@
 
 <img src="assets/logo.png" width="96" style="vertical-align: middle; margin-right: 10px;" alt="logo" align="right" />
 
-A PDF reader built with Python, GTK4, Libadwaita, PyMuPDF, and OpenGL. Features continuous page scrolling, page margin auto-cropping, a page thumbnail grid, and SQLite FTS5 text search with inline snippet previews.
+A PDF reader built with Python, GTK4, Libadwaita, PyMuPDF, and OpenGL. Features continuous GPU-accelerated scrolling, multi-tab & multi-window reading, directional page margin auto-cropping, a page thumbnail minimap, arXiv/LaTeX integration, and SQLite FTS5 search with Masonry Search Portals.
 
 <p align="center">
   <img src="assets/screenshots/attention_hero.png" alt="PDF Atlas Reader View" width="100%" />
@@ -52,18 +52,19 @@ Pressing `M` opens a page thumbnail grid overlay:
 
 ### Auto-Crop Margins & Index Caching
 
-- **Auto-Crop Margins (`C`):** Trims page whitespace margins in the background to maximize readable text area on smaller screens.
+- **Directional Auto-Crop (`C`):** Trims page whitespace margins in the background to maximize readable text area, with per-direction padding and `"original"` edge overrides in Settings.
 - **Search Index Cache:** Text search indexes are cached in `~/.cache/pdfatlas/` keyed by file SHA-256 for faster opening on subsequent runs.
 
 <br clear="all" />
 
 <img src="assets/screenshots/attention_text_selection.png" alt="Text Selection Toolbar" width="45%" align="left" style="margin-right: 20px; margin-bottom: 20px;" />
 
-### Text Selection & Highlighting
+### Text Selection, Highlighting & Custom Links
 
-Select text in any document to open the context toolbar:
+Select text in any document to open the floating context toolbar:
 
-- **Text Highlighting (`H`):** Create persistent color highlights saved globally per document SHA-256 hash.
+- **Text Highlighting:** Create persistent color highlights saved globally per document SHA-256 hash.
+- **Custom Links & Hover Previews:** Attach custom links (`Link Paper`, `Link File`, `Link URL`) to any selection, and hover internal PDF links for inline portal preview cards.
 - **PDF Plain Text Copy (`Ctrl+Shift+C`):** Copy selected plain text from the PDF.
 - **LaTeX Source Copy (`Ctrl+C`):** For arXiv papers, map selections back to original LaTeX source code.
 
@@ -89,46 +90,22 @@ Select text in any document to open the context toolbar:
 
 <br clear="all" />
 
+### Tabs, Multi-Window & arXiv Integration
+
+- **Multi-Tab & Multi-Window:** Open multiple documents in `Adw.TabBar` tabs, drag tabs out into new windows, or transfer tabs via the **Move to Window…** picker.
+- **arXiv & Remote PDFs:** Open arXiv papers directly by ID or URL (with instant cached opening and background TeX source fetching) as well as remote PDF URLs.
+
+---
 
 ## Architecture
 
-```
-pdfatlas/
-├── pdfatlas/                # Main application package
-│   ├── __init__.py          # Package initialization
-│   ├── main.py              # Application entry point (Adw.Application & CLI parser)
-│   ├── core/                # Core non-UI logic and indexing engines
-│   │   ├── __init__.py      # Package init
-│   │   ├── cache.py         # LRU RenderCache & MiniMapCache
-│   │   ├── crop.py          # Background margin cropping analyzer logic
-│   │   ├── document.py      # PyMuPDF fitz.Document thread-safe wrapper
-│   │   ├── index.py         # SQLite FTS5 text indexing and search logic
-│   │   ├── renderer.py      # Multi-threaded background render worker pool
-│   │   └── settings.py      # App settings model & state management
-│   └── ui/                  # GTK4 / Libadwaita UI components
-│       ├── __init__.py      # Package init
-│       ├── canvas.py        # Continuous scroll layout canvas & page containers
-│       ├── gl_canvas.py     # OpenGL hardware-accelerated background render canvas
-│       ├── minimap.py       # Minimap thumbnail drawing & modal navigator window
-│       ├── portal.py        # FTS search result card list item (ResultRow)
-│       ├── settings.py      # Settings popover & configuration dialog
-│       ├── theme.py         # Window CSS provider loading
-│       └── window.py        # MainWindow (Adw.HeaderBar, Gtk.Stack navigation)
-├── assets/
-│   ├── screenshots/         # Documentation screenshots
-
-│   └── window.css           # Main window GTK CSS theme
-├── prototypes/              # Prototype scripts & launcher shortcuts
-├── scripts/                 # Maintenance and benchmark scripts
-├── pyproject.toml           # Packaging and dependency declarations
-├── README.md                # Project documentation
-└── uv.lock                  # Lockfile
-```
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the component breakdown, layering, and GTK layout diagrams, and [`RESEARCH.md`](RESEARCH.md) for technical notes.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.14+
 - GTK 4 & Libadwaita
+- WebKitGTK 6.0 (for rendered Markdown note previews)
 - Cairo & PyGObject development headers
 
 ### macOS Setup
@@ -159,7 +136,7 @@ On a fresh macOS system, install Xcode Command Line Tools and Homebrew system de
 
 On Ubuntu / Debian:
 ```bash
-sudo apt install libgirepository1.0-dev gir1.2-adw-1 libcairo2-dev cmake pkg-config
+sudo apt install libgirepository1.0-dev gir1.2-adw-1 gir1.2-webkit-6.0 libcairo2-dev cmake pkg-config
 ```
 
 On Arch Linux (AUR):
@@ -170,9 +147,6 @@ paru -S pdfatlas-git
 # Or using yay
 yay -S pdfatlas-git
 ```
-
-
-
 
 ---
 
@@ -247,26 +221,31 @@ uv run main.py 1706.03762 --debug
 
 ## Keyboard Shortcuts
 
-| Shortcut                | Action                                     |
-| ----------------------- | ------------------------------------------ |
-| `Ctrl+O`                | Open PDF Document                          |
-| `Ctrl+F`                | Focus Search Bar                           |
-| `+` / `-` / `=`         | Zoom In / Out                              |
-| `Ctrl+scroll`           | Zoom centered on cursor                    |
-| `Ctrl+0`                | Reset Zoom to 100%                         |
-| `W`                     | Fit Page Width                             |
-| `F`                     | Fit Entire Page in Viewport                |
-| `M`                     | Toggle Pages Minimap Navigator             |
-| `C`                     | Toggle Auto-crop margins                   |
-| `N`                     | Toggle Night Mode (Dark theme)             |
-| `G`                     | Toggle Gap-less Mode                       |
-| `Page Up` / `Page Down` | Scroll by viewport height                  |
-| `Left` / `Right` or `h` / `l` | Scroll Back / Forward by viewport height   |
-| `Up` / `Down` or `k` / `j` | Fine step scroll Up / Down                 |
-| `Ctrl+C`                | Copy Source TeX (if available, else PDF text) |
-| `Ctrl+Shift+C`          | Copy raw PDF text                          |
-| `Escape`                | Clear selection/search or close Minimap modal |
-| `Ctrl+Q` or `q`         | Quit                                       |
+| Shortcut                      | Action                                          |
+| ----------------------------- | ----------------------------------------------- |
+| `Ctrl+O`                      | Open PDF Document                               |
+| `Ctrl+P`                      | Print Document                                  |
+| `Ctrl+T` / `Ctrl+W`           | New Tab / Close Tab                             |
+| `Ctrl+N`                      | New Window                                      |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / Previous Tab                             |
+| `Alt+1` – `Alt+9`             | Switch to Tab 1–9                               |
+| `Ctrl+F`                      | Focus Search Bar (searches active selection)    |
+| `+` / `-` / `=`               | Zoom In / Out                                   |
+| `Ctrl+scroll`                 | Zoom centered on cursor                         |
+| `Ctrl+0`                      | Reset Zoom to 100%                              |
+| `W`                           | Fit Page Width                                  |
+| `F`                           | Fit Entire Page in Viewport                     |
+| `M`                           | Toggle Pages Minimap Navigator                  |
+| `C`                           | Toggle Auto-crop margins                        |
+| `N`                           | Toggle Night Mode (Dark theme)                  |
+| `G`                           | Toggle Gap-less Mode                            |
+| `Page Up` / `Page Down`       | Scroll by page height                           |
+| `Left` / `Right` or `h` / `l` | Scroll Back / Forward by page height            |
+| `Up` / `Down` or `k` / `j`    | Fine step scroll Up / Down                      |
+| `Ctrl+C`                      | Copy Source TeX (if available, else PDF text)   |
+| `Ctrl+Shift+C`                | Copy raw PDF text                               |
+| `Escape`                      | Clear selection/search or close Minimap modal   |
+| `Ctrl+Q` or `q`               | Quit                                            |
 
 ## Contributing
 
